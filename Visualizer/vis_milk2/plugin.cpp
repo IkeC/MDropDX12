@@ -606,6 +606,7 @@ SPOUT :
 #include <locale.h>
 #include <process.h>  // for beginthread, etc.
 #include <shellapi.h>
+#include <shobjidl.h>  // IFileDialog for folder picker (Ctrl+L)
 #include <strsafe.h>
 #include <Windows.h>
 #include "AutoCharFn.h"
@@ -676,6 +677,75 @@ D3DVERTEXELEMENT9 g_SpriteVertDecl[] =
 
 //extern CSoundData*   pg_sound;	// declared in main.cpp
 extern CPlugin g_plugin;		// declared in main.cpp (note: was 'pg')
+
+//----------------------------------------------------------------------
+// Settings screen types (used by UI_SETTINGS rendering + input)
+//----------------------------------------------------------------------
+enum SettingType { ST_PATH, ST_BOOL, ST_INT, ST_FLOAT, ST_READONLY };
+
+struct SettingDesc {
+  const wchar_t* name;
+  SettingType type;
+  int id;
+  float fMin, fMax, fStep;
+  const wchar_t* iniSection;
+  const wchar_t* iniKey;
+};
+
+enum {
+  SET_PRESET_DIR = 0,
+  SET_AUDIO_DEVICE,
+  SET_AUDIO_SENSITIVITY,
+  SET_BLEND_TIME,
+  SET_TIME_BETWEEN,
+  SET_HARD_CUTS,
+  SET_PRESET_LOCK,
+  SET_SEQ_ORDER,
+  SET_SONG_TITLE_ANIMS,
+  SET_CHANGE_WITH_SONG,
+  SET_SHOW_FPS,
+  SET_ALWAYS_ON_TOP,
+  SET_BORDERLESS,
+  SET_SPOUT,
+  SET_COUNT
+};
+
+static SettingDesc g_settingsDesc[] = {
+  { L"Preset Directory",       ST_PATH,     SET_PRESET_DIR,       0, 0, 0,       L"Settings",  L"szPresetDir" },
+  { L"Audio Device",           ST_READONLY, SET_AUDIO_DEVICE,     0, 0, 0,       NULL,         NULL },
+  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, 1, 256, 4,    L"Milkwave",  L"AudioSensitivity" },
+  { L"Blend Time",             ST_FLOAT,    SET_BLEND_TIME,       0.1f, 10, 0.1f, L"Settings", L"fBlendTimeAuto" },
+  { L"Time Between Presets",   ST_FLOAT,    SET_TIME_BETWEEN,     1, 300, 5,     L"Settings",  L"fTimeBetweenPresets" },
+  { L"Hard Cuts Disabled",     ST_BOOL,     SET_HARD_CUTS,        0, 0, 0,       L"Settings",  L"bHardCutsDisabled" },
+  { L"Preset Lock on Startup", ST_BOOL,     SET_PRESET_LOCK,      0, 0, 0,       L"Settings",  L"bPresetLockOnAtStartup" },
+  { L"Sequential Order",       ST_BOOL,     SET_SEQ_ORDER,        0, 0, 0,       L"Settings",  L"bSequentialPresetOrder" },
+  { L"Song Title Animations",  ST_BOOL,     SET_SONG_TITLE_ANIMS, 0, 0, 0,       L"Settings",  L"bSongTitleAnims" },
+  { L"Change Preset w/ Song",  ST_BOOL,     SET_CHANGE_WITH_SONG, 0, 0, 0,       L"Milkwave",  L"ChangePresetWithSong" },
+  { L"Show FPS",               ST_BOOL,     SET_SHOW_FPS,         0, 0, 0,       L"Settings",  L"bShowFPS" },
+  { L"Always On Top",          ST_BOOL,     SET_ALWAYS_ON_TOP,    0, 0, 0,       L"Milkwave",  L"WindowAlwaysOnTop" },
+  { L"Borderless Window",      ST_BOOL,     SET_BORDERLESS,       0, 0, 0,       L"Milkwave",  L"WindowBorderless" },
+  { L"Spout Output",           ST_BOOL,     SET_SPOUT,            0, 0, 0,       L"Settings",  L"bSpoutOut" },
+};
+
+// Settings window control IDs
+#define IDC_MW_PRESET_DIR    2001
+#define IDC_MW_BROWSE_DIR    2002
+#define IDC_MW_AUDIO_DEVICE  2003
+#define IDC_MW_AUDIO_SENS    2004
+#define IDC_MW_BLEND_TIME    2005
+#define IDC_MW_TIME_BETWEEN  2006
+#define IDC_MW_HARD_CUTS     2007
+#define IDC_MW_PRESET_LOCK   2008
+#define IDC_MW_SEQ_ORDER     2009
+#define IDC_MW_SONG_TITLE    2010
+#define IDC_MW_CHANGE_SONG   2011
+#define IDC_MW_SHOW_FPS      2012
+#define IDC_MW_ALWAYS_TOP    2013
+#define IDC_MW_BORDERLESS    2014
+#define IDC_MW_SPOUT         2015
+#define IDC_MW_CLOSE         2016
+static const wchar_t* SETTINGS_WND_CLASS = L"MilkwaveSettingsWnd";
+static bool g_bSettingsWndClassRegistered = false;
 
 // from support.cpp:
 extern bool g_bDebugOutput;
@@ -1418,15 +1488,18 @@ void CPlugin::MyReadConfig() {
 
   GetPrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, m_szPresetDir, sizeof(m_szPresetDir), pIni);
 
-  // If the saved preset dir doesn't have .milk files, reset to default and auto-descend
-  if (!DirHasMilkFilesHelper(m_szPresetDir)) {
+  // Validate preset directory — if it doesn't exist, flag for settings screen
+  if (GetFileAttributesW(m_szPresetDir) == INVALID_FILE_ATTRIBUTES) {
+    // Try the default presets dir before flagging
     wchar_t szDefault[MAX_PATH];
     swprintf(szDefault, L"%spresets\\", m_szMilkdrop2Path);
-    if (TryDescendIntoPresetSubdirHelper(szDefault)) {
+    if (GetFileAttributesW(szDefault) != INVALID_FILE_ATTRIBUTES) {
       lstrcpyW(m_szPresetDir, szDefault);
-      wchar_t logbuf[512];
-      swprintf(logbuf, L"Preset dir resolved to: %s", m_szPresetDir);
-      DebugLogW(logbuf);
+      TryDescendIntoPresetSubdirHelper(m_szPresetDir);
+      WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, pIni);
+    }
+    else {
+      m_bSettingsNeedAttention = true;
     }
   }
 
@@ -1774,6 +1847,9 @@ void CPlugin::CleanUpMyNonDx9Stuff() {
   // This gets called only once, when your plugin exits.
   // Be sure to clean up any objects here that were
   //   created/initialized in AllocateMyNonDx9Stuff.
+
+  // Close settings window if open
+  CloseSettingsWindow();
 
   // Join any in-flight preset load thread
   if (m_presetLoadThread.joinable())
@@ -4378,6 +4454,13 @@ void CPlugin::MyRenderFn(int redraw) {
 
   //   1. take care of timing/other paperwork/etc. for new frame
   if (!redraw) {
+    // Force settings window open if config needs attention (once, on first frame)
+    if (m_bSettingsNeedAttention && m_UI_mode == UI_REGULAR) {
+      m_bSettingsNeedAttention = false; // only force once
+      OpenSettingsWindow();
+      AddError(L"Preset directory not found. Press Ctrl+L to set a valid path.", 8.0f, ERR_MISC, true);
+    }
+
     float dt = GetTime() - m_prev_time;
     m_prev_time = GetTime(); // note: m_prev_time is not for general use!
     m_bPresetLockedByCode = (m_UI_mode != UI_REGULAR);
@@ -5829,6 +5912,74 @@ void CPlugin::MyRenderUI(
         }
       }
     }
+    else if (m_UI_mode == UI_SETTINGS) {
+      // Settings screen header
+      MyTextOut(L"MILKWAVE SETTINGS  (F2 to close, UP/DOWN to navigate)", MTO_UPPER_LEFT, true);
+
+      wchar_t iniPath[MAX_PATH + 64];
+      swprintf(iniPath, L"Config: %s", GetConfigIniFile());
+      MyTextOut(iniPath, MTO_UPPER_LEFT, true);
+
+      if (GetFileAttributesW(m_szPresetDir) == INVALID_FILE_ATTRIBUTES)
+        MyTextOut(L"WARNING: Preset directory not found! Please set a valid path.", MTO_UPPER_LEFT, true);
+
+      *upper_left_corner_y += h / 2;
+
+      RECT rect;
+      SetRect(&rect, xL, *upper_left_corner_y, xR, *lower_left_corner_y);
+      rect.top += PLAYLIST_INNER_MARGIN;
+      rect.left += PLAYLIST_INNER_MARGIN;
+      rect.right -= PLAYLIST_INNER_MARGIN;
+      rect.bottom -= PLAYLIST_INNER_MARGIN;
+
+      RECT orig_rect = rect;
+      RECT box;
+      box.top = rect.top;
+      box.left = rect.left;
+      box.right = rect.left;
+      box.bottom = rect.top;
+
+      for (int pass = 0; pass < 2; pass++) {
+        rect = orig_rect;
+        for (int i = 0; i < SET_COUNT; i++) {
+          bool bSelected = (i == m_nSettingsCurSel);
+
+          wchar_t valBuf[MAX_PATH];
+          GetSettingValueString(g_settingsDesc[i].id, valBuf, MAX_PATH);
+          const wchar_t* hint = GetSettingHint(g_settingsDesc[i].id);
+
+          wchar_t line[1024];
+          if (g_settingsDesc[i].type == ST_READONLY)
+            swprintf(line, L" %s%-24s %s", bSelected ? L"> " : L"  ", g_settingsDesc[i].name, valBuf);
+          else
+            swprintf(line, L" %s%-24s %-40s  [%s]", bSelected ? L"> " : L"  ", g_settingsDesc[i].name, valBuf, hint);
+
+          DWORD color = PLAYLIST_COLOR_NORMAL;
+          if (bSelected)
+            color = PLAYLIST_COLOR_HILITE_TRACK;
+          if (g_settingsDesc[i].type == ST_READONLY)
+            color = bSelected ? PLAYLIST_COLOR_HILITE_TRACK : 0x80808080;
+
+          RECT r2 = rect;
+          rect.top += m_text.DrawTextW(GetFont(SIMPLE_FONT), line, -1, &r2,
+            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | (pass == 0 ? DT_CALCRECT : 0),
+            color, false);
+
+          if (pass == 0) {
+            box.right = max(box.right, box.left + r2.right - r2.left);
+            box.bottom += r2.bottom - r2.top;
+          }
+        }
+        if (pass == 0) {
+          box.top -= PLAYLIST_INNER_MARGIN;
+          box.left -= PLAYLIST_INNER_MARGIN;
+          box.right += PLAYLIST_INNER_MARGIN;
+          box.bottom += PLAYLIST_INNER_MARGIN;
+          DrawDarkTranslucentBox(&box);
+          *upper_left_corner_y = box.bottom + PLAYLIST_INNER_MARGIN;
+        }
+      }
+    }
   }
 
   // 5. render *remaining* text to upper-right corner
@@ -6686,6 +6837,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
     case VK_SCROLL:
       m_bPresetLockedByUser = GetKeyState(VK_SCROLL) & 1;
       TogglePlaylist();
+      return 0;
 
   // check ???
   //case VK_F6:	break;
@@ -6693,7 +6845,17 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   //case VK_F8:	break;
   //case VK_F9: conflict
 
-      // Default - fall through
+    case VK_F2:
+      OpenSettingsWindow();
+      return 0;
+
+    case 'L':
+      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+        // Ctrl+L: open settings window
+        OpenSettingsWindow();
+        return 0;
+      }
+      break;
 
     } // end switch(wParam)
     //------------------------------------------
@@ -7021,6 +7183,42 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
         return 0; // we processed (or absorbed) the key
     }
 
+    // case 2b: settings screen keyboard input
+    if (m_UI_mode == UI_SETTINGS) {
+      switch (wParam) {
+      case VK_UP:
+        m_nSettingsCurSel--;
+        if (m_nSettingsCurSel < 0) m_nSettingsCurSel = SET_COUNT - 1;
+        return 0;
+      case VK_DOWN:
+        m_nSettingsCurSel++;
+        if (m_nSettingsCurSel >= SET_COUNT) m_nSettingsCurSel = 0;
+        return 0;
+      case VK_RETURN:
+        if (g_settingsDesc[m_nSettingsCurSel].type == ST_PATH) {
+          OpenFolderPickerForPresetDir();
+        }
+        else if (g_settingsDesc[m_nSettingsCurSel].type == ST_BOOL) {
+          ToggleSetting(g_settingsDesc[m_nSettingsCurSel].id);
+        }
+        return 0;
+      case VK_LEFT:
+        if (g_settingsDesc[m_nSettingsCurSel].type == ST_FLOAT || g_settingsDesc[m_nSettingsCurSel].type == ST_INT)
+          AdjustSetting(g_settingsDesc[m_nSettingsCurSel].id, -1);
+        return 0;
+      case VK_RIGHT:
+        if (g_settingsDesc[m_nSettingsCurSel].type == ST_FLOAT || g_settingsDesc[m_nSettingsCurSel].type == ST_INT)
+          AdjustSetting(g_settingsDesc[m_nSettingsCurSel].id, 1);
+        return 0;
+      case VK_ESCAPE:
+      case VK_F2:
+        m_UI_mode = UI_REGULAR;
+        return 0;
+      }
+      // absorb all other keys while in settings
+      return 0;
+    }
+
     // case 3: handle non-character keys (virtual keys) and return 0.
         //         if we don't handle them, return 1, and the shell will
         //         (passing some to the shell's key bindings, some to Winamp,
@@ -7050,7 +7248,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       break;
 
     case VK_ESCAPE:
-      if (m_UI_mode == UI_LOAD || m_UI_mode == UI_MENU || m_UI_mode == UI_MASHUP) {
+      if (m_UI_mode == UI_LOAD || m_UI_mode == UI_MENU || m_UI_mode == UI_MASHUP || m_UI_mode == UI_SETTINGS) {
         m_UI_mode = UI_REGULAR;
         return 0; // we processed (or absorbed) the key
       }
@@ -7308,13 +7506,20 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           wchar_t* p = GetPresetDir();
 
           if (wcscmp(m_presets[m_nPresetListCurPos].szFilename.c_str(), L"*..") == 0) {
-            // back up one dir
-            wchar_t* p2 = wcsrchr(p, L'\\');
-            if (p2) {
-              *p2 = 0;
-              p2 = wcsrchr(p, L'\\');
-              if (p2)	*(p2 + 1) = 0;
+            // back up one dir, but don't go above the presets root
+            wchar_t szPresetsRoot[MAX_PATH];
+            swprintf(szPresetsRoot, L"%spresets\\", m_szMilkdrop2Path);
+            int rootLen = lstrlenW(szPresetsRoot);
+
+            if (lstrlenW(p) > rootLen) {
+              wchar_t* p2 = wcsrchr(p, L'\\');
+              if (p2) {
+                *p2 = 0;
+                p2 = wcsrchr(p, L'\\');
+                if (p2) *(p2 + 1) = 0;
+              }
             }
+            // else: already at presets root — don't go higher
           }
           else {
             // open subdir
@@ -7918,6 +8123,8 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
     // SPOUT
     m_show_help = 0;
 
+    // Note: Ctrl+L folder picker is handled in WM_KEYDOWN (not here in WM_CHAR)
+
     if (m_UI_mode == UI_LOAD) {
       m_UI_mode = UI_REGULAR;
       return 0; // we processed (or absorbed) the key
@@ -7926,7 +8133,13 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
     else if (
       m_UI_mode == UI_REGULAR ||
       m_UI_mode == UI_MENU) {
-      UpdatePresetList(true); // make sure list is completely ready
+      // If current preset dir has no .milk files, reset to default presets directory
+      if (!DirHasMilkFilesHelper(m_szPresetDir)) {
+        swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
+        TryDescendIntoPresetSubdirHelper(m_szPresetDir);
+        WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
+      }
+      UpdatePresetList(false, true); // force synchronous re-scan
       m_UI_mode = UI_LOAD;
       m_bUserPagedUp = false;
       m_bUserPagedDown = false;
@@ -8272,6 +8485,636 @@ void CPlugin::WriteRealtimeConfig() {
   // WritePrivateProfileIntW(m_bShowSongTime, L"bShowSongTime", GetConfigIniFile(), L"Settings");
   // WritePrivateProfileIntW(m_bShowSongLen, L"bShowSongLen", GetConfigIniFile(), L"Settings");
 }
+
+// Get the current value of a setting as a display string
+void CPlugin::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
+  switch (id) {
+  case SET_PRESET_DIR:       lstrcpynW(buf, m_szPresetDir, bufLen); break;
+  case SET_AUDIO_DEVICE:     lstrcpynW(buf, m_szAudioDevice, bufLen); break;
+  case SET_AUDIO_SENSITIVITY: swprintf(buf, L"%.0f", m_fAudioSensitivity); break;
+  case SET_BLEND_TIME:       swprintf(buf, L"%.1f s", m_fBlendTimeAuto); break;
+  case SET_TIME_BETWEEN:     swprintf(buf, L"%.0f s", m_fTimeBetweenPresets); break;
+  case SET_HARD_CUTS:        lstrcpyW(buf, m_bHardCutsDisabled ? L"yes" : L"no"); break;
+  case SET_PRESET_LOCK:      lstrcpyW(buf, m_bPresetLockOnAtStartup ? L"on" : L"off"); break;
+  case SET_SEQ_ORDER:        lstrcpyW(buf, m_bSequentialPresetOrder ? L"on" : L"off"); break;
+  case SET_SONG_TITLE_ANIMS: lstrcpyW(buf, m_bSongTitleAnims ? L"on" : L"off"); break;
+  case SET_CHANGE_WITH_SONG: lstrcpyW(buf, m_ChangePresetWithSong ? L"on" : L"off"); break;
+  case SET_SHOW_FPS:         lstrcpyW(buf, m_bShowFPS ? L"on" : L"off"); break;
+  case SET_ALWAYS_ON_TOP:    lstrcpyW(buf, m_bAlwaysOnTop ? L"on" : L"off"); break;
+  case SET_BORDERLESS:       lstrcpyW(buf, m_WindowBorderless ? L"on" : L"off"); break;
+  case SET_SPOUT:            lstrcpyW(buf, bSpoutOut ? L"on" : L"off"); break;
+  default: buf[0] = 0; break;
+  }
+}
+
+// Get the hint text for a setting
+const wchar_t* CPlugin::GetSettingHint(int id) {
+  SettingType t = g_settingsDesc[id].type;
+  if (t == ST_PATH)     return L"ENTER: browse";
+  if (t == ST_BOOL)     return L"ENTER: toggle";
+  if (t == ST_FLOAT || t == ST_INT) return L"LEFT/RIGHT: adjust";
+  return L"";
+}
+
+// Toggle or adjust a setting, save to INI
+void CPlugin::ToggleSetting(int id) {
+  bool* pBool = NULL;
+  switch (id) {
+  case SET_HARD_CUTS:        pBool = &m_bHardCutsDisabled; break;
+  case SET_PRESET_LOCK:      pBool = &m_bPresetLockOnAtStartup; break;
+  case SET_SEQ_ORDER:        pBool = &m_bSequentialPresetOrder; break;
+  case SET_SONG_TITLE_ANIMS: pBool = &m_bSongTitleAnims; break;
+  case SET_CHANGE_WITH_SONG: pBool = &m_ChangePresetWithSong; break;
+  case SET_SHOW_FPS:         pBool = &m_bShowFPS; break;
+  case SET_ALWAYS_ON_TOP:    pBool = &m_bAlwaysOnTop; break;
+  case SET_BORDERLESS:       pBool = &m_WindowBorderless; break;
+  case SET_SPOUT:            pBool = &bSpoutOut; break;
+  default: return;
+  }
+  *pBool = !(*pBool);
+  SaveSettingToINI(id);
+
+  // Side effects
+  if (id == SET_ALWAYS_ON_TOP)
+    ToggleAlwaysOnTop(GetPluginWindow());
+}
+
+void CPlugin::AdjustSetting(int id, int direction) {
+  SettingDesc& s = g_settingsDesc[id];
+  float* pFloat = NULL;
+  switch (id) {
+  case SET_AUDIO_SENSITIVITY: pFloat = &m_fAudioSensitivity; break;
+  case SET_BLEND_TIME:        pFloat = &m_fBlendTimeAuto; break;
+  case SET_TIME_BETWEEN:      pFloat = &m_fTimeBetweenPresets; break;
+  default: return;
+  }
+  *pFloat += s.fStep * direction;
+  if (*pFloat < s.fMin) *pFloat = s.fMin;
+  if (*pFloat > s.fMax) *pFloat = s.fMax;
+  if (id == SET_AUDIO_SENSITIVITY)
+    milkwave_audio_sensitivity = m_fAudioSensitivity;
+  SaveSettingToINI(id);
+}
+
+void CPlugin::SaveSettingToINI(int id) {
+  SettingDesc& s = g_settingsDesc[id];
+  if (!s.iniSection || !s.iniKey) return;
+  wchar_t val[MAX_PATH];
+  GetSettingValueString(id, val, MAX_PATH);
+  // For float values, write the raw number (not the display string with "s")
+  switch (id) {
+  case SET_AUDIO_SENSITIVITY: swprintf(val, L"%.0f", m_fAudioSensitivity); break;
+  case SET_BLEND_TIME:        swprintf(val, L"%f", m_fBlendTimeAuto); break;
+  case SET_TIME_BETWEEN:      swprintf(val, L"%f", m_fTimeBetweenPresets); break;
+  case SET_HARD_CUTS:
+  case SET_PRESET_LOCK:
+  case SET_SEQ_ORDER:
+  case SET_SONG_TITLE_ANIMS:
+  case SET_CHANGE_WITH_SONG:
+  case SET_SHOW_FPS:
+  case SET_ALWAYS_ON_TOP:
+  case SET_BORDERLESS:
+  case SET_SPOUT: {
+    bool bVal = false;
+    switch (id) {
+    case SET_HARD_CUTS:        bVal = m_bHardCutsDisabled; break;
+    case SET_PRESET_LOCK:      bVal = m_bPresetLockOnAtStartup; break;
+    case SET_SEQ_ORDER:        bVal = m_bSequentialPresetOrder; break;
+    case SET_SONG_TITLE_ANIMS: bVal = m_bSongTitleAnims; break;
+    case SET_CHANGE_WITH_SONG: bVal = m_ChangePresetWithSong; break;
+    case SET_SHOW_FPS:         bVal = m_bShowFPS; break;
+    case SET_ALWAYS_ON_TOP:    bVal = m_bAlwaysOnTop; break;
+    case SET_BORDERLESS:       bVal = m_WindowBorderless; break;
+    case SET_SPOUT:            bVal = bSpoutOut; break;
+    }
+    swprintf(val, L"%d", bVal ? 1 : 0);
+    break;
+  }
+  }
+  WritePrivateProfileStringW(s.iniSection, s.iniKey, val, GetConfigIniFile());
+}
+
+void CPlugin::OpenFolderPickerForPresetDir() {
+  DebugLogW(L"OpenFolderPicker: entering");
+
+  // COM must be initialized on this thread for IFileDialog
+  HRESULT hrCom = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+  {
+    wchar_t dbg[128];
+    swprintf(dbg, 128, L"OpenFolderPicker: CoInitializeEx hr=0x%08X", (unsigned)hrCom);
+    DebugLogW(dbg);
+  }
+  if (FAILED(hrCom) && hrCom != RPC_E_CHANGED_MODE) {
+    AddError(L"Failed to initialize COM for folder picker.", 4.0f, ERR_MISC, true);
+    return;
+  }
+
+  IFileDialog* pfd = NULL;
+  HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+  {
+    wchar_t dbg[128];
+    swprintf(dbg, 128, L"OpenFolderPicker: CoCreateInstance hr=0x%08X", (unsigned)hr);
+    DebugLogW(dbg);
+  }
+  if (SUCCEEDED(hr)) {
+    DWORD dwOptions;
+    pfd->GetOptions(&dwOptions);
+    pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    pfd->SetTitle(L"Select Preset Directory (folder containing .milk files)");
+    DebugLogW(L"OpenFolderPicker: options set");
+
+    IShellItem* psiFolder = NULL;
+    if (SHCreateItemFromParsingName(m_szPresetDir, NULL, IID_PPV_ARGS(&psiFolder)) == S_OK) {
+      pfd->SetFolder(psiFolder);
+      psiFolder->Release();
+      DebugLogW(L"OpenFolderPicker: initial folder set");
+    }
+
+    DebugLogW(L"OpenFolderPicker: about to call Show(NULL)...");
+    hr = pfd->Show(NULL);  // NULL parent to avoid DX12 window interaction issues
+    {
+      wchar_t dbg[128];
+      swprintf(dbg, 128, L"OpenFolderPicker: Show returned hr=0x%08X", (unsigned)hr);
+      DebugLogW(dbg);
+    }
+    if (SUCCEEDED(hr)) {
+      IShellItem* psi = NULL;
+      hr = pfd->GetResult(&psi);
+      if (SUCCEEDED(hr)) {
+        LPWSTR pszPath = NULL;
+        hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+        if (SUCCEEDED(hr) && pszPath) {
+          lstrcpyW(m_szPresetDir, pszPath);
+          int len = lstrlenW(m_szPresetDir);
+          if (len > 0 && m_szPresetDir[len - 1] != L'\\')
+            lstrcatW(m_szPresetDir, L"\\");
+          WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
+          CoTaskMemFree(pszPath);
+          UpdatePresetList(false, true);
+          m_bSettingsNeedAttention = false;
+          wchar_t notif[512];
+          swprintf(notif, L"Preset directory: %s", m_szPresetDir);
+          AddNotification(notif);
+          DebugLogW(L"OpenFolderPicker: preset dir updated");
+        }
+        psi->Release();
+      }
+    }
+    pfd->Release();
+    DebugLogW(L"OpenFolderPicker: dialog released");
+  }
+
+  if (SUCCEEDED(hrCom))
+    CoUninitialize();
+  DebugLogW(L"OpenFolderPicker: done");
+}
+
+//----------------------------------------------------------------------
+// Win32 Settings Window
+//----------------------------------------------------------------------
+
+static HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont) {
+  HWND hw = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
+    x, y, w, h, hParent, NULL, GetModuleHandle(NULL), NULL);
+  if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+  return hw;
+}
+
+static HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0) {
+  HWND hw = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", text,
+    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | extraStyle,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+  return hw;
+}
+
+static HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked) {
+  HWND hw = CreateWindowExW(0, L"BUTTON", text,
+    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw) {
+    if (hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessage(hw, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+  }
+  return hw;
+}
+
+static HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont) {
+  HWND hw = CreateWindowExW(0, L"BUTTON", text,
+    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+  return hw;
+}
+
+LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  CPlugin* p = (CPlugin*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+  switch (uMsg) {
+  case WM_CLOSE:
+    if (p) {
+      p->m_hSettingsWnd = NULL;
+      // Restore focus to the plugin window so keyboard shortcuts work
+      HWND hPlugin = p->GetPluginWindow();
+      if (hPlugin) SetFocus(hPlugin);
+    }
+    DestroyWindow(hWnd);
+    return 0;
+
+  case WM_DESTROY:
+    if (p) p->m_hSettingsWnd = NULL;
+    return 0;
+
+  case WM_COMMAND:
+  {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    if (!p) break;
+
+    // Browse button
+    if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
+      p->OpenFolderPickerForPresetDir();
+      // Update the edit control with the new path
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), p->m_szPresetDir);
+      return 0;
+    }
+
+    // Audio device combo box selection
+    if (id == IDC_MW_AUDIO_DEVICE && code == CBN_SELCHANGE) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel >= 0) {
+        wchar_t deviceName[MAX_PATH] = {};
+        SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)deviceName);
+
+        if (sel == 0) {
+          // "(Default)" selected — clear device name to use system default
+          wcscpy_s(p->m_szAudioDevicePrevious, p->m_szAudioDevice);
+          p->m_nAudioDevicePreviousType = p->m_nAudioDeviceActiveType;
+          p->m_szAudioDevice[0] = L'\0';
+          p->m_nAudioDeviceRequestType = 0;
+          p->SetAudioDeviceDisplayName(NULL, true);
+        }
+        else {
+          // Check if it's an input device (ends with " [Input]")
+          bool isInput = false;
+          wchar_t cleanName[MAX_PATH];
+          lstrcpyW(cleanName, deviceName);
+          int len = lstrlenW(cleanName);
+          const wchar_t* inputSuffix = L" [Input]";
+          int suffixLen = lstrlenW(inputSuffix);
+          if (len > suffixLen && _wcsicmp(cleanName + len - suffixLen, inputSuffix) == 0) {
+            cleanName[len - suffixLen] = L'\0';
+            isInput = true;
+          }
+
+          wcscpy_s(p->m_szAudioDevicePrevious, p->m_szAudioDevice);
+          p->m_nAudioDevicePreviousType = p->m_nAudioDeviceActiveType;
+          wcscpy_s(p->m_szAudioDevice, cleanName);
+          p->m_nAudioDeviceRequestType = isInput ? 1 : 2;
+          p->SetAudioDeviceDisplayName(cleanName, !isInput);
+        }
+
+        // Save to INI
+        WritePrivateProfileStringW(L"Milkwave", L"AudioDevice", p->m_szAudioDevice, p->GetConfigIniFile());
+        wchar_t reqBuf[16];
+        swprintf(reqBuf, 16, L"%d", p->m_nAudioDeviceRequestType);
+        WritePrivateProfileStringW(L"Milkwave", L"AudioDeviceRequestType", reqBuf, p->GetConfigIniFile());
+
+        // Restart audio capture
+        p->m_nAudioLoopState = 1;
+        p->AddNotificationAudioDevice();
+      }
+      return 0;
+    }
+
+    // Close button
+    if (id == IDC_MW_CLOSE && code == BN_CLICKED) {
+      PostMessage(hWnd, WM_CLOSE, 0, 0);
+      return 0;
+    }
+
+    // Checkbox toggles — save immediately
+    if (code == BN_CLICKED) {
+      bool bChecked = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+      switch (id) {
+      case IDC_MW_HARD_CUTS:
+        p->m_bHardCutsDisabled = bChecked;
+        p->SaveSettingToINI(SET_HARD_CUTS);
+        return 0;
+      case IDC_MW_PRESET_LOCK:
+        p->m_bPresetLockOnAtStartup = bChecked;
+        p->SaveSettingToINI(SET_PRESET_LOCK);
+        return 0;
+      case IDC_MW_SEQ_ORDER:
+        p->m_bSequentialPresetOrder = bChecked;
+        p->SaveSettingToINI(SET_SEQ_ORDER);
+        return 0;
+      case IDC_MW_SONG_TITLE:
+        p->m_bSongTitleAnims = bChecked;
+        p->SaveSettingToINI(SET_SONG_TITLE_ANIMS);
+        return 0;
+      case IDC_MW_CHANGE_SONG:
+        p->m_ChangePresetWithSong = bChecked;
+        p->SaveSettingToINI(SET_CHANGE_WITH_SONG);
+        return 0;
+      case IDC_MW_SHOW_FPS:
+        p->m_bShowFPS = bChecked;
+        p->SaveSettingToINI(SET_SHOW_FPS);
+        return 0;
+      case IDC_MW_ALWAYS_TOP:
+        p->m_bAlwaysOnTop = bChecked;
+        p->SaveSettingToINI(SET_ALWAYS_ON_TOP);
+        p->ToggleAlwaysOnTop(p->GetPluginWindow());
+        return 0;
+      case IDC_MW_BORDERLESS:
+        p->m_WindowBorderless = bChecked;
+        p->SaveSettingToINI(SET_BORDERLESS);
+        return 0;
+      case IDC_MW_SPOUT:
+        p->bSpoutOut = bChecked;
+        p->SaveSettingToINI(SET_SPOUT);
+        return 0;
+      }
+    }
+
+    // Edit control changes (apply on focus lost)
+    if (code == EN_KILLFOCUS) {
+      wchar_t buf[64];
+      GetWindowTextW((HWND)lParam, buf, 64);
+      switch (id) {
+      case IDC_MW_AUDIO_SENS:
+        p->m_fAudioSensitivity = (float)_wtof(buf);
+        if (p->m_fAudioSensitivity < 1) p->m_fAudioSensitivity = 1;
+        if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
+        milkwave_audio_sensitivity = p->m_fAudioSensitivity;
+        p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
+        return 0;
+      case IDC_MW_BLEND_TIME:
+        p->m_fBlendTimeAuto = (float)_wtof(buf);
+        if (p->m_fBlendTimeAuto < 0.1f) p->m_fBlendTimeAuto = 0.1f;
+        if (p->m_fBlendTimeAuto > 10) p->m_fBlendTimeAuto = 10;
+        p->SaveSettingToINI(SET_BLEND_TIME);
+        return 0;
+      case IDC_MW_TIME_BETWEEN:
+        p->m_fTimeBetweenPresets = (float)_wtof(buf);
+        if (p->m_fTimeBetweenPresets < 1) p->m_fTimeBetweenPresets = 1;
+        if (p->m_fTimeBetweenPresets > 300) p->m_fTimeBetweenPresets = 300;
+        p->SaveSettingToINI(SET_TIME_BETWEEN);
+        return 0;
+      }
+    }
+    break;
+  }
+
+  case WM_CTLCOLORSTATIC:
+  case WM_CTLCOLORBTN:
+  {
+    HDC hdc = (HDC)wParam;
+    SetBkColor(hdc, RGB(30, 30, 30));
+    SetTextColor(hdc, RGB(220, 220, 220));
+    static HBRUSH hBrush = CreateSolidBrush(RGB(30, 30, 30));
+    return (LRESULT)hBrush;
+  }
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+  {
+    HDC hdc = (HDC)wParam;
+    SetBkColor(hdc, RGB(50, 50, 50));
+    SetTextColor(hdc, RGB(240, 240, 240));
+    static HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50));
+    return (LRESULT)hBrush;
+  }
+  case WM_ERASEBKGND:
+  {
+    HDC hdc = (HDC)wParam;
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    HBRUSH hBrush = CreateSolidBrush(RGB(30, 30, 30));
+    FillRect(hdc, &rc, hBrush);
+    DeleteObject(hBrush);
+    return 1;
+  }
+  }
+  return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+// Enumerate audio devices into a combo box. Returns the index of the current device, or -1.
+static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice) {
+  int curIdx = -1;
+
+  // Add "(Default)" as first entry
+  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Default)");
+
+  HRESULT hrCom = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+  IMMDeviceEnumerator* pEnum = NULL;
+  HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+    __uuidof(IMMDeviceEnumerator), (void**)&pEnum);
+  if (SUCCEEDED(hr) && pEnum) {
+    // Enumerate render (output) devices
+    IMMDeviceCollection* pCollection = NULL;
+    hr = pEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollection);
+    if (SUCCEEDED(hr) && pCollection) {
+      UINT count = 0;
+      pCollection->GetCount(&count);
+      for (UINT i = 0; i < count; i++) {
+        IMMDevice* pDev = NULL;
+        if (SUCCEEDED(pCollection->Item(i, &pDev)) && pDev) {
+          IPropertyStore* pProps = NULL;
+          if (SUCCEEDED(pDev->OpenPropertyStore(STGM_READ, &pProps)) && pProps) {
+            PROPVARIANT pv; PropVariantInit(&pv);
+            if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &pv)) && pv.vt == VT_LPWSTR) {
+              int idx = (int)SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)pv.pwszVal);
+              if (_wcsicmp(pv.pwszVal, szCurrentDevice) == 0)
+                curIdx = idx;
+            }
+            PropVariantClear(&pv);
+            pProps->Release();
+          }
+          pDev->Release();
+        }
+      }
+      pCollection->Release();
+    }
+    // Also enumerate capture (input) devices
+    pCollection = NULL;
+    hr = pEnum->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &pCollection);
+    if (SUCCEEDED(hr) && pCollection) {
+      UINT count = 0;
+      pCollection->GetCount(&count);
+      for (UINT i = 0; i < count; i++) {
+        IMMDevice* pDev = NULL;
+        if (SUCCEEDED(pCollection->Item(i, &pDev)) && pDev) {
+          IPropertyStore* pProps = NULL;
+          if (SUCCEEDED(pDev->OpenPropertyStore(STGM_READ, &pProps)) && pProps) {
+            PROPVARIANT pv; PropVariantInit(&pv);
+            if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &pv)) && pv.vt == VT_LPWSTR) {
+              // Mark input devices with [Input] suffix
+              wchar_t label[MAX_PATH];
+              swprintf(label, MAX_PATH, L"%s [Input]", pv.pwszVal);
+              int idx = (int)SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)label);
+              if (_wcsicmp(pv.pwszVal, szCurrentDevice) == 0)
+                curIdx = idx;
+            }
+            PropVariantClear(&pv);
+            pProps->Release();
+          }
+          pDev->Release();
+        }
+      }
+      pCollection->Release();
+    }
+    pEnum->Release();
+  }
+  if (SUCCEEDED(hrCom))
+    CoUninitialize();
+
+  // Select current device, or default
+  SendMessageW(hCombo, CB_SETCURSEL, curIdx >= 0 ? curIdx : 0, 0);
+  return curIdx;
+}
+
+void CPlugin::OpenSettingsWindow() {
+  // If already open, bring to front
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
+    SetForegroundWindow(m_hSettingsWnd);
+    return;
+  }
+
+  // Register window class once
+  if (!g_bSettingsWndClassRegistered) {
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = SettingsWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = SETTINGS_WND_CLASS;
+    wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    if (RegisterClassExW(&wc))
+      g_bSettingsWndClassRegistered = true;
+    else
+      return;
+  }
+
+  // Create window centered on screen
+  int wndW = 440, wndH = 580;
+  int screenW = GetSystemMetrics(SM_CXSCREEN);
+  int screenH = GetSystemMetrics(SM_CYSCREEN);
+  int posX = (screenW - wndW) / 2;
+  int posY = (screenH - wndH) / 2;
+
+  m_hSettingsWnd = CreateWindowExW(
+    WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+    SETTINGS_WND_CLASS, L"Milkwave Settings",
+    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+    posX, posY, wndW, wndH,
+    NULL, NULL, GetModuleHandle(NULL), NULL);
+
+  if (!m_hSettingsWnd) return;
+
+  SetWindowLongPtr(m_hSettingsWnd, GWLP_USERDATA, (LONG_PTR)this);
+
+  // Create fonts for controls
+  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  HFONT hFontBold = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  int x = 12, y = 10, lw = 120, rw = wndW - 36;
+  int lineH = 24, gap = 6;
+
+  // --- Preset Directory ---
+  CreateLabel(m_hSettingsWnd, L"Preset Directory:", x, y, rw, lineH, hFontBold);
+  y += lineH;
+  CreateEdit(m_hSettingsWnd, m_szPresetDir, IDC_MW_PRESET_DIR, x, y, rw - 70, lineH, hFont, ES_READONLY);
+  CreateBtn(m_hSettingsWnd, L"Browse", IDC_MW_BROWSE_DIR, x + rw - 65, y, 65, lineH, hFont);
+  y += lineH + gap + 4;
+
+  // --- Audio Device (combo box) ---
+  CreateLabel(m_hSettingsWnd, L"Audio Device:", x, y, rw, lineH, hFontBold);
+  y += lineH;
+  {
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+      x, y, rw, 200, m_hSettingsWnd, (HMENU)(INT_PTR)IDC_MW_AUDIO_DEVICE, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
+  }
+  y += lineH + gap + 8;
+
+  // --- Numeric settings ---
+  CreateLabel(m_hSettingsWnd, L"Audio Sensitivity:", x, y, lw + 20, lineH, hFont);
+  { wchar_t buf[32]; swprintf(buf, 32, L"%.0f", m_fAudioSensitivity);
+    CreateEdit(m_hSettingsWnd, buf, IDC_MW_AUDIO_SENS, x + lw + 24, y, 60, lineH, hFont); }
+  y += lineH + gap;
+
+  CreateLabel(m_hSettingsWnd, L"Blend Time (s):", x, y, lw + 20, lineH, hFont);
+  { wchar_t buf[32]; swprintf(buf, 32, L"%.1f", m_fBlendTimeAuto);
+    CreateEdit(m_hSettingsWnd, buf, IDC_MW_BLEND_TIME, x + lw + 24, y, 60, lineH, hFont); }
+  y += lineH + gap;
+
+  CreateLabel(m_hSettingsWnd, L"Time Between (s):", x, y, lw + 20, lineH, hFont);
+  { wchar_t buf[32]; swprintf(buf, 32, L"%.0f", m_fTimeBetweenPresets);
+    CreateEdit(m_hSettingsWnd, buf, IDC_MW_TIME_BETWEEN, x + lw + 24, y, 60, lineH, hFont); }
+  y += lineH + gap + 8;
+
+  // --- Checkboxes ---
+  CreateCheck(m_hSettingsWnd, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Song Title Animations",   IDC_MW_SONG_TITLE,   x, y, rw, lineH, hFont, m_bSongTitleAnims); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless); y += lineH + 2;
+  CreateCheck(m_hSettingsWnd, L"Spout Output",            IDC_MW_SPOUT,        x, y, rw, lineH, hFont, bSpoutOut); y += lineH + gap + 8;
+
+  // --- Close button ---
+  CreateBtn(m_hSettingsWnd, L"Close", IDC_MW_CLOSE, wndW / 2 - 50, y, 100, 30, hFontBold);
+
+  ShowWindow(m_hSettingsWnd, SW_SHOW);
+  UpdateWindow(m_hSettingsWnd);
+}
+
+void CPlugin::CloseSettingsWindow() {
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
+    DestroyWindow(m_hSettingsWnd);
+    m_hSettingsWnd = NULL;
+    // Restore focus to the plugin window
+    HWND hPlugin = GetPluginWindow();
+    if (hPlugin) SetFocus(hPlugin);
+  }
+}
+
+void CPlugin::PopulateSettingsControls() {
+  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
+  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR), m_szPresetDir);
+  // Numeric fields
+  wchar_t buf[32];
+  swprintf(buf, 32, L"%.0f", m_fAudioSensitivity);
+  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_AUDIO_SENS), buf);
+  swprintf(buf, 32, L"%.1f", m_fBlendTimeAuto);
+  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_BLEND_TIME), buf);
+  swprintf(buf, 32, L"%.0f", m_fTimeBetweenPresets);
+  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_TIME_BETWEEN), buf);
+  // Checkboxes
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_HARD_CUTS,   BM_SETCHECK, m_bHardCutsDisabled ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_PRESET_LOCK, BM_SETCHECK, m_bPresetLockOnAtStartup ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SEQ_ORDER,   BM_SETCHECK, m_bSequentialPresetOrder ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SONG_TITLE,  BM_SETCHECK, m_bSongTitleAnims ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_CHANGE_SONG, BM_SETCHECK, m_ChangePresetWithSong ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SHOW_FPS,    BM_SETCHECK, m_bShowFPS ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_ALWAYS_TOP,  BM_SETCHECK, m_bAlwaysOnTop ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_BORDERLESS,  BM_SETCHECK, m_WindowBorderless ? BST_CHECKED : BST_UNCHECKED, 0);
+  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SPOUT,       BM_SETCHECK, bSpoutOut ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+//----------------------------------------------------------------------
 
 void CPlugin::dumpmsg(wchar_t* s) {
   DebugLogW(s);
@@ -9854,13 +10697,9 @@ void CPlugin::FindValidPresetDir() {
   lstrcpyW(m_szPresetDir, GetPluginsDirPath());
   if (GetFileAttributesW(m_szPresetDir) != -1)
     return;
-  lstrcpyW(m_szPresetDir, L"c:\\program files\\winamp\\");  //getting desperate here
-  if (GetFileAttributesW(m_szPresetDir) != -1)
-    return;
-  lstrcpyW(m_szPresetDir, L"c:\\program files\\");  //getting desperate here
-  if (GetFileAttributesW(m_szPresetDir) != -1)
-    return;
-  lstrcpyW(m_szPresetDir, L"c:\\");
+  // Keep default preset path — do NOT fall back to c:\program files or c:\
+  // which would cause extremely long directory scans.
+  swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
 }
 
 char* NextLine(char* p) {
@@ -10181,7 +11020,7 @@ void CPlugin::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectC
 
   if (bForce) {
     if (g_bThreadAlive)
-      CancelThread(3000);  // flags it to exit; the param is the # of ms to wait before forcefully killing it
+      CancelThread(500);  // flags it to exit; shorter timeout for interactive responsiveness
   }
   else {
     if (bBackground && (g_bThreadAlive || m_bPresetListReady))
@@ -10211,31 +11050,20 @@ void CPlugin::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectC
     g_hThread = INVALID_HANDLE_VALUE;
   }
   else {
-    // it will just run in the background til it finishes.
-    // however, we want to wait until at least ~32 presets are found (or failure) before returning,
-    // so we know we have *something* in the preset list to start with.
+    // Background mode: wait briefly for an initial batch of presets so that
+    // LoadRandomPreset (called right after this at startup) has something to work with.
+    // This does NOT hold the critical section, so the render loop is NOT blocked.
+    SetThreadPriority(g_hThread, THREAD_PRIORITY_ABOVE_NORMAL);
 
-    SetThreadPriority(g_hThread, THREAD_PRIORITY_HIGHEST); //THREAD_PRIORITY_IDLE,    THREAD_PRIORITY_LOWEST,    THREAD_PRIORITY_NORMAL,    THREAD_PRIORITY_HIGHEST,
-
-    // wait until either the thread exits, or # of presets is >32, before returning.
-    // also make sure you enter the CS whenever you check on it!
-    // (thread will update preset list every so often, with the newest presets scanned in...)
-    while (g_bThreadAlive) {
+    int waited = 0;
+    while (g_bThreadAlive && waited < 3000) {
       Sleep(30);
+      waited += 30;
 
-      EnterCriticalSection(&g_cs);
-      int nPresets = g_plugin.m_nPresets;
-      LeaveCriticalSection(&g_cs);
-
-      if (nPresets >= 30)
+      // Check preset count without the CS to avoid blocking the render thread.
+      // A brief race on m_nPresets is acceptable — we just need a rough count.
+      if (g_plugin.m_nPresets >= 30)
         break;
-    }
-
-    if (g_bThreadAlive) {
-      // the load still takes a while even at THREAD_PRIORITY_ABOVE_NORMAL,
-      // because it is waiting on the HDD so much...
-      // but the OS is smart, and the CPU stays nice and zippy in other threads =)
-      SetThreadPriority(g_hThread, THREAD_PRIORITY_HIGHEST); //THREAD_PRIORITY_IDLE,    THREAD_PRIORITY_LOWEST,    THREAD_PRIORITY_NORMAL,    THREAD_PRIORITY_HIGHEST,
     }
   }
 

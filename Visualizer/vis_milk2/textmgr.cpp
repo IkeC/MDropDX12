@@ -34,6 +34,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "dxcontext.h"
 #include "dx12pipeline.h"
 #include "support.h"
+#include <vector>
 
 #define MAX_MSG_CHARS (65536*2)
 wchar_t g_szMsgPool[2][MAX_MSG_CHARS];
@@ -305,6 +306,22 @@ int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD fla
     }
   }
 
+  // Measure actual text height via GDI so callers can advance layout correctly.
+  // Without this, returning (pRect->bottom - pRect->top) gives the full remaining
+  // rect height, causing only the first line to be positioned correctly.
+  if (m_memDC) {
+    int fontIdx = DecodeFontIndex(pFont);
+    HGDIOBJ oldFont = nullptr;
+    if (fontIdx >= 0 && fontIdx < m_nFonts && m_pFonts && m_pFonts[fontIdx])
+      oldFont = SelectObject(m_memDC, m_pFonts[fontIdx]);
+
+    RECT rc = *pRect;
+    int h = ::DrawTextW(m_memDC, szText, -1, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
+
+    if (oldFont) SelectObject(m_memDC, oldFont);
+    return h;
+  }
+
   return pRect->bottom - pRect->top;
 }
 
@@ -355,6 +372,8 @@ void CTextManager::RenderQueuedMessages() {
     if (fontIdx >= 0 && fontIdx < m_nFonts && m_pFonts && m_pFonts[fontIdx])
       oldFont = SelectObject(m_memDC, m_pFonts[fontIdx]);
 
+    DWORD drawFlags = entry.flags & ~DT_CALCRECT;
+
     // Extract RGB from ARGB color (D3DCOLOR format)
     BYTE cr = (BYTE)((entry.color >> 16) & 0xFF);
     BYTE cg = (BYTE)((entry.color >>  8) & 0xFF);
@@ -362,8 +381,6 @@ void CTextManager::RenderQueuedMessages() {
     SetTextColor(m_memDC, RGB(cr, cg, cb));
 
     RECT rc = entry.rect;
-    // Remove DT_CALCRECT if somehow set (shouldn't be, but safety)
-    DWORD drawFlags = entry.flags & ~DT_CALCRECT;
     ::DrawTextW(m_memDC, entry.msg, -1, &rc, drawFlags | DT_NOPREFIX);
 
     if (oldFont) SelectObject(m_memDC, oldFont);
@@ -373,18 +390,51 @@ void CTextManager::RenderQueuedMessages() {
   // Convert to premultiplied alpha: A = max(R,G,B), keep R,G,B as-is.
   // Pixels already set by box rendering (A > 0) are left untouched.
   BYTE* pixels = m_dibBits;
-  for (UINT y = 0; y < m_texH; y++) {
-    for (UINT x = 0; x < m_texW; x++) {
-      UINT idx = (y * m_texW + x) * 4;
-      BYTE b = pixels[idx + 0];
-      BYTE g = pixels[idx + 1];
-      BYTE r = pixels[idx + 2];
-      BYTE a = pixels[idx + 3];
-      if (a == 0 && (r | g | b) != 0) {
-        // This pixel was drawn by GDI text (A=0 but has color).
-        // Set alpha to coverage (max channel value).
-        BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-        pixels[idx + 3] = intensity;
+  size_t totalPixels = (size_t)m_texW * m_texH;
+  for (size_t i = 0; i < totalPixels; i++) {
+    UINT idx = (UINT)(i * 4);
+    BYTE b = pixels[idx + 0];
+    BYTE g = pixels[idx + 1];
+    BYTE r = pixels[idx + 2];
+    BYTE a = pixels[idx + 3];
+    if (a == 0 && (r | g | b) != 0) {
+      // This pixel was drawn by GDI text (A=0 but has color).
+      // Set alpha to coverage (max channel value).
+      BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+      pixels[idx + 3] = intensity;
+    }
+  }
+
+  // Outline pass: dilate alpha to create a 1px dark outline around all text.
+  // This makes text readable on both light and dark backgrounds.
+  // Use a temporary copy of alpha to avoid read-after-write issues.
+  std::vector<BYTE> alphaMap(totalPixels);
+  for (size_t i = 0; i < totalPixels; i++)
+    alphaMap[i] = pixels[i * 4 + 3];
+
+  for (UINT y = 1; y < m_texH - 1; y++) {
+    for (UINT x = 1; x < m_texW - 1; x++) {
+      UINT i = y * m_texW + x;
+      if (alphaMap[i] > 0) continue;  // already has content
+
+      // Check 8-connected neighbors for text pixels
+      BYTE maxA = 0;
+      maxA = max(maxA, alphaMap[i - 1]);             // left
+      maxA = max(maxA, alphaMap[i + 1]);             // right
+      maxA = max(maxA, alphaMap[i - m_texW]);        // up
+      maxA = max(maxA, alphaMap[i + m_texW]);        // down
+      maxA = max(maxA, alphaMap[i - m_texW - 1]);    // up-left
+      maxA = max(maxA, alphaMap[i - m_texW + 1]);    // up-right
+      maxA = max(maxA, alphaMap[i + m_texW - 1]);    // down-left
+      maxA = max(maxA, alphaMap[i + m_texW + 1]);    // down-right
+      if (maxA > 32) {
+        // Set outline pixel to semi-transparent black (premultiplied)
+        BYTE oa = (BYTE)(maxA * 3 / 4);
+        UINT pi = i * 4;
+        pixels[pi + 0] = 0;   // B
+        pixels[pi + 1] = 0;   // G
+        pixels[pi + 2] = 0;   // R
+        pixels[pi + 3] = oa;
       }
     }
   }

@@ -54,7 +54,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 extern "C" int (*warand)(void);
 
 typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
-typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP } ui_mode;
+typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
 typedef struct { float rad; float ang; float a; float c; } td_vertinfo; // blending: mix = max(0,min(1,a*t + c));
 typedef char* CHARPTR;
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -626,6 +626,8 @@ public:
   wchar_t     m_szAudioDevice[MAX_PATH];
   wchar_t     m_szAudioDeviceDisplayName[MAX_PATH];
   wchar_t     m_SongInfoFormat[MAX_PATH];
+  int m_nSettingsCurSel = 0;       // currently highlighted setting in UI_SETTINGS
+  bool m_bSettingsNeedAttention = false; // force settings open on bad config
   int m_nAudioLoopState = 0; // 0: Running, 1: Cancel running thread, 2: Must restart
   int m_nAudioDeviceRequestType = 0; // 0: Undefined, 1: Capture (in), 2: Render (out)
   int m_nAudioDeviceActiveType = 2;   // 0: Unknown, 1: Capture (in), 2: Render (out)
@@ -785,6 +787,19 @@ public:
   void		MergeSortPresets(int left, int right);
   void		BuildMenus();
   void        SetMenusForPresetVersion(int WarpPSVersion, int CompPSVersion);
+  // Settings screen (overlay)
+  void        GetSettingValueString(int id, wchar_t* buf, int bufLen);
+  const wchar_t* GetSettingHint(int id);
+  void        ToggleSetting(int id);
+  void        AdjustSetting(int id, int direction);
+  void        SaveSettingToINI(int id);
+  void        OpenFolderPickerForPresetDir();
+  // Settings window (Win32 dialog)
+  HWND        m_hSettingsWnd = NULL;
+  void        OpenSettingsWindow();
+  void        CloseSettingsWindow();
+  void        PopulateSettingsControls();
+  static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   //void  ResetWindowSizeOnDisk();
   bool		LaunchSprite(int nSpriteNum, int nSlot);
   void		KillSprite(int iSlot);
