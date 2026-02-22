@@ -1141,25 +1141,6 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       }
     }
   }
-  else if (wParam == VK_B) {
-    if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
-      g_plugin.m_SongInfoPollingEnabled = !g_plugin.m_SongInfoPollingEnabled;
-      milkwave.doPoll = g_plugin.m_SongInfoPollingEnabled;
-      if (g_plugin.m_SongInfoPollingEnabled) {
-        g_plugin.AddNotification(L"Song Info enabled");
-      }
-      else {
-        g_plugin.AddNotification(L"Song Info disabled");
-        milkwave.currentArtist = L"";
-        milkwave.currentTitle = L"";
-        milkwave.currentAlbum = L"";
-      }
-    }
-    else {
-      milkwave.doPollExplicit = true;
-    }
-    return 0;
-  }
   else if (wParam == VK_C) {
     if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
       g_plugin.m_DisplayCover = !g_plugin.m_DisplayCover;
@@ -1170,9 +1151,6 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       else {
         g_plugin.AddNotification(L"Cover Display disabled");
       }
-    }
-    else {
-      milkwave.doPollExplicit = true;
     }
     return 0;
   }
@@ -1364,10 +1342,6 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     if (rightMouseButtonHeld) {
       // Right + Middle
       g_plugin.OpenMilkwaveRemote();
-    }
-    else {
-      // Middle only
-      milkwave.doPollExplicit = true;
     }
     break;
 

@@ -8031,23 +8031,43 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
   case 'F':
     m_pState->m_nVideoEchoOrientation = (m_pState->m_nVideoEchoOrientation + 1) % 4;
     return 0; // we processed (or absorbed) the key
+  case 'b':
+    m_ColShiftBrightness -= 0.02f;
+    if (m_ColShiftBrightness < -1.0f) m_ColShiftBrightness = -1.0f;
+    {
+      wchar_t buf[64];
+      swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
+    }
+    SendSettingsInfoToMilkwaveRemote();
+    return 0;
+  case 'B':
+    m_ColShiftBrightness += 0.02f;
+    if (m_ColShiftBrightness > 1.0f) m_ColShiftBrightness = 1.0f;
+    {
+      wchar_t buf[64];
+      swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
+    }
+    SendSettingsInfoToMilkwaveRemote();
+    return 0;
   case 'g':
     m_pState->m_fGammaAdj -= 0.1f;
     if (m_pState->m_fGammaAdj.eval(-1) < 0.0f) m_pState->m_fGammaAdj = 0.0f;
     {
       wchar_t buf[64];
       swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); // bright cyan
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
     }
-    return 0; // we processed (or absorbed) the key
+    return 0;
   case 'G':
     m_pState->m_fGammaAdj += 0.1f;
     {
       wchar_t buf[64];
       swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); // bright cyan
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
     }
-    return 0; // we processed (or absorbed) the key
+    return 0;
   case 'j':
     m_pState->m_fWaveScale *= 0.9f;
     SendPresetWaveInfoToMilkwaveRemote();

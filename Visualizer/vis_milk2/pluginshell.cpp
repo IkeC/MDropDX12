@@ -2380,10 +2380,6 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
       return 0;
 
     switch (wParam) {
-    case 'b':
-    case 'B':
-      /* track info */
-      return 0;
     case 's':
     case 'S':
       /* save preset */
