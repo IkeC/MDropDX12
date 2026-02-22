@@ -805,9 +805,11 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[4]; // HWNDs per tab (General, Vis, Color, Spout)
+  std::vector<HWND> m_settingsPageCtrls[5]; // HWNDs per tab (General, Visual, Colors, Sound, Files)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
+  int         m_nSettingsWndW = 600;
+  int         m_nSettingsWndH = 800;
   std::thread m_settingsThread;
   std::atomic<bool> m_bSettingsThreadRunning{false};
   void        OpenSettingsWindow();
@@ -816,7 +818,34 @@ public:
   void        BuildSettingsControls();
   void        ShowSettingsPage(int page);
   void        LayoutSettingsControls();
+  void        EnsureSettingsVisible();
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  // User "safe" defaults (persisted to INI [UserDefaults] section)
+  bool  m_bUserDefaultsSaved = false;
+  float m_udOpacity = 1.0f;
+  float m_udRenderQuality = 1.0f;
+  float m_udTimeFactor = 1.0f;
+  float m_udFrameFactor = 1.0f;
+  float m_udFpsFactor = 1.0f;
+  float m_udVisIntensity = 1.0f;
+  float m_udVisShift = 0.0f;
+  float m_udVisVersion = 1.0f;
+  float m_udHue = 0.0f;
+  float m_udSaturation = 0.0f;
+  float m_udBrightness = 0.0f;
+  float m_udGamma = 2.0f;
+  void  SaveUserDefaults();
+  void  LoadUserDefaults();
+  void  ResetToFactory(HWND hWnd);
+  void  ResetToUserDefaults(HWND hWnd);
+  void  UpdateVisualUI(HWND hWnd);
+  void  UpdateColorsUI(HWND hWnd);
+
+  // Fallback search paths (Files tab)
+  std::vector<std::wstring> m_fallbackPaths;
+  void  SaveFallbackPaths();
+  void  LoadFallbackPaths();
 
   // Resource Viewer
   HWND        m_hResourceWnd = NULL;

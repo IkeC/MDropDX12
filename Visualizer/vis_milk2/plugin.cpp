@@ -785,6 +785,12 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_RESOURCES        2057   // "Resources..." button on General tab
 #define IDC_MW_RESET_VISUAL     2058   // Reset button on Visual tab
 #define IDC_MW_RESET_COLORS     2059   // Reset button on Colors tab
+#define IDC_MW_RESET_ALL        2060   // Factory Reset (General tab)
+#define IDC_MW_SAVE_DEFAULTS    2061   // Save Safe Defaults (General tab)
+#define IDC_MW_USER_RESET       2062   // User Safe Reset (General tab)
+#define IDC_MW_FILE_LIST        2063   // ListBox on Files tab
+#define IDC_MW_FILE_ADD         2064   // Add button on Files tab
+#define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -1599,10 +1605,18 @@ void CPlugin::MyReadConfig() {
   m_WindowY = GetPrivateProfileIntW(L"Milkwave", L"WindowY", m_WindowY, pIni);
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
+  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 600, pIni);
+  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 800, pIni);
+  if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
+  if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
+  if (m_nSettingsWndW > 2000) m_nSettingsWndW = 2000;
+  if (m_nSettingsWndH > 2000) m_nSettingsWndH = 2000;
   m_WindowFixedWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedWidth", m_WindowFixedWidth, pIni);
   m_WindowFixedHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedHeight", m_WindowFixedHeight, pIni);
 
   ReadCustomMessages();
+  LoadUserDefaults();
+  LoadFallbackPaths();
 
   // bounds-checking:
   if (m_nGridX > MAX_GRID_X)
@@ -1744,6 +1758,8 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowY, L"WindowY", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowWidth, L"WindowWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
 }
 
 void CPlugin::SaveWindowSizeAndPosition(HWND hwnd) {
@@ -3740,8 +3756,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
-                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF)
-                  continue;
+                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
+                  // Search fallback paths
+                  bool fbFound = false;
+                  for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                    swprintf(szFilename, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                  }
+                  if (!fbFound) continue;
+                }
               }
               x.dx12Tex = g_plugin.m_lpDX->LoadTextureFromFile(szFilename);
               if (x.dx12Tex.resource) {
@@ -3797,8 +3820,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
-                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF)
-                  continue;
+                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
+                  // Search fallback paths
+                  bool fbFound = false;
+                  for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                    swprintf(szFilename, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                  }
+                  if (!fbFound) continue;
+                }
               }
               D3DXIMAGE_INFO desc;
 
@@ -6462,6 +6492,12 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
     SetSpoutFixedSize(false, true);
     return 0;
 
+  case WM_SIZE:
+    // If render window went fullscreen, move settings window to another monitor
+    if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
+      EnsureSettingsVisible();
+    break; // let base class handle resize too
+
   case WM_COPYDATA:
   {
     PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
@@ -8942,7 +8978,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (p) {
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
-      for (int i = 0; i < 4; i++) p->m_settingsPageCtrls[i].clear();
+      for (int i = 0; i < 5; i++) p->m_settingsPageCtrls[i].clear();
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
     }
@@ -8962,7 +8998,13 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
   case WM_SIZE:
   {
     if (wParam == SIZE_MINIMIZED) break;
-    if (p) p->LayoutSettingsControls();
+    if (p) {
+      RECT rc;
+      GetWindowRect(hWnd, &rc);
+      p->m_nSettingsWndW = rc.right - rc.left;
+      p->m_nSettingsWndH = rc.bottom - rc.top;
+      p->LayoutSettingsControls();
+    }
     return 0;
   }
 
@@ -9158,6 +9200,63 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       // Update checkbox and edit
       SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, BST_UNCHECKED, 0);
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), L"0.020");
+      return 0;
+    }
+
+    if (id == IDC_MW_RESET_ALL && code == BN_CLICKED) {
+      p->ResetToFactory(hWnd);
+      return 0;
+    }
+
+    if (id == IDC_MW_SAVE_DEFAULTS && code == BN_CLICKED) {
+      p->SaveUserDefaults();
+      return 0;
+    }
+
+    if (id == IDC_MW_USER_RESET && code == BN_CLICKED) {
+      p->ResetToUserDefaults(hWnd);
+      return 0;
+    }
+
+    if (id == IDC_MW_FILE_ADD && code == BN_CLICKED) {
+      // Open folder picker
+      IFileDialog* pfd = NULL;
+      HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+      if (SUCCEEDED(hr)) {
+        DWORD opts;
+        pfd->GetOptions(&opts);
+        pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        pfd->SetTitle(L"Add Fallback Search Path");
+        if (SUCCEEDED(pfd->Show(hWnd))) {
+          IShellItem* psi;
+          if (SUCCEEDED(pfd->GetResult(&psi))) {
+            PWSTR pszPath = NULL;
+            if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+              std::wstring path(pszPath);
+              // Ensure trailing backslash
+              if (!path.empty() && path.back() != L'\\') path += L'\\';
+              p->m_fallbackPaths.push_back(path);
+              HWND hList = GetDlgItem(hWnd, IDC_MW_FILE_LIST);
+              if (hList) SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)path.c_str());
+              p->SaveFallbackPaths();
+              CoTaskMemFree(pszPath);
+            }
+            psi->Release();
+          }
+        }
+        pfd->Release();
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_FILE_REMOVE && code == BN_CLICKED) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_FILE_LIST);
+      int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
+      if (sel >= 0 && sel < (int)p->m_fallbackPaths.size()) {
+        p->m_fallbackPaths.erase(p->m_fallbackPaths.begin() + sel);
+        SendMessage(hList, LB_DELETESTRING, sel, 0);
+        p->SaveFallbackPaths();
+      }
       return 0;
     }
 
@@ -9411,9 +9510,9 @@ static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice
 }
 
 void CPlugin::OpenSettingsWindow() {
-  // If already open, bring to front
+  // If already open, bring to front (and move off fullscreen monitor if needed)
   if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
-    SetForegroundWindow(m_hSettingsWnd);
+    EnsureSettingsVisible();
     return;
   }
   if (m_bSettingsThreadRunning.load()) return;
@@ -9444,7 +9543,7 @@ void CPlugin::CreateSettingsWindowOnThread() {
   INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
   InitCommonControlsEx(&icex);
 
-  int wndW = 600, wndH = 550;
+  int wndW = m_nSettingsWndW, wndH = m_nSettingsWndH;
   int screenW = GetSystemMetrics(SM_CXSCREEN);
   int screenH = GetSystemMetrics(SM_CYSCREEN);
   int posX = (screenW - wndW) / 2;
@@ -9488,7 +9587,7 @@ void CPlugin::BuildSettingsControls() {
   if (!hw) return;
 
   // Clear previous page control lists
-  for (int i = 0; i < 4; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < 5; i++) m_settingsPageCtrls[i].clear();
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
@@ -9517,8 +9616,8 @@ void CPlugin::BuildSettingsControls() {
   SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)hFont, TRUE);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound" };
-  for (int i = 0; i < 4; i++) {
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files" };
+  for (int i = 0; i < 5; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
     ti.pszText = (LPWSTR)tabNames[i];
@@ -9604,7 +9703,10 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless));
   y += lineH + gap + 4;
-  PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 120, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 95, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, x + 168, y, 80, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, x + 252, y, 80, lineH, hFont));
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
@@ -9747,6 +9849,28 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(3, hCombo);
   }
 
+  // ====== PAGE 4: Files (created hidden) ======
+  y = tabTop + 10;
+
+  PAGE_CTRL(4, CreateLabel(hw, L"Fallback Search Paths:", x, y, rw, lineH, hFont, false));
+  y += lineH + 2;
+  {
+    HWND hList = CreateWindowExW(0, L"LISTBOX", L"",
+      WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
+      x, y, rw, 200, hw, (HMENU)(INT_PTR)IDC_MW_FILE_LIST,
+      GetModuleHandle(NULL), NULL);
+    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    // Populate from m_fallbackPaths
+    for (auto& p : m_fallbackPaths)
+      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.c_str());
+    PAGE_CTRL(4, hList);
+  }
+  y += 204;
+  PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, x, y, 70, lineH, hFont));
+  PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, x + 74, y, 70, lineH, hFont));
+  y += lineH + gap;
+  PAGE_CTRL(4, CreateLabel(hw, L"These paths are searched for textures and presets\nin addition to the built-in directories.", x, y, rw, lineH * 2, hFont, false));
+
   #undef PAGE_CTRL
 
   // Show only page 0 initially, hide all others
@@ -9754,7 +9878,7 @@ void CPlugin::BuildSettingsControls() {
 }
 
 void CPlugin::ShowSettingsPage(int page) {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     int cmd = (i == page) ? SW_SHOW : SW_HIDE;
     for (HWND h : m_settingsPageCtrls[i])
       ShowWindow(h, cmd);
@@ -9817,6 +9941,16 @@ void CPlugin::LayoutSettingsControls() {
     }
   }
 
+  // Stretch Files tab ListBox to fill available area
+  HWND hFileList = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_LIST);
+  if (hFileList) {
+    RECT r; GetWindowRect(hFileList, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    int listBottom = rcDisplay.bottom - 70;  // leave room for buttons + help text below
+    if (listBottom < r.top + 40) listBottom = r.top + 40;
+    MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
+  }
+
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
 }
 
@@ -9826,6 +9960,248 @@ void CPlugin::CloseSettingsWindow() {
   }
   if (m_settingsThread.joinable())
     m_settingsThread.join();
+}
+
+// ====== User Defaults & Fallback Paths ======
+
+void CPlugin::UpdateVisualUI(HWND hWnd) {
+  wchar_t buf[32];
+  SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, (int)(fOpacity * 100));
+  swprintf(buf, 32, L"%d%%", (int)(fOpacity * 100));
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, (int)(m_fRenderQuality * 100));
+  swprintf(buf, 32, L"%.2f", m_fRenderQuality);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, bQualityAuto ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%.2f", m_timeFactor);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), buf);
+  swprintf(buf, 32, L"%.2f", m_frameFactor);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), buf);
+  swprintf(buf, 32, L"%.2f", m_fpsFactor);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FPS_FACTOR), buf);
+  swprintf(buf, 32, L"%.2f", m_VisIntensity);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), buf);
+  swprintf(buf, 32, L"%.2f", m_VisShift);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), buf);
+  swprintf(buf, 32, L"%.0f", m_VisVersion);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), buf);
+  HWND hw = GetPluginWindow();
+  if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+  if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+}
+
+void CPlugin::UpdateColorsUI(HWND hWnd) {
+  wchar_t buf[32];
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, (int)(m_ColShiftHue * 100) + 100);
+  swprintf(buf, 32, L"%.2f", m_ColShiftHue);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, (int)(m_ColShiftSaturation * 100) + 100);
+  swprintf(buf, 32, L"%.2f", m_ColShiftSaturation);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, (int)(m_ColShiftBrightness * 100) + 100);
+  swprintf(buf, 32, L"%.2f", m_ColShiftBrightness);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
+  float gamma = m_pState ? m_pState->m_fGammaAdj.eval(-1) : 2.0f;
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_GAMMA), TBM_SETPOS, TRUE, (int)(gamma * 10));
+  swprintf(buf, 32, L"%.1f", gamma);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, m_AutoHue ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%.3f", m_AutoHueSeconds);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), buf);
+}
+
+void CPlugin::ResetToFactory(HWND hWnd) {
+  // Visual defaults
+  fOpacity = 1.0f;
+  m_fRenderQuality = 1.0f;
+  bQualityAuto = false;
+  m_timeFactor = 1.0f;
+  m_frameFactor = 1.0f;
+  m_fpsFactor = 1.0f;
+  m_VisIntensity = 1.0f;
+  m_VisShift = 0.0f;
+  m_VisVersion = 1.0f;
+  // Color defaults
+  m_ColShiftHue = 0.0f;
+  m_ColShiftSaturation = 0.0f;
+  m_ColShiftBrightness = 0.0f;
+  if (m_pState) m_pState->m_fGammaAdj = 2.0f;
+  m_AutoHue = false;
+  m_AutoHueSeconds = 0.02f;
+  // Update UI
+  UpdateVisualUI(hWnd);
+  UpdateColorsUI(hWnd);
+}
+
+void CPlugin::SaveUserDefaults() {
+  // Copy current values with safety clamps
+  m_udOpacity = max(fOpacity, 0.5f);
+  m_udRenderQuality = m_fRenderQuality;
+  m_udTimeFactor = m_timeFactor;
+  m_udFrameFactor = m_frameFactor;
+  m_udFpsFactor = m_fpsFactor;
+  m_udVisIntensity = m_VisIntensity;
+  m_udVisShift = m_VisShift;
+  m_udVisVersion = m_VisVersion;
+  m_udHue = m_ColShiftHue;
+  m_udSaturation = m_ColShiftSaturation;
+  m_udBrightness = max(m_ColShiftBrightness, -1.0f);
+  m_udGamma = max(m_pState ? m_pState->m_fGammaAdj.eval(-1) : 2.0f, 0.5f);
+  m_bUserDefaultsSaved = true;
+
+  // Write to INI
+  wchar_t* pIni = GetConfigIniFile();
+  wchar_t buf[32];
+  WritePrivateProfileStringW(L"UserDefaults", L"Saved", L"1", pIni);
+  #define WRITE_UD_FLOAT(key, val) swprintf(buf, 32, L"%.4f", val); WritePrivateProfileStringW(L"UserDefaults", key, buf, pIni)
+  WRITE_UD_FLOAT(L"Opacity", m_udOpacity);
+  WRITE_UD_FLOAT(L"RenderQuality", m_udRenderQuality);
+  WRITE_UD_FLOAT(L"TimeFactor", m_udTimeFactor);
+  WRITE_UD_FLOAT(L"FrameFactor", m_udFrameFactor);
+  WRITE_UD_FLOAT(L"FpsFactor", m_udFpsFactor);
+  WRITE_UD_FLOAT(L"VisIntensity", m_udVisIntensity);
+  WRITE_UD_FLOAT(L"VisShift", m_udVisShift);
+  WRITE_UD_FLOAT(L"VisVersion", m_udVisVersion);
+  WRITE_UD_FLOAT(L"Hue", m_udHue);
+  WRITE_UD_FLOAT(L"Saturation", m_udSaturation);
+  WRITE_UD_FLOAT(L"Brightness", m_udBrightness);
+  WRITE_UD_FLOAT(L"Gamma", m_udGamma);
+  #undef WRITE_UD_FLOAT
+}
+
+void CPlugin::LoadUserDefaults() {
+  wchar_t* pIni = GetConfigIniFile();
+  wchar_t buf[32];
+  m_bUserDefaultsSaved = GetPrivateProfileIntW(L"UserDefaults", L"Saved", 0, pIni) != 0;
+  if (!m_bUserDefaultsSaved) return;
+
+  #define READ_UD_FLOAT(key, dest, def) GetPrivateProfileStringW(L"UserDefaults", key, L"", buf, 32, pIni); dest = buf[0] ? (float)_wtof(buf) : def
+  READ_UD_FLOAT(L"Opacity", m_udOpacity, 1.0f);
+  READ_UD_FLOAT(L"RenderQuality", m_udRenderQuality, 1.0f);
+  READ_UD_FLOAT(L"TimeFactor", m_udTimeFactor, 1.0f);
+  READ_UD_FLOAT(L"FrameFactor", m_udFrameFactor, 1.0f);
+  READ_UD_FLOAT(L"FpsFactor", m_udFpsFactor, 1.0f);
+  READ_UD_FLOAT(L"VisIntensity", m_udVisIntensity, 1.0f);
+  READ_UD_FLOAT(L"VisShift", m_udVisShift, 0.0f);
+  READ_UD_FLOAT(L"VisVersion", m_udVisVersion, 1.0f);
+  READ_UD_FLOAT(L"Hue", m_udHue, 0.0f);
+  READ_UD_FLOAT(L"Saturation", m_udSaturation, 0.0f);
+  READ_UD_FLOAT(L"Brightness", m_udBrightness, 0.0f);
+  READ_UD_FLOAT(L"Gamma", m_udGamma, 2.0f);
+  #undef READ_UD_FLOAT
+}
+
+void CPlugin::ResetToUserDefaults(HWND hWnd) {
+  if (!m_bUserDefaultsSaved) {
+    ResetToFactory(hWnd);
+    return;
+  }
+  // Visual
+  fOpacity = m_udOpacity;
+  m_fRenderQuality = m_udRenderQuality;
+  bQualityAuto = false;
+  m_timeFactor = m_udTimeFactor;
+  m_frameFactor = m_udFrameFactor;
+  m_fpsFactor = m_udFpsFactor;
+  m_VisIntensity = m_udVisIntensity;
+  m_VisShift = m_udVisShift;
+  m_VisVersion = m_udVisVersion;
+  // Colors
+  m_ColShiftHue = m_udHue;
+  m_ColShiftSaturation = m_udSaturation;
+  m_ColShiftBrightness = m_udBrightness;
+  if (m_pState) m_pState->m_fGammaAdj = m_udGamma;
+  m_AutoHue = false;
+  m_AutoHueSeconds = 0.02f;
+  // Update UI
+  UpdateVisualUI(hWnd);
+  UpdateColorsUI(hWnd);
+}
+
+void CPlugin::SaveFallbackPaths() {
+  wchar_t* pIni = GetConfigIniFile();
+  wchar_t buf[32];
+  swprintf(buf, 32, L"%d", (int)m_fallbackPaths.size());
+  WritePrivateProfileStringW(L"FallbackPaths", L"Count", buf, pIni);
+  for (int i = 0; i < (int)m_fallbackPaths.size(); i++) {
+    wchar_t key[32];
+    swprintf(key, 32, L"Path%d", i);
+    WritePrivateProfileStringW(L"FallbackPaths", key, m_fallbackPaths[i].c_str(), pIni);
+  }
+  // Clean up old entries beyond current count
+  for (int i = (int)m_fallbackPaths.size(); i < 20; i++) {
+    wchar_t key[32];
+    swprintf(key, 32, L"Path%d", i);
+    WritePrivateProfileStringW(L"FallbackPaths", key, NULL, pIni);
+  }
+}
+
+void CPlugin::LoadFallbackPaths() {
+  wchar_t* pIni = GetConfigIniFile();
+  int count = GetPrivateProfileIntW(L"FallbackPaths", L"Count", 0, pIni);
+  m_fallbackPaths.clear();
+  for (int i = 0; i < count && i < 20; i++) {
+    wchar_t key[32], val[MAX_PATH] = {};
+    swprintf(key, 32, L"Path%d", i);
+    GetPrivateProfileStringW(L"FallbackPaths", key, L"", val, MAX_PATH, pIni);
+    if (val[0])
+      m_fallbackPaths.push_back(val);
+  }
+}
+
+// ====== Settings Fullscreen Awareness ======
+
+struct EnumMonitorData {
+  HMONITOR hExclude;   // monitor to skip (the one render is on)
+  RECT     rcResult;   // work area of first alternate monitor found
+  bool     bFound;
+};
+
+static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
+  EnumMonitorData* d = (EnumMonitorData*)lp;
+  if (hMon == d->hExclude) return TRUE; // skip render monitor
+  MONITORINFO mi = { sizeof(mi) };
+  if (GetMonitorInfo(hMon, &mi)) {
+    d->rcResult = mi.rcWork;
+    d->bFound = true;
+    return FALSE; // stop enumerating
+  }
+  return TRUE;
+}
+
+void CPlugin::EnsureSettingsVisible() {
+  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd) || !IsWindowVisible(m_hSettingsWnd))
+    return;
+
+  HWND hRender = GetPluginWindow();
+  if (!hRender) return;
+
+  HMONITOR hRenderMon = MonitorFromWindow(hRender, MONITOR_DEFAULTTONEAREST);
+  HMONITOR hSettingsMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);
+
+  // Only act if both windows are on the same monitor AND render is fullscreen
+  if (hRenderMon != hSettingsMon || !IsBorderlessFullscreen(hRender)) {
+    SetForegroundWindow(m_hSettingsWnd);
+    return;
+  }
+
+  // Try to find an alternate monitor
+  EnumMonitorData emd = {};
+  emd.hExclude = hRenderMon;
+  emd.bFound = false;
+  EnumDisplayMonitors(NULL, NULL, FindAltMonitorProc, (LPARAM)&emd);
+
+  if (emd.bFound) {
+    // Move settings window to center of the alternate monitor's work area
+    int monW = emd.rcResult.right - emd.rcResult.left;
+    int monH = emd.rcResult.bottom - emd.rcResult.top;
+    int wx = emd.rcResult.left + (monW - m_nSettingsWndW) / 2;
+    int wy = emd.rcResult.top + (monH - m_nSettingsWndH) / 2;
+    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, wx, wy, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
+  } else {
+    // Single monitor — just bring to foreground
+    SetForegroundWindow(m_hSettingsWnd);
+  }
 }
 
 // ====== Resource Viewer ======
@@ -9953,12 +10329,28 @@ LRESULT CALLBACK CPlugin::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPa
         item.pszText = szPath;
         item.cchTextMax = 1024;
         SendMessageW(p->m_hResourceList, LVM_GETITEMTEXTW, sel, (LPARAM)&item);
-        if (szPath[0] && OpenClipboard(hWnd)) {
+
+        // For procedural resources, copy Name + Type + Details instead of path
+        wchar_t szClip[2048] = {};
+        if (!wcscmp(szPath, L"(procedural)") || !wcscmp(szPath, L"(render target)")) {
+          wchar_t szType[128] = {}, szName[256] = {}, szDetails[128] = {};
+          item.iSubItem = 1; item.pszText = szType; item.cchTextMax = 128;
+          SendMessageW(p->m_hResourceList, LVM_GETITEMTEXTW, sel, (LPARAM)&item);
+          item.iSubItem = 2; item.pszText = szName; item.cchTextMax = 256;
+          SendMessageW(p->m_hResourceList, LVM_GETITEMTEXTW, sel, (LPARAM)&item);
+          item.iSubItem = 4; item.pszText = szDetails; item.cchTextMax = 128;
+          SendMessageW(p->m_hResourceList, LVM_GETITEMTEXTW, sel, (LPARAM)&item);
+          swprintf(szClip, 2048, L"%s\t%s\t%s", szName, szType, szDetails);
+        } else {
+          lstrcpyW(szClip, szPath);
+        }
+
+        if (szClip[0] && OpenClipboard(hWnd)) {
           EmptyClipboard();
-          size_t len = (wcslen(szPath) + 1) * sizeof(wchar_t);
+          size_t len = (wcslen(szClip) + 1) * sizeof(wchar_t);
           HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
           if (hMem) {
-            memcpy(GlobalLock(hMem), szPath, len);
+            memcpy(GlobalLock(hMem), szClip, len);
             GlobalUnlock(hMem);
             SetClipboardData(CF_UNICODETEXT, hMem);
           }
@@ -10161,6 +10553,16 @@ void CPlugin::PopulateResourceViewer() {
               pathFound = true;
               break;
             }
+            // Search fallback paths
+            for (auto& fbPath : m_fallbackPaths) {
+              swprintf(szTry, MAX_PATH, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
+                lstrcpyW(szFullPath, szTry);
+                pathFound = true;
+                break;
+              }
+            }
+            if (pathFound) break;
           }
           if (!pathFound) {
             // Show expected primary search path for missing textures
