@@ -615,9 +615,9 @@ int CPluginShell::AllocateDX9Stuff() {
   if (!m_vj_mode) {
     m_text.Finish();
     m_text.Init(GetDX12Device(), nullptr, 1);
-    // Phase 6: wire GDI→DX12 text rendering with the GDI fonts from InitGDIStuff()
+    // D2D text rendering via D3D11on12 + DirectWrite
     if (m_lpDX)
-      m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS);
+      m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
   }
 
   return ret;
@@ -735,8 +735,12 @@ void CPluginShell::OnUserResizeWindow() {
         }
         SetVariableBackBuffer(newW, newH);
         UpdateBackBufferTracking(newW, newH);
+        // Release D2D wrapped resources before swap chain resize
+        m_text.ReleaseBackBufferResources();
         // DX12: resize the swap chain instead of resetting the device
         m_lpDX->ResizeSwapChain(newW, newH);
+        // Re-wrap new back buffers for D2D
+        m_text.WrapBackBuffers();
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
       if (!AllocateDX9Stuff()) {
@@ -1057,7 +1061,7 @@ void CPluginShell::READ_FONT(int n) {
 
   m_fontinfo[n].bBold = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontBold", iniIndex), m_fontinfo[n].bBold, m_szConfigIniFile);
   m_fontinfo[n].bItalic = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontItalic", iniIndex), m_fontinfo[n].bItalic, m_szConfigIniFile);
-  m_fontinfo[n].bAntiAliased = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontAA", iniIndex), m_fontinfo[n].bItalic, m_szConfigIniFile);
+  m_fontinfo[n].bAntiAliased = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontAA", iniIndex), m_fontinfo[n].bAntiAliased, m_szConfigIniFile);
 
   if (n == SIMPLE_FONT) {
     m_fontinfo[n].R = SIMPLE_FONT_DEFAULT_COLOR_R;
@@ -1364,9 +1368,7 @@ void CPluginShell::DrawAndDisplay(int redraw) {
       m_left_edge, m_right_edge);
     RenderPlaylist();
 
-    m_text.DrawNow();
-
-    // DX12 screenshot: copy back buffer to readback resource before EndFrame
+    // DX12 screenshot: copy back buffer to readback resource before command list close
     ComPtr<ID3D12Resource> screenshotReadback;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT screenshotLayout = {};
     UINT screenshotWidth = 0, screenshotHeight = 0;
@@ -1417,7 +1419,7 @@ void CPluginShell::DrawAndDisplay(int redraw) {
 
         m_lpDX->m_commandList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 
-        // Transition back COPY_SOURCE → RENDER_TARGET (EndFrame will do RT → PRESENT)
+        // Transition back COPY_SOURCE → RENDER_TARGET
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         m_lpDX->m_commandList->ResourceBarrier(1, &barrier);
@@ -1427,7 +1429,14 @@ void CPluginShell::DrawAndDisplay(int redraw) {
       }
     }
 
-    // EndFrame: transitions back buffer to PRESENT, executes command list, calls Present()
+    // Close + execute the DX12 command list (back buffer stays in RENDER_TARGET state)
+    m_lpDX->ExecuteCommandList();
+
+    // D2D text rendering via D3D11on12 — renders directly to back buffer,
+    // then transitions it from RENDER_TARGET → PRESENT on release.
+    m_text.DrawNow();
+
+    // Present + advance to next frame
     m_lpDX->EndFrame();
 
     // Save screenshot after GPU completes the copy
@@ -2794,8 +2803,12 @@ void CPluginShell::ResetBufferAndFonts() {
   int newH = m_lpDX->m_client_height;
   SetVariableBackBuffer(newW, newH);
   UpdateBackBufferTracking(newW, newH);
+  // Release D2D wrapped resources before swap chain resize
+  m_text.ReleaseBackBufferResources();
   // DX12: resize swap chain instead of device reset
   m_lpDX->ResizeSwapChain(newW, newH);
+  // Re-wrap new back buffers for D2D
+  m_text.WrapBackBuffers();
 
   if (newW != 0 && newH != 0) {
     CleanUpFonts();

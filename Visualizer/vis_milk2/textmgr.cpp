@@ -27,32 +27,56 @@ IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISI
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-// Phase 6: CTextManager renders text via GDI to a DIB section, then uploads
-// to a DX12 texture and composites with premultiplied alpha blending.
+// CTextManager: D3D11on12 + Direct2D + DirectWrite text rendering.
+// Replaces GDI→DIB→DX12 pipeline with GPU-accelerated text.
 
 #include "textmgr.h"
 #include "dxcontext.h"
-#include "dx12pipeline.h"
+#include "pluginshell.h"  // td_fontinfo
 #include "support.h"
-#include <vector>
+#include <cmath>
+
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
 
 #define MAX_MSG_CHARS (65536*2)
 wchar_t g_szMsgPool[2][MAX_MSG_CHARS];
+
+// Convert D3DCOLOR (0xAARRGGBB) to D2D1_COLOR_F
+static D2D1_COLOR_F D3DColorToD2D(DWORD d3dColor) {
+  float a = ((d3dColor >> 24) & 0xFF) / 255.0f;
+  float r = ((d3dColor >> 16) & 0xFF) / 255.0f;
+  float g = ((d3dColor >>  8) & 0xFF) / 255.0f;
+  float b = ((d3dColor >>  0) & 0xFF) / 255.0f;
+  return D2D1::ColorF(r, g, b, a);
+}
+
+// Map GDI DT_ flags to DirectWrite alignment on a text format
+static void ApplyDWriteAlignment(IDWriteTextFormat* fmt, DWORD dtFlags) {
+  // Horizontal alignment
+  if (dtFlags & DT_CENTER)
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+  else if (dtFlags & DT_RIGHT)
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+  else
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
+  // Word wrapping
+  if (dtFlags & DT_SINGLELINE)
+    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+  else
+    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+}
 
 CTextManager::CTextManager()
   : m_lpDevice(nullptr)
   , m_lpTextSurface(nullptr)
   , m_blit_additively(0)
   , m_lpDX(nullptr)
-  , m_pFonts(nullptr)
   , m_nFonts(0)
-  , m_memDC(nullptr)
-  , m_hDIB(nullptr)
-  , m_dibBits(nullptr)
-  , m_texW(0)
-  , m_texH(0)
-  , m_dirty(false)
-  , m_dx12Ready(false)
+  , m_pFontInfo(nullptr)
+  , m_d2dReady(false)
 {
   m_b = 0;
   m_nMsg[0] = 0;
@@ -85,151 +109,222 @@ int CTextManager::DecodeFontIndex(void* pFont) {
   return idx;
 }
 
-void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts) {
-  m_lpDX   = lpDX;
-  m_pFonts = pFonts;
-  m_nFonts = nFonts;
+void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pFontInfo) {
+  m_lpDX      = lpDX;
+  m_nFonts    = nFonts;
+  m_pFontInfo = pFontInfo;
 
   if (!lpDX) return;
-  UINT w = (UINT)lpDX->m_client_width;
-  UINT h = (UINT)lpDX->m_client_height;
-  if (w > 0 && h > 0)
-    CreateDX12Resources(w, h);
+  InitD2D();
+}
+
+bool CTextManager::InitD2D() {
+  if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandQueue) return false;
+
+  // 1. Create D3D11On12 device (shares DX12 device + command queue)
+  UINT d3d11Flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#ifdef _DEBUG
+  d3d11Flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+  IUnknown* cmdQueues[] = { m_lpDX->m_commandQueue.Get() };
+  ComPtr<ID3D11Device> d3d11Device;
+  HRESULT hr = D3D11On12CreateDevice(
+    m_lpDX->m_device.Get(),
+    d3d11Flags,
+    nullptr, 0,          // feature levels (default)
+    cmdQueues, 1,        // command queue
+    0,                   // node mask
+    &d3d11Device,
+    &m_d3d11Context,
+    nullptr);
+  if (FAILED(hr)) {
+    OutputDebugStringA("CTextManager: D3D11On12CreateDevice FAILED\n");
+    return false;
+  }
+
+  hr = d3d11Device.As(&m_d3d11Device);
+  hr = d3d11Device.As(&m_d3d11On12Device);
+  if (!m_d3d11On12Device) {
+    OutputDebugStringA("CTextManager: QueryInterface ID3D11On12Device FAILED\n");
+    return false;
+  }
+
+  // 2. Create D2D factory
+  D2D1_FACTORY_OPTIONS d2dOpts = {};
+#ifdef _DEBUG
+  d2dOpts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+#endif
+  hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    __uuidof(ID2D1Factory3), &d2dOpts,
+    reinterpret_cast<void**>(m_d2dFactory.GetAddressOf()));
+  if (FAILED(hr)) {
+    OutputDebugStringA("CTextManager: D2D1CreateFactory FAILED\n");
+    return false;
+  }
+
+  // 3. Create D2D device + context from DXGI device
+  ComPtr<IDXGIDevice> dxgiDevice;
+  m_d3d11Device.As(&dxgiDevice);
+
+  ComPtr<ID2D1Device> d2dDevice;
+  hr = m_d2dFactory->CreateDevice(dxgiDevice.Get(), &d2dDevice);
+  if (FAILED(hr)) {
+    OutputDebugStringA("CTextManager: D2D CreateDevice FAILED\n");
+    return false;
+  }
+  d2dDevice.As(&m_d2dDevice);
+
+  ComPtr<ID2D1DeviceContext> d2dCtx;
+  hr = m_d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &d2dCtx);
+  if (FAILED(hr)) {
+    OutputDebugStringA("CTextManager: D2D CreateDeviceContext FAILED\n");
+    return false;
+  }
+  d2dCtx.As(&m_d2dContext);
+
+  // 4. Create DirectWrite factory
+  hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+    __uuidof(IDWriteFactory5),
+    reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
+  if (FAILED(hr)) {
+    // Try base factory version
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+      __uuidof(IDWriteFactory),
+      reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
+    if (FAILED(hr)) {
+      OutputDebugStringA("CTextManager: DWriteCreateFactory FAILED\n");
+      return false;
+    }
+  }
+
+  // 5. Create reusable brush
+  m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &m_brush);
+
+  // 6. Create DirectWrite text formats from font info
+  CreateDWriteFormats();
+
+  // 7. Wrap back buffers for D2D rendering
+  WrapBackBuffers();
+
+  m_d2dReady = true;
+  OutputDebugStringA("CTextManager: D2D initialized successfully\n");
+  return true;
+}
+
+void CTextManager::CreateDWriteFormats() {
+  if (!m_dwriteFactory || !m_pFontInfo) return;
+
+  td_fontinfo* fontInfo = (td_fontinfo*)m_pFontInfo;
+
+  for (int i = 0; i < m_nFonts && i < MAX_TEXT_FONTS; i++) {
+    float fontSize = (float)abs(fontInfo[i].nSize);
+    if (fontSize <= 0) fontSize = 16.0f;
+
+    DWRITE_FONT_WEIGHT weight = fontInfo[i].bBold
+      ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL;
+    DWRITE_FONT_STYLE style = fontInfo[i].bItalic
+      ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+
+    HRESULT hr = m_dwriteFactory->CreateTextFormat(
+      fontInfo[i].szFace,
+      nullptr,
+      weight,
+      style,
+      DWRITE_FONT_STRETCH_NORMAL,
+      fontSize,
+      L"en-us",
+      &m_dwFormats[i]);
+
+    if (FAILED(hr)) {
+      char buf[256];
+      sprintf(buf, "CTextManager: CreateTextFormat failed for font %d hr=0x%08X\n", i, (unsigned)hr);
+      OutputDebugStringA(buf);
+    }
+  }
+}
+
+void CTextManager::WrapBackBuffers() {
+  ReleaseBackBufferResources();
+  if (!m_d3d11On12Device || !m_lpDX) return;
+
+  for (UINT i = 0; i < 2; i++) {
+    if (!m_lpDX->m_renderTargets[i]) continue;
+
+    D3D11_RESOURCE_FLAGS d3d11Flags = {};
+    d3d11Flags.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+    HRESULT hr = m_d3d11On12Device->CreateWrappedResource(
+      m_lpDX->m_renderTargets[i].Get(),
+      &d3d11Flags,
+      D3D12_RESOURCE_STATE_RENDER_TARGET,  // state on acquire
+      D3D12_RESOURCE_STATE_PRESENT,        // state on release
+      IID_PPV_ARGS(&m_wrappedBackBuffers[i]));
+
+    if (FAILED(hr)) {
+      char buf[128];
+      sprintf(buf, "CTextManager: CreateWrappedResource[%u] FAILED hr=0x%08X\n", i, (unsigned)hr);
+      OutputDebugStringA(buf);
+      continue;
+    }
+
+    ComPtr<IDXGISurface> surface;
+    m_wrappedBackBuffers[i].As(&surface);
+    if (!surface) continue;
+
+    D2D1_BITMAP_PROPERTIES1 bmpProps = D2D1::BitmapProperties1(
+      D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+      D2D1::PixelFormat(DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    // Set DPI to 96 so DIPs = pixels (font sizes match CreateFontW pixel heights)
+    bmpProps.dpiX = 96.0f;
+    bmpProps.dpiY = 96.0f;
+
+    hr = m_d2dContext->CreateBitmapFromDxgiSurface(surface.Get(), &bmpProps,
+      &m_d2dRenderTargets[i]);
+    if (FAILED(hr)) {
+      char buf[128];
+      sprintf(buf, "CTextManager: CreateBitmapFromDxgiSurface[%u] FAILED hr=0x%08X\n", i, (unsigned)hr);
+      OutputDebugStringA(buf);
+    }
+  }
+}
+
+void CTextManager::ReleaseBackBufferResources() {
+  if (m_d2dContext) m_d2dContext->SetTarget(nullptr);
+  for (UINT i = 0; i < 2; i++) {
+    m_d2dRenderTargets[i].Reset();
+    m_wrappedBackBuffers[i].Reset();
+  }
+  if (m_d3d11Context) m_d3d11Context->Flush();
+}
+
+void CTextManager::CleanupD2D() {
+  m_d2dReady = false;
+  ReleaseBackBufferResources();
+  m_brush.Reset();
+  for (int i = 0; i < MAX_TEXT_FONTS; i++)
+    m_dwFormats[i].Reset();
+  m_dwriteFactory.Reset();
+  m_d2dContext.Reset();
+  m_d2dDevice.Reset();
+  m_d2dFactory.Reset();
+  m_d3d11On12Device.Reset();
+  m_d3d11Context.Reset();
+  m_d3d11Device.Reset();
 }
 
 void CTextManager::CleanupDX12() {
-  DestroyDX12Resources();
+  CleanupD2D();
   m_lpDX = nullptr;
-  m_pFonts = nullptr;
   m_nFonts = 0;
+  m_pFontInfo = nullptr;
 }
 
 void CTextManager::OnResize(int newW, int newH) {
   if (newW <= 0 || newH <= 0) return;
-  if ((UINT)newW == m_texW && (UINT)newH == m_texH) return;
-  DestroyDX12Resources();
-  if (m_lpDX)
-    CreateDX12Resources((UINT)newW, (UINT)newH);
-}
-
-bool CTextManager::CreateDX12Resources(UINT w, UINT h) {
-  if (!m_lpDX || !m_lpDX->m_device) return false;
-
-  auto* device = m_lpDX->m_device.Get();
-  m_texW = w;
-  m_texH = h;
-
-  // Create GDI DIB section (32-bit BGRA, top-down)
-  BITMAPINFO bmi = {};
-  bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth       = w;
-  bmi.bmiHeader.biHeight      = -(int)h;  // top-down
-  bmi.bmiHeader.biPlanes      = 1;
-  bmi.bmiHeader.biBitCount    = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-
-  m_memDC = CreateCompatibleDC(nullptr);
-  if (!m_memDC) return false;
-
-  m_hDIB = CreateDIBSection(m_memDC, &bmi, DIB_RGB_COLORS, (void**)&m_dibBits, nullptr, 0);
-  if (!m_hDIB || !m_dibBits) {
-    DeleteDC(m_memDC);
-    m_memDC = nullptr;
-    return false;
-  }
-  SelectObject(m_memDC, m_hDIB);
-  SetBkMode(m_memDC, TRANSPARENT);
-
-  // Clear to transparent
-  memset(m_dibBits, 0, (size_t)w * h * 4);
-
-  // Create DX12 default-heap texture
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  desc.Width              = w;
-  desc.Height             = h;
-  desc.DepthOrArraySize   = 1;
-  desc.MipLevels          = 1;
-  desc.Format             = DXGI_FORMAT_B8G8R8A8_UNORM;
-  desc.SampleDesc.Count   = 1;
-  desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
-
-  D3D12_HEAP_PROPERTIES heapProps = {};
-  heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
-
-  HRESULT hr = device->CreateCommittedResource(
-      &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-      D3D12_RESOURCE_STATE_COPY_DEST,
-      nullptr, IID_PPV_ARGS(&m_dx12Tex.resource));
-  if (FAILED(hr)) {
-    DeleteObject(m_hDIB); m_hDIB = nullptr;
-    DeleteDC(m_memDC); m_memDC = nullptr;
-    return false;
-  }
-
-  m_dx12Tex.width  = w;
-  m_dx12Tex.height = h;
-  m_dx12Tex.format = DXGI_FORMAT_B8G8R8A8_UNORM;
-  m_dx12Tex.currentState = D3D12_RESOURCE_STATE_COPY_DEST;
-
-  // Allocate SRV descriptor
-  D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
-  m_dx12Tex.srvIndex = m_lpDX->m_nextFreeSrvSlot;
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Format                  = DXGI_FORMAT_B8G8R8A8_UNORM;
-  srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Texture2D.MipLevels     = 1;
-  device->CreateShaderResourceView(m_dx12Tex.resource.Get(), &srvDesc, srvCpu);
-  m_lpDX->AllocateSrvGpu();
-
-  // Create 16-entry binding block for texture binding
-  m_lpDX->CreateBindingBlockForTexture(m_dx12Tex);
-
-  // Create upload buffer (row-pitch aligned)
-  UINT rowPitch = (w * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
-                  & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
-  UINT64 uploadSize = (UINT64)rowPitch * h;
-
-  D3D12_HEAP_PROPERTIES uploadHeapProps = {};
-  uploadHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-  D3D12_RESOURCE_DESC bufDesc = {};
-  bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-  bufDesc.Width            = uploadSize;
-  bufDesc.Height           = 1;
-  bufDesc.DepthOrArraySize = 1;
-  bufDesc.MipLevels        = 1;
-  bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
-  bufDesc.SampleDesc.Count = 1;
-  bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-  hr = device->CreateCommittedResource(
-      &uploadHeapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
-      D3D12_RESOURCE_STATE_GENERIC_READ,
-      nullptr, IID_PPV_ARGS(&m_uploadBuf));
-  if (FAILED(hr)) {
-    m_dx12Tex.Reset();
-    DeleteObject(m_hDIB); m_hDIB = nullptr;
-    DeleteDC(m_memDC); m_memDC = nullptr;
-    return false;
-  }
-
-  m_dx12Ready = true;
-  m_dirty = false;
-  return true;
-}
-
-void CTextManager::DestroyDX12Resources() {
-  m_dx12Ready = false;
-  m_uploadBuf.Reset();
-  m_dx12Tex.Reset();
-  if (m_hDIB) { DeleteObject(m_hDIB); m_hDIB = nullptr; }
-  if (m_memDC) { DeleteDC(m_memDC); m_memDC = nullptr; }
-  m_dibBits = nullptr;
-  m_texW = 0;
-  m_texH = 0;
+  // Back buffers are about to be resized — release wrapped resources.
+  // Caller must call WrapBackBuffers() after ResizeSwapChain completes.
+  ReleaseBackBufferResources();
 }
 
 void CTextManager::ClearAll() {
@@ -263,23 +358,10 @@ int CTextManager::DrawText(void* pFont, char* szText, RECT* pRect, DWORD flags, 
 int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD flags, DWORD color, bool bBox, DWORD boxColor) {
   if (!pRect) return 0;
 
-  // For DT_CALCRECT: measure text immediately using GDI and return the height.
-  // This is needed because callers use the result for layout calculations.
+  // For DT_CALCRECT: measure text immediately via DirectWrite and return.
   if (flags & DT_CALCRECT) {
-    if (m_memDC) {
-      int fontIdx = DecodeFontIndex(pFont);
-      HGDIOBJ oldFont = nullptr;
-      if (fontIdx >= 0 && fontIdx < m_nFonts && m_pFonts && m_pFonts[fontIdx])
-        oldFont = SelectObject(m_memDC, m_pFonts[fontIdx]);
-
-      RECT rc = *pRect;
-      int h = ::DrawTextW(m_memDC, szText ? szText : L"", -1, &rc, flags);
-      *pRect = rc;
-
-      if (oldFont) SelectObject(m_memDC, oldFont);
-      return h;
-    }
-    return 0;
+    int fontIdx = DecodeFontIndex(pFont);
+    return MeasureTextDW(fontIdx, szText, pRect, flags);
   }
 
   // Queue the text entry for rendering in DrawNow()
@@ -306,212 +388,117 @@ int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD fla
     }
   }
 
-  // Measure actual text height via GDI so callers can advance layout correctly.
-  // Without this, returning (pRect->bottom - pRect->top) gives the full remaining
-  // rect height, causing only the first line to be positioned correctly.
-  if (m_memDC) {
-    int fontIdx = DecodeFontIndex(pFont);
-    HGDIOBJ oldFont = nullptr;
-    if (fontIdx >= 0 && fontIdx < m_nFonts && m_pFonts && m_pFonts[fontIdx])
-      oldFont = SelectObject(m_memDC, m_pFonts[fontIdx]);
-
-    RECT rc = *pRect;
-    int h = ::DrawTextW(m_memDC, szText, -1, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
-
-    if (oldFont) SelectObject(m_memDC, oldFont);
-    return h;
-  }
-
-  return pRect->bottom - pRect->top;
+  // Measure actual text height via DirectWrite so callers can advance layout.
+  int fontIdx = DecodeFontIndex(pFont);
+  RECT rc = *pRect;
+  return MeasureTextDW(fontIdx, szText, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
 }
 
-void CTextManager::RenderQueuedMessages() {
-  if (!m_memDC || !m_dibBits) return;
+int CTextManager::MeasureTextDW(int fontIdx, const wchar_t* text, RECT* pRect, DWORD flags) {
+  if (!m_dwriteFactory || fontIdx < 0 || fontIdx >= m_nFonts || !m_dwFormats[fontIdx] || !pRect)
+    return 0;
 
-  // Clear DIB to fully transparent
-  memset(m_dibBits, 0, (size_t)m_texW * m_texH * 4);
+  float maxWidth = (float)(pRect->right - pRect->left);
+  if (maxWidth <= 0) maxWidth = 100000.f;
+  float maxHeight = (float)(pRect->bottom - pRect->top);
+  if (maxHeight <= 0) maxHeight = 100000.f;
 
-  int readBuf = 1 - m_b;  // read from the buffer that was filled last frame
-  int nMsgs = m_nMsg[readBuf];
-  if (nMsgs == 0) return;
+  const wchar_t* str = text ? text : L"";
+  UINT32 strLen = (UINT32)wcslen(str);
 
-  m_dirty = true;
+  IDWriteTextLayout* layoutRaw = nullptr;
+  HRESULT hr = m_dwriteFactory->CreateTextLayout(
+    str, strLen, m_dwFormats[fontIdx].Get(), maxWidth, maxHeight, &layoutRaw);
+  ComPtr<IDWriteTextLayout> layout;
+  layout.Attach(layoutRaw);
+  if (FAILED(hr) || !layout) return 0;
 
-  for (int i = 0; i < nMsgs; i++) {
-    td_string& entry = m_msg[readBuf][i];
+  // Apply word wrapping based on DT_ flags
+  if (flags & DT_SINGLELINE)
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+  else
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
 
-    if (!entry.pfont) {
-      // Box entry (no font = dark box)
-      BYTE a = (BYTE)((entry.bgColor >> 24) & 0xFF);
-      BYTE r = (BYTE)((entry.bgColor >> 16) & 0xFF);
-      BYTE g = (BYTE)((entry.bgColor >>  8) & 0xFF);
-      BYTE b = (BYTE)((entry.bgColor >>  0) & 0xFF);
+  DWRITE_TEXT_METRICS metrics;
+  layout->GetMetrics(&metrics);
 
-      // Clamp rect to texture bounds
-      LONG x0 = max(0L, entry.rect.left);
-      LONG y0 = max(0L, entry.rect.top);
-      LONG x1 = min((LONG)m_texW, entry.rect.right);
-      LONG y1 = min((LONG)m_texH, entry.rect.bottom);
+  pRect->right = pRect->left + (LONG)ceilf(metrics.widthIncludingTrailingWhitespace);
+  pRect->bottom = pRect->top + (LONG)ceilf(metrics.height);
 
-      for (LONG y = y0; y < y1; y++) {
-        for (LONG x = x0; x < x1; x++) {
-          UINT idx = (y * m_texW + x) * 4;
-          // Premultiplied alpha: store color * alpha
-          m_dibBits[idx + 0] = (BYTE)(b * a / 255);  // B
-          m_dibBits[idx + 1] = (BYTE)(g * a / 255);  // G
-          m_dibBits[idx + 2] = (BYTE)(r * a / 255);  // R
-          m_dibBits[idx + 3] = a;
-        }
-      }
-      continue;
-    }
-
-    // Text entry
-    int fontIdx = DecodeFontIndex(entry.pfont);
-    HGDIOBJ oldFont = nullptr;
-    if (fontIdx >= 0 && fontIdx < m_nFonts && m_pFonts && m_pFonts[fontIdx])
-      oldFont = SelectObject(m_memDC, m_pFonts[fontIdx]);
-
-    DWORD drawFlags = entry.flags & ~DT_CALCRECT;
-
-    // Extract RGB from ARGB color (D3DCOLOR format)
-    BYTE cr = (BYTE)((entry.color >> 16) & 0xFF);
-    BYTE cg = (BYTE)((entry.color >>  8) & 0xFF);
-    BYTE cb = (BYTE)((entry.color >>  0) & 0xFF);
-    SetTextColor(m_memDC, RGB(cr, cg, cb));
-
-    RECT rc = entry.rect;
-    ::DrawTextW(m_memDC, entry.msg, -1, &rc, drawFlags | DT_NOPREFIX);
-
-    if (oldFont) SelectObject(m_memDC, oldFont);
-  }
-
-  // Post-process: GDI renders colored text with A=0.
-  // Convert to premultiplied alpha: A = max(R,G,B), keep R,G,B as-is.
-  // Pixels already set by box rendering (A > 0) are left untouched.
-  BYTE* pixels = m_dibBits;
-  size_t totalPixels = (size_t)m_texW * m_texH;
-  for (size_t i = 0; i < totalPixels; i++) {
-    UINT idx = (UINT)(i * 4);
-    BYTE b = pixels[idx + 0];
-    BYTE g = pixels[idx + 1];
-    BYTE r = pixels[idx + 2];
-    BYTE a = pixels[idx + 3];
-    if (a == 0 && (r | g | b) != 0) {
-      // This pixel was drawn by GDI text (A=0 but has color).
-      // Set alpha to coverage (max channel value).
-      BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-      pixels[idx + 3] = intensity;
-    }
-  }
-
-  // Outline pass: dilate alpha to create a 1px dark outline around all text.
-  // This makes text readable on both light and dark backgrounds.
-  // Use a temporary copy of alpha to avoid read-after-write issues.
-  std::vector<BYTE> alphaMap(totalPixels);
-  for (size_t i = 0; i < totalPixels; i++)
-    alphaMap[i] = pixels[i * 4 + 3];
-
-  for (UINT y = 1; y < m_texH - 1; y++) {
-    for (UINT x = 1; x < m_texW - 1; x++) {
-      UINT i = y * m_texW + x;
-      if (alphaMap[i] > 0) continue;  // already has content
-
-      // Check 8-connected neighbors for text pixels
-      BYTE maxA = 0;
-      maxA = max(maxA, alphaMap[i - 1]);             // left
-      maxA = max(maxA, alphaMap[i + 1]);             // right
-      maxA = max(maxA, alphaMap[i - m_texW]);        // up
-      maxA = max(maxA, alphaMap[i + m_texW]);        // down
-      maxA = max(maxA, alphaMap[i - m_texW - 1]);    // up-left
-      maxA = max(maxA, alphaMap[i - m_texW + 1]);    // up-right
-      maxA = max(maxA, alphaMap[i + m_texW - 1]);    // down-left
-      maxA = max(maxA, alphaMap[i + m_texW + 1]);    // down-right
-      if (maxA > 32) {
-        // Set outline pixel to semi-transparent black (premultiplied)
-        BYTE oa = (BYTE)(maxA * 3 / 4);
-        UINT pi = i * 4;
-        pixels[pi + 0] = 0;   // B
-        pixels[pi + 1] = 0;   // G
-        pixels[pi + 2] = 0;   // R
-        pixels[pi + 3] = oa;
-      }
-    }
-  }
-}
-
-void CTextManager::UploadAndDraw() {
-  if (!m_dx12Ready || !m_lpDX || !m_dirty) return;
-  if (!m_dx12Tex.IsValid() || !m_uploadBuf) return;
-
-  UINT rowPitch = (m_texW * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
-                  & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
-
-  // Copy DIB to upload buffer with row-pitch alignment
-  BYTE* uploadPtr = nullptr;
-  m_uploadBuf->Map(0, nullptr, (void**)&uploadPtr);
-  if (uploadPtr) {
-    for (UINT y = 0; y < m_texH; y++) {
-      memcpy(uploadPtr + y * rowPitch, m_dibBits + y * m_texW * 4, m_texW * 4);
-    }
-    m_uploadBuf->Unmap(0, nullptr);
-  }
-
-  auto* cmdList = m_lpDX->m_commandList.Get();
-
-  // Transition to COPY_DEST, upload, then to PIXEL_SHADER_RESOURCE
-  m_lpDX->TransitionResource(m_dx12Tex, D3D12_RESOURCE_STATE_COPY_DEST);
-
-  D3D12_TEXTURE_COPY_LOCATION src = {};
-  src.pResource = m_uploadBuf.Get();
-  src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  src.PlacedFootprint.Offset = 0;
-  src.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
-  src.PlacedFootprint.Footprint.Width    = m_texW;
-  src.PlacedFootprint.Footprint.Height   = m_texH;
-  src.PlacedFootprint.Footprint.Depth    = 1;
-  src.PlacedFootprint.Footprint.RowPitch = rowPitch;
-
-  D3D12_TEXTURE_COPY_LOCATION dst = {};
-  dst.pResource = m_dx12Tex.resource.Get();
-  dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-  dst.SubresourceIndex = 0;
-
-  cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-
-  m_lpDX->TransitionResource(m_dx12Tex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-  // Draw fullscreen quad with premultiplied alpha blend
-  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
-  cmdList->SetDescriptorHeaps(1, heaps);
-  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
-
-  D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = m_lpDX->GetBindingBlockGpuHandle(m_dx12Tex);
-  cmdList->SetGraphicsRootDescriptorTable(1, srvHandle);
-
-  cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_PREMULALPHA_SPRITEVERTEX].Get());
-
-  SPRITEVERTEX verts[6];
-  DWORD white = 0xFFFFFFFF;
-  verts[0] = { -1.f,  1.f, 0, white, 0, 0 };
-  verts[1] = {  1.f,  1.f, 0, white, 1, 0 };
-  verts[2] = { -1.f, -1.f, 0, white, 0, 1 };
-  verts[3] = { -1.f, -1.f, 0, white, 0, 1 };
-  verts[4] = {  1.f,  1.f, 0, white, 1, 0 };
-  verts[5] = {  1.f, -1.f, 0, white, 1, 1 };
-
-  m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, verts, 6, sizeof(SPRITEVERTEX));
+  return (int)ceilf(metrics.height);
 }
 
 void CTextManager::DrawNow() {
-  // Render all queued text from the previous buffer to the DIB
-  RenderQueuedMessages();
+  int readBuf = 1 - m_b;
+  int nMsgs = m_nMsg[readBuf];
 
-  // Upload to GPU and draw the textured quad
-  UploadAndDraw();
+  if (!m_d2dReady || !m_lpDX) {
+    m_b = 1 - m_b;
+    ClearAll();
+    return;
+  }
+
+  UINT frameIdx = m_lpDX->m_frameIndex;
+  if (frameIdx >= 2 || !m_wrappedBackBuffers[frameIdx] || !m_d2dRenderTargets[frameIdx]) {
+    m_b = 1 - m_b;
+    ClearAll();
+    return;
+  }
+
+  // Acquire the wrapped back buffer for D2D access
+  ID3D11Resource* resources[] = { m_wrappedBackBuffers[frameIdx].Get() };
+  m_d3d11On12Device->AcquireWrappedResources(resources, 1);
+
+  if (nMsgs > 0) {
+    m_d2dContext->SetTarget(m_d2dRenderTargets[frameIdx].Get());
+    m_d2dContext->BeginDraw();
+
+    for (int i = 0; i < nMsgs; i++) {
+      td_string& entry = m_msg[readBuf][i];
+
+      if (!entry.pfont) {
+        // Box entry (no font = filled rectangle)
+        D2D1_COLOR_F boxColor = D3DColorToD2D(entry.bgColor);
+        m_brush->SetColor(boxColor);
+        D2D1_RECT_F rect = {
+          (float)entry.rect.left,  (float)entry.rect.top,
+          (float)entry.rect.right, (float)entry.rect.bottom };
+        m_d2dContext->FillRectangle(rect, m_brush.Get());
+        continue;
+      }
+
+      // Text entry
+      int fontIdx = DecodeFontIndex(entry.pfont);
+      if (fontIdx < 0 || fontIdx >= m_nFonts || !m_dwFormats[fontIdx])
+        continue;
+
+      D2D1_COLOR_F color = D3DColorToD2D(entry.color);
+      m_brush->SetColor(color);
+
+      DWORD drawFlags = entry.flags & ~DT_CALCRECT;
+
+      D2D1_RECT_F rect = {
+        (float)entry.rect.left,  (float)entry.rect.top,
+        (float)entry.rect.right, (float)entry.rect.bottom };
+
+      // Map DT_ flags to DirectWrite alignment
+      ApplyDWriteAlignment(m_dwFormats[fontIdx].Get(), drawFlags);
+
+      D2D1_DRAW_TEXT_OPTIONS opts = D2D1_DRAW_TEXT_OPTIONS_CLIP;
+      m_d2dContext->DrawText(
+        entry.msg, (UINT32)wcslen(entry.msg),
+        m_dwFormats[fontIdx].Get(), rect, m_brush.Get(), opts);
+    }
+
+    m_d2dContext->EndDraw();
+    m_d2dContext->SetTarget(nullptr);
+  }
+
+  // Release wrapped resource (transitions back buffer RT → PRESENT)
+  m_d3d11On12Device->ReleaseWrappedResources(resources, 1);
+  m_d3d11Context->Flush();
 
   // Flip double buffer and clear for next frame
   m_b = 1 - m_b;
   ClearAll();
-  m_dirty = false;
 }

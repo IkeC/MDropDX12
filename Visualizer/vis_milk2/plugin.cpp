@@ -4106,8 +4106,10 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
         p = strrchr(p, '}');
         // add the last line - "    _return_value = float4(ret.xyz, _vDiffuse.w);"
         if (p) {
+          // For comp shaders, apply gamma_adj before output (dynamic constant, no recompile needed)
+          const char* szGammaLine = (shaderType == SHADER_COMP) ? "    ret *= gamma_adj;\n" : "";
           char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-          sprintf(p, " %s\n}\n", szLastLine);
+          sprintf(p, " %s%s\n}\n", szGammaLine, szLastLine);
         }
       }
     }
@@ -4950,6 +4952,23 @@ void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold
   x.category = category;
   x.bBold = bBold;
   x.bSentToRemote = false; // not sent to remote yet
+  x.color = 0; // default font color
+  m_errors.push_back(x);
+}
+
+void CPlugin::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
+  DebugLogW(szMsg);
+  OutputDebugStringW(szMsg);
+  ClearErrors(ERR_NOTIFY);
+
+  ErrorMsg x;
+  x.msg = szMsg;
+  x.birthTime = GetTime();
+  x.expireTime = GetTime() + time;
+  x.category = ERR_NOTIFY;
+  x.bBold = true;
+  x.bSentToRemote = false;
+  x.color = color;
   m_errors.push_back(x);
 }
 
@@ -6035,9 +6054,9 @@ void CPlugin::MyRenderUI(
               m_errors[i].bSentToRemote = res != 0;
             }
             if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
-              SelectFont(SIMPLE_FONT);
+              SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
               swprintf(buf, L"%s ", m_errors[i].msg.c_str());
-              DWORD col = GetFontColor(SIMPLE_FONT);
+              DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);
               MyTextOut_Color(buf, MTO_UPPER_RIGHT, col);
 
               /*
@@ -8015,10 +8034,19 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
   case 'g':
     m_pState->m_fGammaAdj -= 0.1f;
     if (m_pState->m_fGammaAdj.eval(-1) < 0.0f) m_pState->m_fGammaAdj = 0.0f;
+    {
+      wchar_t buf[64];
+      swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); // bright cyan
+    }
     return 0; // we processed (or absorbed) the key
   case 'G':
     m_pState->m_fGammaAdj += 0.1f;
-    //if (m_pState->m_fGammaAdj > 1.0f) m_pState->m_fGammaAdj = 1.0f;
+    {
+      wchar_t buf[64];
+      swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); // bright cyan
+    }
     return 0; // we processed (or absorbed) the key
   case 'j':
     m_pState->m_fWaveScale *= 0.9f;
@@ -12835,11 +12863,9 @@ void CPlugin::GenCompPShaderText(char* szShaderText, float brightness, float ve_
     p += sprintf(p, "                tex2D(sampler_main, uv_echo).xyz, %c", LF);
     p += sprintf(p, "                %.2f %c", ve_alpha, LF);
     p += sprintf(p, "              ); //video echo%c", LF);
-    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   else {
     p += sprintf(p, "    ret = tex2D(sampler_main, uv).xyz;%c", LF);
-    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   if (hue_shader >= 1.0f)
     p += sprintf(p, "    ret *= hue_shader; //old hue shader effect%c", LF);

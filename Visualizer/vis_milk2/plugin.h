@@ -208,6 +208,7 @@ typedef struct {
   float     expireTime;
   int       category;
   bool      bSentToRemote;
+  DWORD     color;  // 0 = use default font color
 } ErrorMsg;
 
 typedef std::vector<ErrorMsg> ErrorMsgList;
@@ -592,6 +593,7 @@ public:
   void AddNotification(wchar_t* szMsg);
   void AddNotificationAudioDevice();
   void AddNotification(wchar_t* szMsg, float time);
+  void AddNotificationColored(wchar_t* szMsg, float time, DWORD color);
   void AddError(wchar_t* szMsg, float fDuration, int category = ERR_ALL, bool bBold = true);
   void ClearErrors(int category = ERR_ALL);  // 0=all categories
 

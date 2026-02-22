@@ -316,33 +316,31 @@ bool DXContext::BeginFrame()
     return true;
 }
 
-void DXContext::EndFrame()
+void DXContext::ExecuteCommandList()
 {
     if (!m_ready) return;
 
-    // Transition back buffer: RENDER_TARGET → PRESENT
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.pResource   = m_renderTargets[m_frameIndex].Get();
-    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    m_commandList->ResourceBarrier(1, &barrier);
-
+    // Close and execute the DX12 command list.
+    // Does NOT transition back buffer to PRESENT — D3D11on12 ReleaseWrappedResources
+    // handles RT→PRESENT when D2D text rendering is active.
     HRESULT hrClose = m_commandList->Close();
     if (FAILED(hrClose)) {
         char buf[256];
-        sprintf(buf, "DX12: EndFrame: Close FAILED hr=0x%08X devRemoved=0x%08X",
+        sprintf(buf, "DX12: ExecuteCommandList: Close FAILED hr=0x%08X devRemoved=0x%08X",
                 (unsigned)hrClose, (unsigned)m_device->GetDeviceRemovedReason());
         DebugLogA(buf);
     }
 
-    // Execute
     ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(1, ppCommandLists);
+}
+
+void DXContext::EndFrame()
+{
+    if (!m_ready) return;
 
     // Present (vsync = 1 sync interval)
+    // Back buffer is already in PRESENT state via D3D11on12 ReleaseWrappedResources.
     HRESULT hrPresent = m_swapChain->Present(1, 0);
     if (FAILED(hrPresent)) {
         char buf[256];

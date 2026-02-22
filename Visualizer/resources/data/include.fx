@@ -21,6 +21,7 @@ float4 _c14 = float4(0.5, 0.5, 0, 0); // mouse
 float4 _c15 = float4(0, 0, 0, 0); // bass_smooth, mid_smooth, treb_smooth, vol_smooth
 float4 _c16 = float4(1, 0, 1, 0); // vis_intensity, vis_shift, vis_version
 float4 _c17 = float4(0, 0, 0, 0); // colshift_hue, colshift_saturation, colshift_brightness
+float4 _c18 = float4(1, 0, 0, 0); // gamma_adj (default 1.0 = no change)
 
 float4 _qa; // q vars bank 1 [q1-q4]
 float4 _qb; // q vars bank 2 [q5-q8]
@@ -92,6 +93,8 @@ float4x3 rot_rand4;
 #define colshift_hue        _c17.x
 #define colshift_saturation _c17.y
 #define colshift_brightness _c17.z
+
+#define gamma_adj _c18.x
 
 #define q1 _qa.x
 #define q2 _qa.y
