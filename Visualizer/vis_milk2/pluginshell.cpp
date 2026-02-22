@@ -269,11 +269,13 @@ char* CPluginShell::GetConfigIniFileA() {
 }
 int  CPluginShell::GetFontHeight(eFontIndex idx) {
   if (idx >= 0 && idx < NUM_BASIC_FONTS + NUM_EXTRA_FONTS) {
+    // Use absolute value since nSize may be negative (CreateFontW convention)
+    int sz = abs((int)m_fontinfo[idx].nSize);
     if (IsSpoutActiveAndFixed()) {
-      return (int)m_fontinfo[idx].nSize;
+      return sz;
     }
     else {
-      return (int)m_fontinfo[idx].nSize * m_fRenderQuality;
+      return (int)(sz * m_fRenderQuality);
     }
   }
   else return 0;
@@ -578,7 +580,7 @@ int CPluginShell::AllocateFonts() {
   // Phase 5 TODO: replace with DirectXTK12 SpriteFont.
   // For now, record expected font heights from GDI font metrics for layout.
   for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++) {
-    int fSize = m_fontinfo[i].nSize;
+    int fSize = abs((int)m_fontinfo[i].nSize);
     if (!IsSpoutActiveAndFixed())
       fSize = (int)(fSize * m_fRenderQuality);
     m_fontHeight[i] = fSize; // approximate height — GDI metric
