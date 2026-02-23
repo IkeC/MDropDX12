@@ -637,8 +637,10 @@ uint64_t LastSentMilkwaveMessage = 0;
 #include "AMDDetection.h"
 #include <cstdint>
 #include <commctrl.h>  // Trackbar, tab, and list-view controls
+#include <uxtheme.h>   // SetWindowTheme for dark mode controls
 #include <set>
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "uxtheme.lib")
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "propsys.lib")
@@ -791,6 +793,7 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_FILE_LIST        2063   // ListBox on Files tab
 #define IDC_MW_FILE_ADD         2064   // Add button on Files tab
 #define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
+#define IDC_MW_FILE_DESC        2066   // Description label on Files tab
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -1611,6 +1614,14 @@ void CPlugin::MyReadConfig() {
   if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
   if (m_nSettingsWndW > 2000) m_nSettingsWndW = 2000;
   if (m_nSettingsWndH > 2000) m_nSettingsWndH = 2000;
+
+  // Settings window dark theme colors (COLORREF as decimal or 0xRRGGBB in INI)
+  m_bSettingsDarkTheme = GetPrivateProfileBoolW(L"SettingsTheme", L"DarkTheme", m_bSettingsDarkTheme, pIni);
+  m_colSettingsBg      = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"BgColor",      (int)m_colSettingsBg, pIni);
+  m_colSettingsCtrlBg  = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"CtrlBgColor",  (int)m_colSettingsCtrlBg, pIni);
+  m_colSettingsText    = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"TextColor",     (int)m_colSettingsText, pIni);
+  m_colSettingsDisabled= (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"DisabledColor", (int)m_colSettingsDisabled, pIni);
+  m_colSettingsBorder  = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"BorderColor",   (int)m_colSettingsBorder, pIni);
   m_WindowFixedWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedWidth", m_WindowFixedWidth, pIni);
   m_WindowFixedHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedHeight", m_WindowFixedHeight, pIni);
 
@@ -3842,10 +3853,10 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                  // Search fallback paths
+                  // Search fallback paths (paths already have trailing backslash)
                   bool fbFound = false;
                   for (auto& fbPath : g_plugin.m_fallbackPaths) {
-                    swprintf(szFilename, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                    swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
                     if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
                   }
                   if (!fbFound) continue;
@@ -3906,10 +3917,10 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                  // Search fallback paths
+                  // Search fallback paths (paths already have trailing backslash)
                   bool fbFound = false;
                   for (auto& fbPath : g_plugin.m_fallbackPaths) {
-                    swprintf(szFilename, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                    swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
                     if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
                   }
                   if (!fbFound) continue;
@@ -9066,6 +9077,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       for (int i = 0; i < 5; i++) p->m_settingsPageCtrls[i].clear();
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
+      p->CleanupSettingsThemeBrushes();
     }
     PostQuitMessage(0);  // exit the settings thread's message loop
     return 0;
@@ -9514,7 +9526,59 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     break;
   }
 
-  // Use default Windows theme colors for all controls
+  // Dark theme color handling for settings window controls
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsCtrlBg) {
+      SetTextColor((HDC)wParam, p->m_colSettingsText);
+      SetBkColor((HDC)wParam, p->m_colSettingsCtrlBg);
+      return (LRESULT)p->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      HDC hdc = (HDC)wParam;
+      // Check if the static control is a disabled edit (ES_READONLY sends CTLCOLORSTATIC)
+      HWND hCtrl = (HWND)lParam;
+      wchar_t szClass[32];
+      GetClassNameW(hCtrl, szClass, 32);
+      if (_wcsicmp(szClass, L"Edit") == 0) {
+        SetTextColor(hdc, p->m_colSettingsText);
+        SetBkColor(hdc, p->m_colSettingsCtrlBg);
+        return (LRESULT)p->m_hBrSettingsCtrlBg;
+      }
+      SetTextColor(hdc, p->m_colSettingsText);
+      SetBkColor(hdc, p->m_colSettingsBg);
+      SetBkMode(hdc, TRANSPARENT);
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORBTN:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, p->m_colSettingsText);
+      SetBkColor((HDC)wParam, p->m_colSettingsBg);
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORDLG:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_ERASEBKGND:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      HDC hdc = (HDC)wParam;
+      RECT rc;
+      GetClientRect(hWnd, &rc);
+      FillRect(hdc, &rc, p->m_hBrSettingsBg);
+      return 1;
+    }
+    break;
+
   }
   return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
@@ -9619,7 +9683,8 @@ void CPlugin::CreateSettingsWindowOnThread() {
   wc.lpfnWndProc = SettingsWndProc;
   wc.hInstance = GetModuleHandle(NULL);
   wc.lpszClassName = SETTINGS_WND_CLASS;
-  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  // Use dark background if dark theme enabled; WM_ERASEBKGND handles the rest
+  wc.hbrBackground = m_bSettingsDarkTheme ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_BTNFACE + 1);
   wc.hCursor = LoadCursor(NULL, IDC_ARROW);
   wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
   RegisterClassExW(&wc);
@@ -9649,6 +9714,7 @@ void CPlugin::CreateSettingsWindowOnThread() {
 
   SetWindowLongPtr(m_hSettingsWnd, GWLP_USERDATA, (LONG_PTR)this);
   BuildSettingsControls();
+  ApplySettingsDarkTheme();
 
   ShowWindow(m_hSettingsWnd, SW_SHOW);
   UpdateWindow(m_hSettingsWnd);
@@ -9665,6 +9731,91 @@ void CPlugin::CreateSettingsWindowOnThread() {
   m_hSettingsWnd = NULL;
   CoUninitialize();
   m_bSettingsThreadRunning.store(false);
+}
+
+void CPlugin::CleanupSettingsThemeBrushes() {
+  if (m_hBrSettingsBg)     { DeleteObject(m_hBrSettingsBg);     m_hBrSettingsBg = NULL; }
+  if (m_hBrSettingsCtrlBg) { DeleteObject(m_hBrSettingsCtrlBg); m_hBrSettingsCtrlBg = NULL; }
+}
+
+void CPlugin::LoadSettingsThemeFromINI() {
+  // Brushes are (re)created from the current color values
+  CleanupSettingsThemeBrushes();
+  if (m_bSettingsDarkTheme) {
+    m_hBrSettingsBg     = CreateSolidBrush(m_colSettingsBg);
+    m_hBrSettingsCtrlBg = CreateSolidBrush(m_colSettingsCtrlBg);
+  }
+}
+
+void CPlugin::ApplySettingsDarkTheme() {
+  HWND hw = m_hSettingsWnd;
+  if (!hw || !m_bSettingsDarkTheme) return;
+
+  LoadSettingsThemeFromINI();
+
+  // Dark title bar via DWM
+  BOOL bDark = TRUE;
+  DwmSetWindowAttribute(hw, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
+  DwmSetWindowAttribute(hw, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
+  DwmSetWindowAttribute(hw, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
+  DwmSetWindowAttribute(hw, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
+
+  // Enable dark mode for the window via undocumented uxtheme ordinals
+  HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll");
+  if (!hUxTheme) hUxTheme = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (hUxTheme) {
+    typedef int  (WINAPI *fnSetPreferredAppMode)(int);
+    typedef BOOL (WINAPI *fnAllowDarkModeForWindow)(HWND, BOOL);
+    typedef void (WINAPI *fnFlushMenuThemes)(void);
+    typedef void (WINAPI *fnRefreshImmersiveColorPolicyState)(void);
+
+    auto pSetMode     = (fnSetPreferredAppMode)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(135));
+    auto pAllowWnd    = (fnAllowDarkModeForWindow)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(133));
+    auto pFlush       = (fnFlushMenuThemes)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(136));
+    auto pRefresh     = (fnRefreshImmersiveColorPolicyState)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(104));
+
+    if (pSetMode)  pSetMode(2); // APPMODE_FORCEDARK
+    if (pRefresh)  pRefresh();
+    if (pFlush)    pFlush();
+    if (pAllowWnd) pAllowWnd(hw, TRUE);
+
+    // Theme the tab control
+    if (m_hSettingsTab) {
+      if (pAllowWnd) pAllowWnd(m_hSettingsTab, TRUE);
+      SetWindowTheme(m_hSettingsTab, L"DarkMode_Explorer", NULL);
+    }
+
+    // Theme all child controls
+    for (int page = 0; page < 5; page++) {
+      for (HWND hChild : m_settingsPageCtrls[page]) {
+        if (!hChild || !IsWindow(hChild)) continue;
+
+        wchar_t szClass[64];
+        GetClassNameW(hChild, szClass, 64);
+
+        if (pAllowWnd) pAllowWnd(hChild, TRUE);
+
+        if (_wcsicmp(szClass, L"Button") == 0) {
+          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
+        } else if (_wcsicmp(szClass, L"Edit") == 0) {
+          SetWindowTheme(hChild, L"DarkMode_CFD", NULL);
+        } else if (_wcsicmp(szClass, L"ComboBox") == 0) {
+          SetWindowTheme(hChild, L"DarkMode_CFD", NULL);
+        } else if (_wcsicmp(szClass, L"ListBox") == 0) {
+          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
+        } else if (_wcsicmp(szClass, TRACKBAR_CLASSW) == 0) {
+          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
+        } else if (_wcsicmp(szClass, L"Static") == 0) {
+          // Statics are themed via WM_CTLCOLORSTATIC
+        } else {
+          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
+        }
+      }
+    }
+  }
+
+  // Force full redraw
+  RedrawWindow(hw, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
 }
 
 void CPlugin::BuildSettingsControls() {
@@ -9954,7 +10105,14 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, x, y, 70, lineH, hFont));
   PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, x + 74, y, 70, lineH, hFont));
   y += lineH + gap;
-  PAGE_CTRL(4, CreateLabel(hw, L"These paths are searched for textures and presets\nin addition to the built-in directories.", x, y, rw, lineH * 2, hFont, false));
+  {
+    HWND hDesc = CreateWindowExW(0, L"STATIC",
+      L"These paths are searched for textures and presets\nin addition to the built-in directories.",
+      WS_CHILD | SS_LEFT, x, y, rw, lineH * 2, hw,
+      (HMENU)(INT_PTR)IDC_MW_FILE_DESC, GetModuleHandle(NULL), NULL);
+    if (hDesc && hFont) SendMessage(hDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hDesc);
+  }
 
   #undef PAGE_CTRL
 
@@ -10026,14 +10184,25 @@ void CPlugin::LayoutSettingsControls() {
     }
   }
 
-  // Stretch Files tab ListBox to fill available area
+  // Stretch Files tab ListBox and reposition buttons + description below it
   HWND hFileList = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_LIST);
   if (hFileList) {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    int listBottom = rcDisplay.bottom - 70;  // leave room for buttons + help text below
+    int lineH = 24, gap = 6;
+    int reserveBelow = 4 + lineH + gap + lineH * 2;  // gap + buttons + gap + description
+    int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
     MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
+
+    int btnY = listBottom + 4;
+    HWND hAdd = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_ADD);
+    HWND hRem = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_REMOVE);
+    if (hAdd) MoveWindow(hAdd, r.left, btnY, 70, lineH, TRUE);
+    if (hRem) MoveWindow(hRem, r.left + 74, btnY, 70, lineH, TRUE);
+
+    HWND hDesc = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_DESC);
+    if (hDesc) MoveWindow(hDesc, r.left, btnY + lineH + gap, rw, lineH * 2, TRUE);
   }
 
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
@@ -10471,6 +10640,36 @@ void CPlugin::LayoutResourceViewer() {
   if (hRefresh) MoveWindow(hRefresh, rc.right - 70 - margin, listBottom + margin, 70, btnH, TRUE);
 }
 
+// Sort callback for resource viewer: failed items first, then by type, name, path
+static int CALLBACK RV_SortCompare(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort) {
+  HWND hList = (HWND)lParamSort;
+  wchar_t buf1[512], buf2[512];
+  LVITEMW item = {};
+  item.mask = LVIF_TEXT;
+  item.cchTextMax = 512;
+
+  // Compare status column (col 0): ✗ before ✓
+  item.iSubItem = 0;
+  item.pszText = buf1; item.iItem = (int)lParam1;
+  SendMessageW(hList, LVM_GETITEMTEXTW, lParam1, (LPARAM)&item);
+  item.pszText = buf2; item.iItem = (int)lParam2;
+  SendMessageW(hList, LVM_GETITEMTEXTW, lParam2, (LPARAM)&item);
+  bool fail1 = (buf1[0] == L'\u2717'), fail2 = (buf2[0] == L'\u2717');
+  if (fail1 != fail2) return fail1 ? -1 : 1;
+
+  // Compare type (col 1), then name (col 2), then path (col 3)
+  for (int col = 1; col <= 3; col++) {
+    item.iSubItem = col;
+    item.pszText = buf1; item.iItem = (int)lParam1;
+    SendMessageW(hList, LVM_GETITEMTEXTW, lParam1, (LPARAM)&item);
+    item.pszText = buf2; item.iItem = (int)lParam2;
+    SendMessageW(hList, LVM_GETITEMTEXTW, lParam2, (LPARAM)&item);
+    int cmp = _wcsicmp(buf1, buf2);
+    if (cmp != 0) return cmp;
+  }
+  return 0;
+}
+
 static void RV_AddRow(HWND hList, int idx, const wchar_t* status, const wchar_t* type,
                       const wchar_t* name, const wchar_t* path, const wchar_t* details) {
   LVITEMW item = {};
@@ -10609,7 +10808,7 @@ void CPlugin::PopulateResourceViewer() {
         if (addedNames.count(key)) continue;
         addedNames.insert(key);
 
-        // Look up in m_textures
+        // Look up in m_textures by name
         bool found = false;
         int texIdx = -1;
         for (int t = 0; t < (int)m_textures.size(); t++) {
@@ -10617,6 +10816,21 @@ void CPlugin::PopulateResourceViewer() {
             found = true;
             texIdx = t;
             break;
+          }
+        }
+        // If not found by name (e.g. rand## textures get resolved to a different name),
+        // check the actual shader binding to see if a texture was loaded for this slot.
+        if (!found && cd.RegisterIndex < 16) {
+          CShaderParams& sp = (s == 0) ? m_shaders.warp.params : m_shaders.comp.params;
+          UINT srvIdx = sp.m_texture_bindings[cd.RegisterIndex].dx12SrvIndex;
+          if (srvIdx != UINT_MAX) {
+            for (int t = 0; t < (int)m_textures.size(); t++) {
+              if (m_textures[t].dx12Tex.srvIndex == srvIdx) {
+                found = true;
+                texIdx = t;
+                break;
+              }
+            }
           }
         }
 
@@ -10640,7 +10854,7 @@ void CPlugin::PopulateResourceViewer() {
             }
             // Search fallback paths
             for (auto& fbPath : m_fallbackPaths) {
-              swprintf(szTry, MAX_PATH, L"%s\\%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+              swprintf(szTry, MAX_PATH, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
                 lstrcpyW(szFullPath, szTry);
                 pathFound = true;
@@ -10664,6 +10878,9 @@ void CPlugin::PopulateResourceViewer() {
       }
     }
   }
+
+  // Sort: failed items first, then by type, name, path
+  ListView_SortItemsEx(m_hResourceList, RV_SortCompare, (LPARAM)m_hResourceList);
 }
 
 //----------------------------------------------------------------------

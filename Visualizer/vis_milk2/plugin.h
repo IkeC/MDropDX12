@@ -821,6 +821,19 @@ public:
   void        EnsureSettingsVisible();
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
+  // Settings window dark theme
+  bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
+  COLORREF    m_colSettingsBg       = RGB(32, 32, 32);    // Main background
+  COLORREF    m_colSettingsCtrlBg   = RGB(50, 50, 50);    // Edit/combo/list background
+  COLORREF    m_colSettingsText     = RGB(255, 255, 255);  // Text color
+  COLORREF    m_colSettingsDisabled = RGB(160, 160, 160);  // Disabled text
+  COLORREF    m_colSettingsBorder   = RGB(70, 70, 70);     // Border/separator
+  HBRUSH      m_hBrSettingsBg      = NULL;
+  HBRUSH      m_hBrSettingsCtrlBg  = NULL;
+  void        LoadSettingsThemeFromINI();
+  void        ApplySettingsDarkTheme();
+  void        CleanupSettingsThemeBrushes();
+
   // User "safe" defaults (persisted to INI [UserDefaults] section)
   bool  m_bUserDefaultsSaved = false;
   float m_udOpacity = 1.0f;
