@@ -3,7 +3,7 @@
 * Visualizer: Ground-up DirectX 12 rebuild of the rendering engine (replaces DX9Ex entirely)
 * Visualizer: GPU-accelerated text rendering via D3D11on12 + Direct2D + DirectWrite
   - Replaces GDI→DIB→upload pipeline, eliminating ~33MB/frame CPU bandwidth and stuttering
-* Visualizer: In-app Settings window (F2 / Ctrl+L) with dark theme
+* Visualizer: In-app Settings window (F8 / Ctrl+L) with dark theme
   - 5-tab UI: General, Visual, Colors, Sound, Files
   - Preset browser with sequential forward/back navigation
   - Resource viewer showing all preset textures with load status, type, and paths

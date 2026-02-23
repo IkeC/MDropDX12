@@ -4907,7 +4907,7 @@ void CPlugin::MyRenderFn(int redraw) {
     if (m_bSettingsNeedAttention && m_UI_mode == UI_REGULAR) {
       m_bSettingsNeedAttention = false; // only force once
       OpenSettingsWindow();
-      AddError(L"Preset directory not found. Press Ctrl+L to set a valid path.", 8.0f, ERR_MISC, true);
+      AddError(L"Preset directory not found. Press F8 to open Settings.", 8.0f, ERR_MISC, true);
     }
 
     float dt = GetTime() - m_prev_time;
@@ -7336,10 +7336,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   //case VK_F7: conflict
   //case VK_F8:	break;
   //case VK_F9: conflict
-
-    case VK_F2:
-      OpenSettingsWindow();
-      return 0;
 
     case 'L':
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
