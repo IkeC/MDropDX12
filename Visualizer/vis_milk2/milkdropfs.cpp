@@ -1963,6 +1963,15 @@ void CPlugin::DX12_RenderWarpAndComposite()
     m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
 
+  // ── Render pending supertext strings to DX12 title textures ──
+  for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+    if (m_supertexts[i].fStartTime != -1.0f && m_supertexts[i].bRedrawSuperText) {
+      if (!RenderStringToTitleTexture(i))
+        m_supertexts[i].fStartTime = -1.0f;
+      m_supertexts[i].bRedrawSuperText = false;
+    }
+  }
+
   // ── Warp pass: draw mesh from VS0 into VS1 ──
   {
     m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -2080,6 +2089,20 @@ void CPlugin::DX12_RenderWarpAndComposite()
     DX12_DrawCustomWaves();
     DX12_DrawWave(mysound.fWave[0], mysound.fWave[1]);
     DX12_DrawSprites();
+
+    // Burn completed supertexts into VS1 (persistence through warp feedback)
+    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
+        float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
+        if (fProgress >= 1.0f) {
+          ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
+          float fTimeAfterFullDuration = GetTime() - m_supertexts[i].fStartTime - m_supertexts[i].fDuration;
+          if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
+            m_supertexts[i].fStartTime = -1.0f;  // 'off' state
+          }
+        }
+      }
+    }
   }
 
   // ── Composite pass: draw VS1 to backbuffer ──
@@ -2140,6 +2163,16 @@ void CPlugin::DX12_RenderWarpAndComposite()
     quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = 0xFFFFFFFF;
     quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
+  }
+
+  // ── Display active supertexts on the backbuffer ──
+  for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+    if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
+      float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
+      if (fProgress <= 1.0f) {
+        ShowSongTitleAnim(GetWidth(), GetHeight(), min(fProgress, 0.9999f), i);
+      }
+    }
   }
 
   DebugLogA("DX12: RenderWarpAndComposite done");
@@ -6998,6 +7031,12 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
     }
   }
 
+  // DX12: flip Y axis — DX12 clip space has +Y = top, but the vertex grid
+  // maps increasing tv (texture top→bottom) to increasing y, which puts
+  // the top of the text at the bottom of the screen without this flip.
+  for (i = 0; i < 128; i++)
+    v3[i].y = -v3[i].y;
+
   float t = 1.0f;
   float currentTime = GetTime();
 
@@ -7079,7 +7118,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
   // nudge down & right for shadow, up & left for solid text
   float offset_x = 0, offset_y = 0;
   float baseOffsetX = m_supertexts[supertextIndex].fShadowOffset / m_nTitleTexSizeX * (m_supertexts[supertextIndex].fFontSize / 40);
-  float baseOffsetY = m_supertexts[supertextIndex].fShadowOffset / m_nTitleTexSizeY * (m_supertexts[supertextIndex].fFontSize / 40);
+  float baseOffsetY = -m_supertexts[supertextIndex].fShadowOffset / m_nTitleTexSizeY * (m_supertexts[supertextIndex].fFontSize / 40);
 
   swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"ShowSongTitleAnim: t=%.2f offset=%.2f\n", t, offset);
   OutputDebugStringW(debugMsg);
