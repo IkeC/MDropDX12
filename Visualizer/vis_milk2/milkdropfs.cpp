@@ -6123,7 +6123,10 @@ void CPlugin::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex,
       break;
 #endif
     case TEX_DISK:
-      outSlots[i] = params->m_texture_bindings[i].dx12SrvIndex;
+      if (params->m_texture_bindings[i].dx12SrvIndex != UINT_MAX)
+        outSlots[i] = params->m_texture_bindings[i].dx12SrvIndex;
+      else if (i == 0)
+        outSlots[i] = vsTex.srvIndex;  // MD1 fallback: slot 0 = VS texture
       break;
     default:
       break;
