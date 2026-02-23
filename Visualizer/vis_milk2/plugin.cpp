@@ -794,6 +794,7 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_FILE_ADD         2064   // Add button on Files tab
 #define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
 #define IDC_MW_FILE_DESC        2066   // Description label on Files tab
+#define IDC_MW_DARK_THEME       2067   // Dark Theme checkbox on General tab
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -1615,13 +1616,8 @@ void CPlugin::MyReadConfig() {
   if (m_nSettingsWndW > 2000) m_nSettingsWndW = 2000;
   if (m_nSettingsWndH > 2000) m_nSettingsWndH = 2000;
 
-  // Settings window dark theme colors (COLORREF as decimal or 0xRRGGBB in INI)
+  // Settings window dark theme — just on/off toggle, colors come from code defaults
   m_bSettingsDarkTheme = GetPrivateProfileBoolW(L"SettingsTheme", L"DarkTheme", m_bSettingsDarkTheme, pIni);
-  m_colSettingsBg      = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"BgColor",      (int)m_colSettingsBg, pIni);
-  m_colSettingsCtrlBg  = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"CtrlBgColor",  (int)m_colSettingsCtrlBg, pIni);
-  m_colSettingsText    = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"TextColor",     (int)m_colSettingsText, pIni);
-  m_colSettingsDisabled= (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"DisabledColor", (int)m_colSettingsDisabled, pIni);
-  m_colSettingsBorder  = (COLORREF)GetPrivateProfileIntW(L"SettingsTheme", L"BorderColor",   (int)m_colSettingsBorder, pIni);
   m_WindowFixedWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedWidth", m_WindowFixedWidth, pIni);
   m_WindowFixedHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedHeight", m_WindowFixedHeight, pIni);
 
@@ -9032,22 +9028,173 @@ static HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, 
 }
 
 static HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true) {
-  DWORD style = WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX | (visible ? WS_VISIBLE : 0);
+  DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | (visible ? WS_VISIBLE : 0);
   HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw) {
     if (hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessage(hw, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+    // Mark as checkbox and store check state (BS_OWNERDRAW doesn't track state)
+    SetPropW(hw, L"IsCheckbox", (HANDLE)(intptr_t)1);
+    SetPropW(hw, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
   }
   return hw;
 }
 
+static void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText) {
+  HDC hdc = pDIS->hDC;
+  RECT rc = pDIS->rcItem;
+  bool bChecked = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"Checked");
+  bool bFocused = (pDIS->itemState & ODS_FOCUS) != 0;
+
+  // Fill entire background
+  HBRUSH hBrBg = CreateSolidBrush(bDark ? colBg : GetSysColor(COLOR_BTNFACE));
+  FillRect(hdc, &rc, hBrBg);
+  DeleteObject(hBrBg);
+
+  // Draw checkbox indicator square (13x13, vertically centered)
+  int boxSize = 13;
+  int boxY = rc.top + (rc.bottom - rc.top - boxSize) / 2;
+  RECT rcBox = { rc.left + 1, boxY, rc.left + 1 + boxSize, boxY + boxSize };
+
+  if (bDark) {
+    HBRUSH hBrBox = CreateSolidBrush(colCtrlBg);
+    FillRect(hdc, &rcBox, hBrBox);
+    DeleteObject(hBrBox);
+    HBRUSH hBrBorder = CreateSolidBrush(bFocused ? RGB(100, 150, 220) : colBorder);
+    FrameRect(hdc, &rcBox, hBrBorder);
+    DeleteObject(hBrBorder);
+  } else {
+    DrawFrameControl(hdc, &rcBox, DFC_BUTTON, DFCS_BUTTONCHECK | (bChecked ? DFCS_CHECKED : 0));
+    // Draw text for light mode and return
+    RECT rcText = { rcBox.right + 4, rc.top, rc.right, rc.bottom };
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+    HFONT hFont = (HFONT)SendMessage(pDIS->hwndItem, WM_GETFONT, 0, 0);
+    HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+    wchar_t szText[128] = {};
+    GetWindowTextW(pDIS->hwndItem, szText, 128);
+    DrawTextW(hdc, szText, -1, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    if (hOld) SelectObject(hdc, hOld);
+    return;
+  }
+
+  // Draw checkmark in dark mode
+  if (bChecked) {
+    HPEN hPen = CreatePen(PS_SOLID, 2, colText);
+    HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+    // Draw a checkmark: short stroke down-right, then long stroke up-right
+    int cx = rcBox.left + 3, cy = rcBox.top + 6;
+    MoveToEx(hdc, cx, cy, NULL);
+    LineTo(hdc, cx + 2, cy + 3);
+    LineTo(hdc, cx + 8, cy - 3);
+    SelectObject(hdc, hOld);
+    DeleteObject(hPen);
+  }
+
+  // Draw text
+  RECT rcText = { rcBox.right + 4, rc.top, rc.right, rc.bottom };
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, colText);
+  HFONT hFont = (HFONT)SendMessage(pDIS->hwndItem, WM_GETFONT, 0, 0);
+  HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+  wchar_t szText[128] = {};
+  GetWindowTextW(pDIS->hwndItem, szText, 128);
+  DrawTextW(hdc, szText, -1, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  if (hOldFont) SelectObject(hdc, hOldFont);
+
+  if (bFocused) {
+    RECT rcFocus = rc;
+    InflateRect(&rcFocus, -1, -1);
+    DrawFocusRect(hdc, &rcFocus);
+  }
+}
+
 static HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true) {
-  DWORD style = WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON | (visible ? WS_VISIBLE : 0);
+  DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | (visible ? WS_VISIBLE : 0);
   HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
   return hw;
+}
+
+// Draw a single 3D edge (1px highlight on top-left, shadow on bottom-right)
+static void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised) {
+  COLORREF topLeft  = raised ? hi : shadow;
+  COLORREF botRight = raised ? shadow : hi;
+
+  // Top + left edges
+  HPEN pen = CreatePen(PS_SOLID, 1, topLeft);
+  HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+  MoveToEx(hdc, rc.left, rc.top, NULL);
+  LineTo(hdc, rc.right - 1, rc.top);
+  MoveToEx(hdc, rc.left, rc.top, NULL);
+  LineTo(hdc, rc.left, rc.bottom - 1);
+  SelectObject(hdc, oldPen);
+  DeleteObject(pen);
+
+  // Bottom + right edges
+  pen = CreatePen(PS_SOLID, 1, botRight);
+  oldPen = (HPEN)SelectObject(hdc, pen);
+  MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+  LineTo(hdc, rc.right, rc.bottom - 1);
+  MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+  LineTo(hdc, rc.right - 1, rc.bottom);
+  SelectObject(hdc, oldPen);
+  DeleteObject(pen);
+}
+
+// Owner-draw button paint helper
+static void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark,
+  COLORREF colBtnFace, COLORREF colBtnHi, COLORREF colBtnShadow, COLORREF colText) {
+  HDC hdc = pDIS->hDC;
+  RECT rc = pDIS->rcItem;
+  bool pressed = (pDIS->itemState & ODS_SELECTED) != 0;
+  bool focused = (pDIS->itemState & ODS_FOCUS) != 0;
+
+  bool disabled = (pDIS->itemState & ODS_DISABLED) != 0;
+
+  if (bDark) {
+    // Fill button face
+    HBRUSH hBrFill = CreateSolidBrush(colBtnFace);
+    FillRect(hdc, &rc, hBrFill);
+    DeleteObject(hBrFill);
+
+    // 3D beveled edges (outer)
+    draw3DEdge(hdc, rc, colBtnHi, colBtnShadow, !pressed);
+
+    // Inner bevel (1px inset for thicker 3D look)
+    RECT inner = { rc.left + 1, rc.top + 1, rc.right - 1, rc.bottom - 1 };
+    COLORREF innerHi = RGB(75, 75, 75);   // subtle inner highlight
+    COLORREF innerSh = RGB(45, 45, 45);   // subtle inner shadow
+    draw3DEdge(hdc, inner, innerHi, innerSh, !pressed);
+
+    // Focus rectangle (inside the 3D border)
+    if (focused) {
+      RECT rcFocus = { rc.left + 3, rc.top + 3, rc.right - 3, rc.bottom - 3 };
+      DrawFocusRect(hdc, &rcFocus);
+    }
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, disabled ? RGB(128, 128, 128) : colText);
+  } else {
+    // Light theme: standard system button look
+    UINT edge = pressed ? DFCS_BUTTONPUSH | DFCS_PUSHED : DFCS_BUTTONPUSH;
+    DrawFrameControl(hdc, &rc, DFC_BUTTON, edge);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+  }
+
+  // Offset text when pressed
+  RECT textRc = rc;
+  if (pressed) OffsetRect(&textRc, 1, 1);
+
+  wchar_t szText[128] = {};
+  GetWindowTextW(pDIS->hwndItem, szText, 128);
+  HFONT hFont = (HFONT)SendMessage(pDIS->hwndItem, WM_GETFONT, 0, 0);
+  HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+  DrawTextW(hdc, szText, -1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  if (hOldFont) SelectObject(hdc, hOldFont);
 }
 
 static HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h,
@@ -9062,7 +9209,37 @@ static HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h,
   return hw;
 }
 
+// Tab control subclass: paints dark background via WM_ERASEBKGND
+static LRESULT CALLBACK SettingsTabSubclassProc(
+  HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+  UINT_PTR /*subclassId*/, DWORD_PTR refData)
+{
+  switch (msg) {
+  case WM_ERASEBKGND: {
+    CPlugin* p = (CPlugin*)refData;
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      HDC hdc = (HDC)wParam;
+      RECT rc;
+      GetClientRect(hwnd, &rc);
+      FillRect(hdc, &rc, p->m_hBrSettingsBg);
+      return 1;
+    }
+    break;
+  }
+  case WM_NCDESTROY:
+    RemoveWindowSubclass(hwnd, SettingsTabSubclassProc, 1);
+    break;
+  }
+  return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  // Set GWLP_USERDATA on first message so dark theme painting works during creation
+  if (uMsg == WM_NCCREATE) {
+    CREATESTRUCTW* pcs = (CREATESTRUCTW*)lParam;
+    if (pcs && pcs->lpCreateParams)
+      SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)pcs->lpCreateParams);
+  }
   CPlugin* p = (CPlugin*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
   switch (uMsg) {
@@ -9074,7 +9251,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (p) {
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
-      for (int i = 0; i < 5; i++) p->m_settingsPageCtrls[i].clear();
+      for (int i = 0; i < 6; i++) p->m_settingsPageCtrls[i].clear();
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
       p->CleanupSettingsThemeBrushes();
@@ -9406,8 +9583,19 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     }
 
     // Checkbox toggles — save immediately
+    // Owner-drawn checkboxes: toggle the "Checked" property on click
     if (code == BN_CLICKED) {
-      bool bChecked = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+      HWND hCtrl = (HWND)lParam;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
+      bool bChecked;
+      if (bIsCheckbox) {
+        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        bChecked = !wasChecked;
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(bChecked ? 1 : 0));
+        InvalidateRect(hCtrl, NULL, TRUE);
+      } else {
+        bChecked = false; // not a checkbox, but let BN_CLICKED handling proceed
+      }
       HWND hw = p->GetPluginWindow();
       switch (id) {
       case IDC_MW_HARD_CUTS:
@@ -9458,6 +9646,13 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       case IDC_MW_SPOUT_FIXED:
         p->bSpoutFixedSize = bChecked;
         if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
+        return 0;
+      case IDC_MW_DARK_THEME:
+        p->m_bSettingsDarkTheme = bChecked;
+        WritePrivateProfileStringW(L"SettingsTheme", L"DarkTheme",
+            bChecked ? L"1" : L"0", p->GetConfigIniFile());
+        p->LoadSettingsThemeFromINI();
+        p->ApplySettingsDarkTheme();
         return 0;
       }
     }
@@ -9566,6 +9761,79 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
   case WM_CTLCOLORDLG:
     if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
       return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_DRAWITEM:
+    if (p) {
+      DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+      if (pDIS && pDIS->CtlType == ODT_TAB) {
+        // Owner-draw tab header items with 3D beveled edges
+        bool bSelected = (pDIS->itemState & ODS_SELECTED) != 0;
+        HDC hdc = pDIS->hDC;
+        RECT rc = pDIS->rcItem;
+        if (p->m_bSettingsDarkTheme) {
+          // Fill tab background
+          COLORREF bg = bSelected ? p->m_colSettingsCtrlBg : p->m_colSettingsBtnFace;
+          HBRUSH hBr = CreateSolidBrush(bg);
+          FillRect(hdc, &rc, hBr);
+          DeleteObject(hBr);
+
+          if (bSelected) {
+            // 3D raised edges on top and sides (no bottom — merges with content)
+            HPEN hiPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnHi);
+            HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+            HPEN oldPen = (HPEN)SelectObject(hdc, hiPen);
+            // Top highlight
+            MoveToEx(hdc, rc.left, rc.top, NULL);
+            LineTo(hdc, rc.right - 1, rc.top);
+            // Left highlight
+            MoveToEx(hdc, rc.left, rc.top, NULL);
+            LineTo(hdc, rc.left, rc.bottom);
+            // Right shadow
+            SelectObject(hdc, shPen);
+            MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+            LineTo(hdc, rc.right - 1, rc.bottom);
+            SelectObject(hdc, oldPen);
+            DeleteObject(hiPen);
+            DeleteObject(shPen);
+          } else {
+            // Unselected: subtle bottom edge only
+            HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+            HPEN oldPen = (HPEN)SelectObject(hdc, shPen);
+            MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+            LineTo(hdc, rc.right, rc.bottom - 1);
+            SelectObject(hdc, oldPen);
+            DeleteObject(shPen);
+          }
+
+          SetBkMode(hdc, TRANSPARENT);
+          SetTextColor(hdc, bSelected ? p->m_colSettingsHighlightText : p->m_colSettingsText);
+        } else {
+          FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
+          SetBkMode(hdc, TRANSPARENT);
+          SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+        }
+        wchar_t szText[64] = {};
+        TCITEMW tci = {};
+        tci.mask = TCIF_TEXT;
+        tci.pszText = szText;
+        tci.cchTextMax = 64;
+        SendMessageW(pDIS->hwndItem, TCM_GETITEMW, pDIS->itemID, (LPARAM)&tci);
+        DrawTextW(hdc, szText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return TRUE;
+      }
+      if (pDIS && pDIS->CtlType == ODT_BUTTON) {
+        bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+        if (bIsCheckbox) {
+          DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+        } else {
+          DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+            p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+        }
+        return TRUE;
+      }
     }
     break;
 
@@ -9693,6 +9961,9 @@ void CPlugin::CreateSettingsWindowOnThread() {
   INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
   InitCommonControlsEx(&icex);
 
+  // Create theme brushes BEFORE window creation so WM_ERASEBKGND works during CreateWindowEx
+  LoadSettingsThemeFromINI();
+
   int wndW = m_nSettingsWndW, wndH = m_nSettingsWndH;
   int screenW = GetSystemMetrics(SM_CXSCREEN);
   int screenH = GetSystemMetrics(SM_CYSCREEN);
@@ -9704,15 +9975,13 @@ void CPlugin::CreateSettingsWindowOnThread() {
     SETTINGS_WND_CLASS, L"Milkwave Settings",
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
     posX, posY, wndW, wndH,
-    NULL, NULL, GetModuleHandle(NULL), NULL);
+    NULL, NULL, GetModuleHandle(NULL), (LPVOID)this);
 
   if (!m_hSettingsWnd) {
     CoUninitialize();
     m_bSettingsThreadRunning.store(false);
     return;
   }
-
-  SetWindowLongPtr(m_hSettingsWnd, GWLP_USERDATA, (LONG_PTR)this);
   BuildSettingsControls();
   ApplySettingsDarkTheme();
 
@@ -9749,73 +10018,40 @@ void CPlugin::LoadSettingsThemeFromINI() {
 
 void CPlugin::ApplySettingsDarkTheme() {
   HWND hw = m_hSettingsWnd;
-  if (!hw || !m_bSettingsDarkTheme) return;
+  if (!hw) return;
 
   LoadSettingsThemeFromINI();
 
-  // Dark title bar via DWM
-  BOOL bDark = TRUE;
+  BOOL bDark = m_bSettingsDarkTheme ? TRUE : FALSE;
+
+  // Title bar via DWM (works reliably on Win11+)
   DwmSetWindowAttribute(hw, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
-  DwmSetWindowAttribute(hw, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
-  DwmSetWindowAttribute(hw, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
-  DwmSetWindowAttribute(hw, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
+  if (m_bSettingsDarkTheme) {
+    DwmSetWindowAttribute(hw, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
+    DwmSetWindowAttribute(hw, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
+    DwmSetWindowAttribute(hw, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
+  } else {
+    // Reset to system defaults by removing custom colors
+    COLORREF defNone = 0xFFFFFFFF; // DWMWA_COLOR_DEFAULT
+    DwmSetWindowAttribute(hw, 35, &defNone, sizeof(defNone));
+    DwmSetWindowAttribute(hw, 34, &defNone, sizeof(defNone));
+    DwmSetWindowAttribute(hw, 36, &defNone, sizeof(defNone));
+  }
 
-  // Enable dark mode for the window via undocumented uxtheme ordinals
-  HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll");
-  if (!hUxTheme) hUxTheme = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-  if (hUxTheme) {
-    typedef int  (WINAPI *fnSetPreferredAppMode)(int);
-    typedef BOOL (WINAPI *fnAllowDarkModeForWindow)(HWND, BOOL);
-    typedef void (WINAPI *fnFlushMenuThemes)(void);
-    typedef void (WINAPI *fnRefreshImmersiveColorPolicyState)(void);
-
-    auto pSetMode     = (fnSetPreferredAppMode)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(135));
-    auto pAllowWnd    = (fnAllowDarkModeForWindow)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(133));
-    auto pFlush       = (fnFlushMenuThemes)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(136));
-    auto pRefresh     = (fnRefreshImmersiveColorPolicyState)GetProcAddress(hUxTheme, MAKEINTRESOURCEA(104));
-
-    if (pSetMode)  pSetMode(2); // APPMODE_FORCEDARK
-    if (pRefresh)  pRefresh();
-    if (pFlush)    pFlush();
-    if (pAllowWnd) pAllowWnd(hw, TRUE);
-
-    // Theme the tab control
-    if (m_hSettingsTab) {
-      if (pAllowWnd) pAllowWnd(m_hSettingsTab, TRUE);
-      SetWindowTheme(m_hSettingsTab, L"DarkMode_Explorer", NULL);
-    }
-
-    // Theme all child controls
-    for (int page = 0; page < 5; page++) {
-      for (HWND hChild : m_settingsPageCtrls[page]) {
-        if (!hChild || !IsWindow(hChild)) continue;
-
-        wchar_t szClass[64];
-        GetClassNameW(hChild, szClass, 64);
-
-        if (pAllowWnd) pAllowWnd(hChild, TRUE);
-
-        if (_wcsicmp(szClass, L"Button") == 0) {
-          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
-        } else if (_wcsicmp(szClass, L"Edit") == 0) {
-          SetWindowTheme(hChild, L"DarkMode_CFD", NULL);
-        } else if (_wcsicmp(szClass, L"ComboBox") == 0) {
-          SetWindowTheme(hChild, L"DarkMode_CFD", NULL);
-        } else if (_wcsicmp(szClass, L"ListBox") == 0) {
-          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
-        } else if (_wcsicmp(szClass, TRACKBAR_CLASSW) == 0) {
-          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
-        } else if (_wcsicmp(szClass, L"Static") == 0) {
-          // Statics are themed via WM_CTLCOLORSTATIC
-        } else {
-          SetWindowTheme(hChild, L"DarkMode_Explorer", NULL);
-        }
-      }
+  // Tab control: strip all visual styles (owner-drawn via TCS_OWNERDRAWFIXED)
+  if (m_hSettingsTab) {
+    SetWindowTheme(m_hSettingsTab, m_bSettingsDarkTheme ? L"" : NULL, m_bSettingsDarkTheme ? L"" : NULL);
+  }
+  // Child controls: use DarkMode_Explorer for native dark scrollbars on listboxes/combos
+  for (int page = 0; page < 6; page++) {
+    for (HWND hChild : m_settingsPageCtrls[page]) {
+      if (!hChild || !IsWindow(hChild)) continue;
+      SetWindowTheme(hChild, m_bSettingsDarkTheme ? L"DarkMode_Explorer" : NULL, NULL);
     }
   }
 
   // Force full redraw
-  RedrawWindow(hw, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+  RedrawWindow(hw, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
 }
 
 void CPlugin::BuildSettingsControls() {
@@ -9823,7 +10059,7 @@ void CPlugin::BuildSettingsControls() {
   if (!hw) return;
 
   // Clear previous page control lists
-  for (int i = 0; i < 5; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < 6; i++) m_settingsPageCtrls[i].clear();
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
@@ -9844,16 +10080,17 @@ void CPlugin::BuildSettingsControls() {
   HFONT hFont = m_hSettingsFont;
   HFONT hFontBold = m_hSettingsFontBold;
 
-  // Create tab control
+  // Create tab control (TCS_OWNERDRAWFIXED lets us paint tab headers in dark theme)
   m_hSettingsTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_OWNERDRAWFIXED,
     0, 0, clientW, clientH, hw, (HMENU)(INT_PTR)IDC_MW_TAB,
     GetModuleHandle(NULL), NULL);
   SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)hFont, TRUE);
+  SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files" };
-  for (int i = 0; i < 5; i++) {
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"About" };
+  for (int i = 0; i < 6; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
     ti.pszText = (LPWSTR)tabNames[i];
@@ -9937,7 +10174,8 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless));
+  PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Dark Theme",              IDC_MW_DARK_THEME,   x, y, rw, lineH, hFont, m_bSettingsDarkTheme));
   y += lineH + gap + 4;
   PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 95, lineH, hFont));
   PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
@@ -10114,6 +10352,33 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(4, hDesc);
   }
 
+  // ===== About tab (page 5) =====
+  y = tabTop + 10;
+
+  PAGE_CTRL(5, CreateLabel(hw, L"Milkwave", x, y, rw, 24, hFontBold, false));
+  y += 28;
+
+  {
+    wchar_t szVersion[128];
+    swprintf(szVersion, 128, L"Version %d.%d-dev", INT_VERSION / 100, INT_SUBVERSION);
+    PAGE_CTRL(5, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
+    y += lineH + 4;
+  }
+
+  {
+    wchar_t szBuild[128];
+    wchar_t wDate[32], wTime[32];
+    MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
+    MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
+    swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
+    PAGE_CTRL(5, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    y += lineH + 4;
+  }
+
+  PAGE_CTRL(5, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  y += lineH + 4;
+  PAGE_CTRL(5, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+
   #undef PAGE_CTRL
 
   // Show only page 0 initially, hide all others
@@ -10121,7 +10386,7 @@ void CPlugin::BuildSettingsControls() {
 }
 
 void CPlugin::ShowSettingsPage(int page) {
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 6; i++) {
     int cmd = (i == page) ? SW_SHOW : SW_HIDE;
     for (HWND h : m_settingsPageCtrls[i])
       ShowWindow(h, cmd);
@@ -10476,7 +10741,7 @@ void CPlugin::OpenResourceViewer() {
     wc.lpfnWndProc = ResourceViewerWndProc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_3DFACE + 1);
+    wc.hbrBackground = m_bSettingsDarkTheme ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_3DFACE + 1);
     wc.lpszClassName = L"MilkwaveResourceViewer";
     RegisterClassExW(&wc);
     g_bResourceViewerClassRegistered = true;
@@ -10506,7 +10771,7 @@ void CPlugin::OpenResourceViewer() {
     GetModuleHandle(NULL),
     NULL);
 
-  ListView_SetExtendedListViewStyle(m_hResourceList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+  ListView_SetExtendedListViewStyle(m_hResourceList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
 
   // Add columns
   LVCOLUMNW col = {};
@@ -10533,10 +10798,10 @@ void CPlugin::OpenResourceViewer() {
   col.pszText = (LPWSTR)L"Details";
   SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 4, (LPARAM)&col);
 
-  // Create buttons
-  CreateWindowExW(0, L"BUTTON", L"Copy Path", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+  // Create buttons (owner-draw for dark theme painting)
+  CreateWindowExW(0, L"BUTTON", L"Copy Path", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
     0, 0, 90, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_COPY_PATH, GetModuleHandle(NULL), NULL);
-  CreateWindowExW(0, L"BUTTON", L"Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+  CreateWindowExW(0, L"BUTTON", L"Refresh", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
     0, 0, 70, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_REFRESH, GetModuleHandle(NULL), NULL);
 
   // Set font on ListView and buttons
@@ -10544,6 +10809,26 @@ void CPlugin::OpenResourceViewer() {
     SendMessage(m_hResourceList, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
     SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
     SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+  }
+
+  // Apply dark theme to resource viewer
+  if (m_bSettingsDarkTheme) {
+    BOOL bDark = TRUE;
+    DwmSetWindowAttribute(m_hResourceWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
+    DwmSetWindowAttribute(m_hResourceWnd, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
+    DwmSetWindowAttribute(m_hResourceWnd, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
+    DwmSetWindowAttribute(m_hResourceWnd, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
+
+    // Strip visual styles so custom painting works reliably
+    SetWindowTheme(m_hResourceList, L"", L"");
+    HWND hCopy = GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH);
+    HWND hRefresh = GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH);
+    if (hCopy) SetWindowTheme(hCopy, L"", L"");
+    if (hRefresh) SetWindowTheme(hRefresh, L"", L"");
+
+    ListView_SetBkColor(m_hResourceList, m_colSettingsBg);
+    ListView_SetTextBkColor(m_hResourceList, m_colSettingsBg);
+    ListView_SetTextColor(m_hResourceList, m_colSettingsText);
   }
 
   LayoutResourceViewer();
@@ -10568,6 +10853,82 @@ LRESULT CALLBACK CPlugin::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPa
     mmi->ptMinTrackSize.y = 250;
     return 0;
   }
+
+  case WM_NOTIFY: {
+    NMHDR* pnm = (NMHDR*)lParam;
+    // Custom-draw the ListView header (column headers) for dark theme
+    if (p && p->m_bSettingsDarkTheme && pnm->code == NM_CUSTOMDRAW) {
+      // The header control is a child of the ListView
+      HWND hHeader = ListView_GetHeader(p->m_hResourceList);
+      if (pnm->hwndFrom == hHeader) {
+        NMCUSTOMDRAW* pcd = (NMCUSTOMDRAW*)lParam;
+        switch (pcd->dwDrawStage) {
+        case CDDS_PREPAINT:
+          return CDRF_NOTIFYITEMDRAW;
+        case CDDS_ITEMPREPAINT: {
+          HDC hdc = pcd->hdc;
+          RECT rc = pcd->rc;
+          // Fill header item background
+          HBRUSH hBr = CreateSolidBrush(p->m_colSettingsCtrlBg);
+          FillRect(hdc, &rc, hBr);
+          DeleteObject(hBr);
+          // Draw separator line at right edge
+          HPEN hPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBorder);
+          HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+          MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+          LineTo(hdc, rc.right - 1, rc.bottom);
+          SelectObject(hdc, hOld);
+          DeleteObject(hPen);
+          // Draw header text
+          wchar_t szText[128] = {};
+          HDITEMW hdi = {};
+          hdi.mask = HDI_TEXT;
+          hdi.pszText = szText;
+          hdi.cchTextMax = 128;
+          Header_GetItem(hHeader, (int)pcd->dwItemSpec, &hdi);
+          SetBkMode(hdc, TRANSPARENT);
+          SetTextColor(hdc, p->m_colSettingsText);
+          HFONT hFont = (HFONT)SendMessage(hHeader, WM_GETFONT, 0, 0);
+          HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+          rc.left += 6; // padding
+          DrawTextW(hdc, szText, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+          if (hOldFont) SelectObject(hdc, hOldFont);
+          return CDRF_SKIPDEFAULT;
+        }
+        }
+      }
+    }
+    break;
+  }
+
+  case WM_ERASEBKGND:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      HDC hdc = (HDC)wParam;
+      RECT rc;
+      GetClientRect(hWnd, &rc);
+      FillRect(hdc, &rc, p->m_hBrSettingsBg);
+      return 1;
+    }
+    break;
+
+  case WM_CTLCOLORBTN:
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, p->m_colSettingsText);
+      SetBkColor((HDC)wParam, p->m_colSettingsBg);
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_DRAWITEM:
+    if (p) {
+      DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+      if (pDIS && pDIS->CtlType == ODT_BUTTON) {
+        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+        return TRUE;
+      }
+    }
+    break;
 
   case WM_COMMAND: {
     int id = LOWORD(wParam);

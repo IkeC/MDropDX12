@@ -805,7 +805,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[5]; // HWNDs per tab (General, Visual, Colors, Sound, Files)
+  std::vector<HWND> m_settingsPageCtrls[6]; // HWNDs per tab (General, Visual, Colors, Sound, Files, About)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_nSettingsWndW = 600;
@@ -823,11 +823,15 @@ public:
 
   // Settings window dark theme
   bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
-  COLORREF    m_colSettingsBg       = RGB(32, 32, 32);    // Main background
-  COLORREF    m_colSettingsCtrlBg   = RGB(50, 50, 50);    // Edit/combo/list background
-  COLORREF    m_colSettingsText     = RGB(255, 255, 255);  // Text color
-  COLORREF    m_colSettingsDisabled = RGB(160, 160, 160);  // Disabled text
-  COLORREF    m_colSettingsBorder   = RGB(70, 70, 70);     // Border/separator
+  COLORREF    m_colSettingsBg       = RGB(30, 30, 30);       // Main window background (matches MilkVision)
+  COLORREF    m_colSettingsCtrlBg   = RGB(45, 45, 45);       // Edit/combo/list background
+  COLORREF    m_colSettingsText     = RGB(0, 220, 0);        // Text color (green, matches MilkVision)
+  COLORREF    m_colSettingsDisabled = RGB(128, 128, 128);    // Disabled text
+  COLORREF    m_colSettingsBorder   = RGB(60, 60, 60);       // Border/button face
+  COLORREF    m_colSettingsBtnFace     = RGB(60, 60, 60);   // Button face
+  COLORREF    m_colSettingsBtnHi       = RGB(90, 90, 90);   // 3D highlight edge (top-left)
+  COLORREF    m_colSettingsBtnShadow   = RGB(35, 35, 35);   // 3D shadow edge (bottom-right)
+  COLORREF    m_colSettingsHighlightText = RGB(255, 255, 255); // Selected tab text
   HBRUSH      m_hBrSettingsBg      = NULL;
   HBRUSH      m_hBrSettingsCtrlBg  = NULL;
   void        LoadSettingsThemeFromINI();
