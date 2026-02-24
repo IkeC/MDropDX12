@@ -344,6 +344,7 @@ public:
   bool    m_bSequentialPresetOrder;
   bool		m_bHardCutsDisabled;
   float		m_fHardCutLoudnessThresh;
+  int     m_nInjectEffectMode;   // 0=off 1=brighten 2=darken 3=solarize 4=invert (F11)
   float		m_fHardCutHalflife;
   float		m_fHardCutThresh;
   //int			m_nWidth;
@@ -668,6 +669,9 @@ public:
   ComPtr<ID3D12PipelineState> m_dx12FallbackWarpPSO; // default warp_ps.fx
   ComPtr<ID3D12PipelineState> m_dx12FallbackCompPSO; // default comp_ps.fx
   ComPtr<ID3D12PipelineState> m_dx12BlurPSO[2];      // [0] = horiz (blur1), [1] = vert (blur2)
+  DX12Texture m_injectEffectTex;                     // back-buffer-sized copy for F11 inject post-process
+  ComPtr<ID3D12PipelineState> m_pInjectEffectPSO;    // inject effect pixel shader PSO
+  void RenderInjectEffect();                         // F11 inject effect post-process pass
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag

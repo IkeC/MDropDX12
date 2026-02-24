@@ -27,3 +27,8 @@ vis_milk2/bin
 /RemoteTests/obj
 /packages
 enc_temp_folder/
+
+# Runtime-generated files
+*.log
+Visualizer/settings.ini
+Visualizer/messages.ini

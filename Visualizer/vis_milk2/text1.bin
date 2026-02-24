@@ -19,7 +19,8 @@ F9                      Toggle clickthrough mode
 CTRL + F9               Toggle windowed fullscreen mode (cover screen except taskbar)
 CTRL + SHIFT + F9       Toggle watermark mode (windowed clickthrough fullscreen)
 F10 / CTRL + Z          Enable/disable Spout output / Holding SHIFT: set fixed Spout resolution
-F11                     Hardcut mode: normal/based of music
+F11                     Inject effect: Off / Brighten / Darken / Solarize / Invert
+Shift+F11               Cycle hard cut mode (audio-reactive preset changes)
 F12                     Transparency mode (removes the black background)
 CTRL + F12              Toggle black mode (no preset rendering)
                         

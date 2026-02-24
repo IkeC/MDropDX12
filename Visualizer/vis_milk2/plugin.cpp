@@ -1286,6 +1286,7 @@ void CPlugin::MyPreInitialize() {
   m_fTimeBetweenPresetsRand = 10.0f;
   m_bSequentialPresetOrder = true;
   m_bHardCutsDisabled = true;
+  m_nInjectEffectMode = 0;
   m_fHardCutLoudnessThresh = 2.5f;
   m_fHardCutHalflife = 60.0f;
   //m_nWidth			= 1024;
@@ -1502,6 +1503,8 @@ void CPlugin::MyReadConfig() {
   bSpoutFixedSize = GetPrivateProfileBoolW(L"Settings", L"bSpoutFixedSize", bSpoutFixedSize, pIni);
   nSpoutFixedWidth = GetPrivateProfileIntW(L"Settings", L"nSpoutFixedWidth", nSpoutFixedWidth, pIni);
   nSpoutFixedHeight = GetPrivateProfileIntW(L"Settings", L"nSpoutFixedHeight", nSpoutFixedHeight, pIni);
+  m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
+  m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
   m_fRenderQuality = GetPrivateProfileFloatW(L"Settings", L"fRenderQuality", m_fRenderQuality, pIni);
 
@@ -1726,6 +1729,7 @@ void CPlugin::MyWriteConfig() {
 
   WritePrivateProfileIntW(m_bSongTitleAnims, L"bSongTitleAnims", pIni, L"Settings");
   WritePrivateProfileIntW(m_bHardCutsDisabled, L"bHardCutsDisabled", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nInjectEffectMode, L"nInjectEffectMode", pIni, L"Settings");
   WritePrivateProfileIntW(m_bEnableRating, L"bEnableRating", pIni, L"Settings");
   WritePrivateProfileIntW(m_bEnableMouseInteraction, L"bEnableMouseInteraction", pIni, L"Settings");
 
@@ -2576,6 +2580,49 @@ int CPlugin::AllocateMyDX9Stuff() {
       m_dx12Blur[i] = m_lpDX->CreateRenderTargetTexture(bw, bh, DXGI_FORMAT_R8G8B8A8_UNORM);
     }
 #endif
+
+    // Inject effect intermediate texture — must match back buffer dimensions for CopyResource
+    {
+      UINT bbW = (UINT)max(1, m_lpDX->m_backbuffer_width);
+      UINT bbH = (UINT)max(1, m_lpDX->m_backbuffer_height);
+      m_injectEffectTex = m_lpDX->CreateRenderTargetTexture(bbW, bbH, DXGI_FORMAT_R8G8B8A8_UNORM);
+      m_lpDX->CreateBindingBlockForTexture(m_injectEffectTex);
+      DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED");
+    }
+
+    // Inject effect pixel shader PSO
+    if (m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
+      static const char szInjectPS[] =
+        "Texture2D<float4> tex : register(t0);\n"
+        "SamplerState samp : register(s0);\n"
+        "cbuffer cbInject : register(b0) { uint4 mode; }\n"
+        "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
+        "    float4 ret = tex.Sample(samp, uv);\n"
+        "    if (mode.x == 1u) ret.rgb = sqrt(max(ret.rgb, 0.0));\n"
+        "    else if (mode.x == 2u) ret.rgb = ret.rgb * ret.rgb;\n"
+        "    else if (mode.x == 3u) ret.rgb = ret.rgb * (1.0 - ret.rgb) * 4.0;\n"
+        "    else if (mode.x == 4u) ret.rgb = 1.0 - ret.rgb;\n"
+        "    return ret;\n"
+        "}\n";
+      ID3DBlob* psBlob = nullptr;
+      ID3DBlob* pErrors = nullptr;
+      HRESULT hr = D3DCompile(szInjectPS, strlen(szInjectPS), nullptr, nullptr, nullptr,
+                              "main", "ps_5_0",
+                              D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY, 0, &psBlob, &pErrors);
+      if (FAILED(hr)) {
+        if (pErrors) { OutputDebugStringA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
+        DebugLogA("DX12: Inject effect PSO: PS compile FAILED");
+      } else {
+        if (pErrors) pErrors->Release();
+        m_pInjectEffectPSO = DX12CreatePresetPSO(
+          m_lpDX->m_device.Get(), m_lpDX->m_rootSignature.Get(),
+          DXGI_FORMAT_R8G8B8A8_UNORM, g_pBlurVSBlob,
+          psBlob->GetBufferPointer(), (UINT)psBlob->GetBufferSize(),
+          g_MyVertexLayout, _countof(g_MyVertexLayout), false);
+        psBlob->Release();
+        DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED");
+      }
+    }
   }
 
   m_fAspectX = (m_nTexSizeY > m_nTexSizeX) ? m_nTexSizeX / (float)m_nTexSizeY : 1.0f;
@@ -4850,6 +4897,8 @@ void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
   if (m_lpDX) {
     m_dx12VS[0].Reset();
     m_dx12VS[1].Reset();
+    m_injectEffectTex.Reset();
+    m_pInjectEffectPSO.Reset();
 #if (NUM_BLUR_TEX > 0)
     for (int bi = 0; bi < NUM_BLUR_TEX; bi++)
       m_dx12Blur[bi].Reset();
@@ -5242,6 +5291,8 @@ void CPlugin::MyRenderFn(int redraw) {
 
   RenderFrame(redraw);  // see milkdropfs.cpp
 
+  RenderInjectEffect();  // F11 inject effect post-process pass (no-op when mode==0)
+
   if (!redraw) {
     m_nFramesSinceResize++;
     if (m_nLoadingPreset > 0) {
@@ -5251,6 +5302,94 @@ void CPlugin::MyRenderFn(int redraw) {
 
   LeaveCriticalSection(&g_cs);
 
+}
+
+//----------------------------------------------------------------------
+//----------------------------------------------------------------------
+//----------------------------------------------------------------------
+//----------------------------------------------------------------------
+
+void CPlugin::RenderInjectEffect()
+{
+  // F11 inject effect: applies a full-screen post-process pass on the composite back buffer.
+  // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
+  if (m_nInjectEffectMode == 0) return;
+  if (!m_pInjectEffectPSO || !m_injectEffectTex.IsValid()) return;
+  if (!m_lpDX || !m_lpDX->m_ready) return;
+
+  // Size guard: intermediate texture must match back buffer for CopyResource
+  if (m_injectEffectTex.width  != (UINT)m_lpDX->m_backbuffer_width ||
+      m_injectEffectTex.height != (UINT)m_lpDX->m_backbuffer_height)
+    return;
+
+  auto* cl = m_lpDX->m_commandList.Get();
+  ID3D12Resource* pBackBuf = m_lpDX->m_renderTargets[m_lpDX->m_frameIndex].Get();
+
+  // 1. Transition back buffer RENDER_TARGET → COPY_SOURCE
+  D3D12_RESOURCE_BARRIER toSrc = {};
+  toSrc.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toSrc.Transition.pResource        = pBackBuf;
+  toSrc.Transition.StateBefore      = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toSrc.Transition.StateAfter       = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toSrc.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toSrc);
+
+  // 2. Transition inject texture → COPY_DEST
+  m_lpDX->TransitionResource(m_injectEffectTex, D3D12_RESOURCE_STATE_COPY_DEST);
+
+  // 3. Copy back buffer to inject texture
+  cl->CopyResource(m_injectEffectTex.resource.Get(), pBackBuf);
+
+  // 4. Transition inject texture COPY_DEST → PIXEL_SHADER_RESOURCE
+  m_lpDX->TransitionResource(m_injectEffectTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  // 5. Transition back buffer COPY_SOURCE → RENDER_TARGET
+  D3D12_RESOURCE_BARRIER toRT = {};
+  toRT.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toRT.Transition.pResource        = pBackBuf;
+  toRT.Transition.StateBefore      = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toRT.Transition.StateAfter       = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toRT.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toRT);
+
+  // 6. Re-bind back buffer as render target
+  D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+  rtvHandle.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+  cl->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+  // 7. Set viewport + scissor
+  float bbW = (float)m_lpDX->m_backbuffer_width;
+  float bbH = (float)m_lpDX->m_backbuffer_height;
+  D3D12_VIEWPORT vp     = { 0.f, 0.f, bbW, bbH, 0.f, 1.f };
+  D3D12_RECT     scissor = { 0, 0, (LONG)bbW, (LONG)bbH };
+  cl->RSSetViewports(1, &vp);
+  cl->RSSetScissorRects(1, &scissor);
+
+  // 8. Set PSO + root signature
+  cl->SetPipelineState(m_pInjectEffectPSO.Get());
+  cl->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+
+  // 9. Set descriptor heap
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cl->SetDescriptorHeaps(_countof(heaps), heaps);
+
+  // 10. Upload mode CBV (b0 = uint4 mode)
+  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, 0, 0, 0 } };
+  D3D12_GPU_VIRTUAL_ADDRESS cbva = m_lpDX->UploadConstantBuffer(&cbData, sizeof(cbData));
+  if (cbva)
+    cl->SetGraphicsRootConstantBufferView(0, cbva);
+
+  // 11. Bind inject texture SRV (descriptor table t0..t15)
+  cl->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(m_injectEffectTex));
+
+  // 12. Draw fullscreen quad (BlurVS reads tu/tv from MYVERTEX as TEXCOORD0)
+  MYVERTEX v[4];
+  ZeroMemory(v, sizeof(v));
+  v[0].x = -1.f; v[0].y =  1.f; v[0].z = 0.f; v[0].Diffuse = 0xFFFFFFFF; v[0].tu = 0.f; v[0].tv = 0.f;
+  v[1].x =  1.f; v[1].y =  1.f; v[1].z = 0.f; v[1].Diffuse = 0xFFFFFFFF; v[1].tu = 1.f; v[1].tv = 0.f;
+  v[2].x = -1.f; v[2].y = -1.f; v[2].z = 0.f; v[2].Diffuse = 0xFFFFFFFF; v[2].tu = 0.f; v[2].tv = 1.f;
+  v[3].x =  1.f; v[3].y = -1.f; v[3].z = 0.f; v[3].Diffuse = 0xFFFFFFFF; v[3].tu = 1.f; v[3].tv = 1.f;
+  m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, v, 4, sizeof(MYVERTEX));
 }
 
 //----------------------------------------------------------------------
@@ -7397,13 +7536,34 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       }
       return 0;
     case VK_F11:
-      //Only changing the HardcutModes value!
-      //Functionalities are moved on void MyRenderFn()
     {
-      HardcutMode++;
-      if (HardcutMode == 1) {
-        m_bHardCutsDisabled = false;
-        AddNotification(L"Hard Cut Mode: Normal");
+      if (bShiftHeldDown) {
+        // Shift+F11: Hard Cut Mode cycling
+        HardcutMode++;
+        if (HardcutMode == 1)  { m_bHardCutsDisabled = false; AddNotification(L"Hard Cut Mode: Normal"); }
+        if (HardcutMode == 2)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Blend"); }
+        if (HardcutMode == 3)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass"); }
+        if (HardcutMode == 4)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Middle"); }
+        if (HardcutMode == 5)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Treble"); }
+        if (HardcutMode == 6)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Fast Blend"); }
+        if (HardcutMode == 7)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Treble Fast Blend"); }
+        if (HardcutMode == 8)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Blend and Hardcut Treble"); }
+        if (HardcutMode == 9)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Rhythmic Hardcut"); }
+        if (HardcutMode == 10) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: 2 beats"); beatcount = -1; }
+        if (HardcutMode == 11) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: 4 beats"); beatcount = -1; }
+        if (HardcutMode == 12) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Kinetronix (Vizikord)"); beatcount = -1; }
+        if (HardcutMode == 13) { HardcutMode = 0; m_bHardCutsDisabled = true; AddNotification(L"Hard Cut Mode: OFF"); }
+      } else {
+        // F11: Inject effect cycle (MilkDrop3 parity)
+        static wchar_t* kInjectNames[] = {
+            L"Inject Effect: Off", L"Inject Effect: Brighten",
+            L"Inject Effect: Darken", L"Inject Effect: Solarize", L"Inject Effect: Invert"
+        };
+        m_nInjectEffectMode = (m_nInjectEffectMode + 1) % 5;
+        AddNotificationColored(kInjectNames[m_nInjectEffectMode], 1.5f, 0xFF00FFFF);
+      }
+    }
+    return 0;
     case 'Q':
     {
       if (bCtrlHeldDown) {
@@ -7438,61 +7598,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       }
       break;
     }
-      }
-      if (HardcutMode == 2) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Bass Blend");
-      }
-      if (HardcutMode == 3) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Bass");
-      }
-      if (HardcutMode == 4) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Middle");
-      }
-      if (HardcutMode == 5) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Treble");
-      }
-      if (HardcutMode == 6) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Bass Fast Blend");
-      }
-      if (HardcutMode == 7) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Treble Fast Blend");
-      }
-      if (HardcutMode == 8) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Bass Blend and Hardcut Treble");
-      }
-      if (HardcutMode == 9) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Rhythmic Hardcut");
-      }
-      if (HardcutMode == 10) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: 2 beats");
-        beatcount = -1;
-      }
-      if (HardcutMode == 11) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: 4 beats");
-        beatcount = -1;
-      }
-      if (HardcutMode == 12) {
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: Kinetronix (Vizikord)");
-        beatcount = -1;
-      }
-      if (HardcutMode == 13) {
-        HardcutMode = 0;
-        m_bHardCutsDisabled = true;
-        AddNotification(L"Hard Cut Mode: OFF");
-      }
-    }
-    return 0; // we processed (or absorbed) the key
 
     //reenabling this feature soon. (This will be Shift+F9)
 //	if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG)

@@ -294,6 +294,9 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
     ComPtr<ID3D12PipelineState> pso;
     HRESULT hr = device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso));
     if (FAILED(hr)) {
+        char buf[80];
+        sprintf_s(buf, "DX12: CreateGraphicsPipelineState FAILED hr=0x%08X\n", (unsigned)hr);
+        OutputDebugStringA(buf);
         return nullptr;
     }
     return pso;
