@@ -107,6 +107,14 @@ public:
   bool IsEnabled() { return m_bEnabled; }
   bool ItemIsEnabled(int i);
 
+  // Accessors for overlay data extraction
+  int GetCurSel() const { return m_nCurSel; }
+  bool IsEditingCurSel() const { return m_bEditingCurSel; }
+  int GetNumChildMenus() const { return m_nChildMenus; }
+  int GetNumChildItems() const { return m_nChildItems; }
+  CMilkMenu* GetChildMenu(int i) { return (i >= 0 && i < m_nChildMenus) ? m_ppChildMenu[i] : nullptr; }
+  CMilkMenuItem* GetFirstChildItem() { return m_pFirstChildItem; }
+
 protected:
   void            Reset();
   CMilkMenu* m_pParentMenu;

@@ -627,6 +627,11 @@ int CPluginShell::AllocateDX9Stuff() {
     // Font atlases persist across resize — no re-wrapping needed
   }
 
+  // Start debug overlay thread (transparent layered window for FPS/debug info)
+  if (m_lpDX && !m_overlay.IsAlive()) {
+    m_overlay.Init(GetPluginWindow(), m_lpDX->m_client_width, m_lpDX->m_client_height);
+  }
+
   return ret;
 }
 
@@ -646,6 +651,9 @@ void CPluginShell::CleanUpDX9Stuff(int final_cleanup) {
     m_helpTexture.Reset();
     m_helpUploadBuffer.Reset();
     m_helpTexturePage = 0;
+
+    // Shutdown debug overlay thread
+    m_overlay.Shutdown();
   }
 
   CleanUpMyDX9Stuff(final_cleanup);
@@ -2500,7 +2508,11 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
     }
     return 0;
   }
-  if (uMsg == WM_WINDOWPOSCHANGING || uMsg == WM_WINDOWPOSCHANGED) {
+  if (uMsg == WM_WINDOWPOSCHANGING) {
+    return DefWindowProc(hWnd, uMsg, wParam, lParam);
+  }
+  if (uMsg == WM_WINDOWPOSCHANGED) {
+    m_overlay.OnParentMove();
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
   }
   return MyWindowProc(hWnd, uMsg, wParam, lParam);

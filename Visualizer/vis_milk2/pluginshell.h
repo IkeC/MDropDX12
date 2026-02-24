@@ -37,6 +37,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "fft.h"
 #include "defines.h"
 #include "textmgr.h"
+#include "overlay.h"
 #include <vector>
 
 // SPOUT
@@ -150,7 +151,8 @@ public:
   LPD3DXFONT   GetFont(eFontIndex idx) { return (LPD3DXFONT)(intptr_t)(idx + 1); }
   int          GetFontHeight(eFontIndex idx);
   CTextManager m_text;
-  
+  COverlayThread m_overlay;  // debug overlay (threaded GDI text for FPS/debug info)
+
   wchar_t      m_szBaseDir[MAX_PATH];
 
   // DX12 screenshot capture (Phase A)
@@ -368,6 +370,7 @@ private:
   DX12Texture m_helpTexture;
   ComPtr<ID3D12Resource> m_helpUploadBuffer;
   int m_helpTexturePage = 0;  // 0 = not rendered yet
+
   int  GetCanvasMarginX();     // returns the # of pixels that exist on the canvas, on each side, that the user will never see.  Mainly here for windowed mode, where sometimes, up to 15 pixels get cropped at edges of the screen.
   int  GetCanvasMarginY();     // returns the # of pixels that exist on the canvas, on each side, that the user will never see.  Mainly here for windowed mode, where sometimes, up to 15 pixels get cropped at edges of the screen.
 public:

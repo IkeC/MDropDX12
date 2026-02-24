@@ -5498,15 +5498,206 @@ void CPlugin::MyRenderUI(
       MyTextOut_Shadow(buf, MTO_UPPER_RIGHT);
     }
 
-    // c) fps display
-    if (m_bShowFPS) {
+    // Feed data to overlay thread (handles FPS, debug info, and menu rendering).
+    // Always send when alive so overlay clears to transparent when nothing is shown.
+    if (m_overlay.IsAlive()) {
+      OverlayData od = {};
+      od.bShowFPS         = m_bShowFPS;
+      od.bShowDebugInfo   = m_bShowDebugInfo;
+      od.bPresetLocked    = m_bPresetLockedByUser || m_bPresetLockedByCode;
+      od.bEnableMouseInteraction = m_bEnableMouseInteraction;
+      od.clientWidth      = m_lpDX->m_client_width;
+      od.clientHeight     = m_lpDX->m_client_height;
+      od.fps              = GetFps();
+      od.fRenderQuality   = m_fRenderQuality;
+      od.fColShiftHue     = m_ColShiftHue;
+      od.fColShiftSaturation = m_ColShiftSaturation;
+      od.fColShiftBrightness = m_ColShiftBrightness;
+      if (m_pState) {
+        od.bass         = (float)(*m_pState->var_pf_bass);
+        od.bass_att     = (float)(*m_pState->var_pf_bass_att);
+        od.bass_smooth  = (float)(*m_pState->var_pf_bass_smooth);
+        od.mid          = (float)(*m_pState->var_pf_mid);
+        od.mid_att      = (float)(*m_pState->var_pf_mid_att);
+        od.mid_smooth   = (float)(*m_pState->var_pf_mid_smooth);
+        od.treb         = (float)(*m_pState->var_pf_treb);
+        od.treb_att     = (float)(*m_pState->var_pf_treb_att);
+        od.treb_smooth  = (float)(*m_pState->var_pf_treb_smooth);
+        od.pfMonitor    = (float)(*m_pState->var_pf_monitor);
+      }
+      od.bass_imm_rel    = mysound.imm_rel[0];
+      od.bass_avg_rel    = mysound.avg_rel[0];
+      od.bass_smooth_rel = mysound.smooth_rel[0];
+      od.mid_imm_rel     = mysound.imm_rel[1];
+      od.mid_avg_rel     = mysound.avg_rel[1];
+      od.mid_smooth_rel  = mysound.smooth_rel[1];
+      od.treb_imm_rel    = mysound.imm_rel[2];
+      od.treb_avg_rel    = mysound.avg_rel[2];
+      od.treb_smooth_rel = mysound.smooth_rel[2];
+      od.presetTime      = GetTime() - m_fPresetStartTime;
+      od.mouseX          = m_mouseX;
+      od.mouseY          = m_mouseY;
+      od.mouseDown       = m_mouseDown;
+
+      // Menu data extraction — replicate DrawMenu layout for overlay rendering
+      if (m_UI_mode == UI_MENU && m_pCurMenu) {
+        od.bShowMenu = true;
+        int fontH = GetFontHeight(SIMPLE_FONT);
+        if (fontH <= 0) fontH = 20;
+        od.menuFontHeight = fontH;
+
+        int menuTop  = *upper_left_corner_y;
+        int menuLeft = xL;
+        int availH   = *lower_left_corner_y - menuTop;
+
+        int nLines = (availH - PLAYLIST_INNER_MARGIN * 2) / fontH - 1;  // -1 for tooltip
+        if (nLines < 1) nLines = 1;
+
+        int curSel = m_pCurMenu->GetCurSel();
+        int nStart = (curSel / nLines) * nLines;
+
+        int nMenuLines = 0;
+        int lineY = menuTop + PLAYLIST_INNER_MARGIN;
+        int lineX = menuLeft + PLAYLIST_INNER_MARGIN;
+
+        if (!m_pCurMenu->IsEditingCurSel()) {
+          int nLinesDrawn = 0;
+          int idx = 0;
+
+          // Child menus
+          for (int cm = 0; cm < m_pCurMenu->GetNumChildMenus(); cm++) {
+            CMilkMenu* pChild = m_pCurMenu->GetChildMenu(cm);
+            if (idx >= nStart && idx < nStart + nLines) {
+              if (pChild && pChild->IsEnabled() && nMenuLines < OVERLAY_MAX_MENU_LINES) {
+                OverlayMenuLine& line = od.menuLines[nMenuLines];
+                swprintf(line.text, 256, L"%s", pChild->GetName());
+                line.color = (idx == curSel) ? MENU_HILITE_COLOR : MENU_COLOR;
+                line.x = lineX;
+                line.y = lineY;
+                lineY += fontH;
+                nMenuLines++;
+                nLinesDrawn++;
+              }
+              if (m_bShowMenuToolTips && idx == curSel) {
+                od.bShowTooltip = true;
+                wcsncpy(od.tooltip, wasabiApiLangString(IDS_SZ_MENU_NAV_TOOLTIP), 1023);
+                od.tooltip[1023] = 0;
+              }
+            }
+            idx++;
+          }
+
+          // Child items
+          CMilkMenuItem* pItem = m_pCurMenu->GetFirstChildItem();
+          while (pItem && nLinesDrawn < nStart + nLines) {
+            if (!pItem->m_bEnabled) { pItem = pItem->m_pNext; idx++; continue; }
+            if (idx >= nStart && nMenuLines < OVERLAY_MAX_MENU_LINES) {
+              OverlayMenuLine& line = od.menuLines[nMenuLines];
+              size_t addr = pItem->m_var_offset + (size_t)m_pState;
+              switch (pItem->m_type) {
+              case MENUITEMTYPE_BOOL:
+                swprintf(line.text, 256, L"%s [%s]", pItem->m_szName,
+                  *((bool*)addr) ? L"ON" : L"OFF");
+                break;
+              default:
+                wcsncpy(line.text, pItem->m_szName, 255);
+                line.text[255] = 0;
+                break;
+              }
+              line.color = (idx == curSel) ? MENU_HILITE_COLOR : MENU_COLOR;
+              line.x = lineX;
+              line.y = lineY;
+              lineY += fontH;
+              nMenuLines++;
+              nLinesDrawn++;
+
+              if (m_bShowMenuToolTips && idx == curSel && pItem->m_szToolTip[0]) {
+                od.bShowTooltip = true;
+                wcsncpy(od.tooltip, pItem->m_szToolTip, 1023);
+                od.tooltip[1023] = 0;
+              }
+            }
+            pItem = pItem->m_pNext;
+            idx++;
+          }
+        } else {
+          // Editing current selection — show instructions + current value
+          CMilkMenuItem* pItem = m_pCurMenu->GetFirstChildItem();
+          for (int sk = m_pCurMenu->GetNumChildMenus(); sk < curSel; sk++)
+            pItem = pItem->m_pNext;
+          size_t addr = pItem->m_var_offset + (size_t)m_pState;
+
+          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
+            OverlayMenuLine& line = od.menuLines[nMenuLines];
+            wcsncpy(line.text, wasabiApiLangString(IDS_USE_UP_DOWN_ARROW_KEYS), 255);
+            line.text[255] = 0;
+            line.color = MENU_COLOR;
+            line.x = lineX; line.y = lineY; lineY += fontH;
+            nMenuLines++;
+          }
+          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
+            OverlayMenuLine& line = od.menuLines[nMenuLines];
+            swprintf(line.text, 256, wasabiApiLangString(IDS_CURRENT_VALUE_OF_X), pItem->m_szName);
+            line.color = MENU_COLOR;
+            line.x = lineX; line.y = lineY; lineY += fontH;
+            nMenuLines++;
+          }
+          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
+            OverlayMenuLine& line = od.menuLines[nMenuLines];
+            switch (pItem->m_type) {
+            case MENUITEMTYPE_INT:
+              swprintf(line.text, 256, L" %d ", *((int*)addr));
+              break;
+            case MENUITEMTYPE_FLOAT:
+            case MENUITEMTYPE_LOGFLOAT:
+              swprintf(line.text, 256, L" %5.3f ", *((float*)addr));
+              break;
+            case MENUITEMTYPE_BLENDABLE:
+            case MENUITEMTYPE_LOGBLENDABLE:
+              swprintf(line.text, 256, L" %5.3f ", ((CBlendableFloat*)addr)->eval(-1));
+              break;
+            default:
+              wcscpy(line.text, L" ? ");
+              break;
+            }
+            line.color = MENU_HILITE_COLOR;
+            line.x = lineX; line.y = lineY; lineY += fontH;
+            nMenuLines++;
+          }
+          if (m_bShowMenuToolTips && pItem->m_szToolTip[0]) {
+            od.bShowTooltip = true;
+            wcsncpy(od.tooltip, pItem->m_szToolTip, 1023);
+            od.tooltip[1023] = 0;
+          }
+        }
+
+        od.nMenuLines = nMenuLines;
+
+        // Dark background box rect
+        od.menuBox.left   = menuLeft;
+        od.menuBox.top    = menuTop;
+        od.menuBox.right  = xR;
+        od.menuBox.bottom = lineY + PLAYLIST_INNER_MARGIN;
+
+        // Tooltip position (lower-right corner)
+        if (od.bShowTooltip) {
+          od.tooltipX = xR - 500;
+          od.tooltipY = *lower_right_corner_y - fontH - TEXT_MARGIN;
+        }
+      }
+
+      m_overlay.UpdateData(od);
+    }
+
+    // c) fps display (fallback to CTextManager if overlay thread is dead)
+    if (m_bShowFPS && !m_overlay.IsAlive()) {
       SelectFont(SIMPLE_FONT);
       swprintf(buf, L"%s: %4.2f ", wasabiApiLangString(IDS_FPS), GetFps()); // leave extra space @ end, so italicized fonts don't get clipped
       MyTextOut_Shadow(buf, MTO_UPPER_RIGHT);
     }
 
-    // d) debug information
-    if (m_bShowDebugInfo) {
+    // d) debug information (fallback to CTextManager if overlay thread is dead)
+    if (m_bShowDebugInfo && !m_overlay.IsAlive()) {
       SelectFont(SIMPLE_FONT);
       DWORD color = GetFontColor(SIMPLE_FONT);
 
@@ -5918,22 +6109,9 @@ void CPlugin::MyRenderUI(
       }
     }
     else if (m_UI_mode == UI_MENU) {
-      assert(m_pCurMenu);
-      SetRect(&r, xL, *upper_left_corner_y, xR, *lower_left_corner_y);
-
-      RECT darkbox = { 0 };
-      m_pCurMenu->DrawMenu(r, xR, *lower_right_corner_y, 1, &darkbox);
-      *upper_left_corner_y += darkbox.bottom - darkbox.top + PLAYLIST_INNER_MARGIN * 3;
-
-      darkbox.right += PLAYLIST_INNER_MARGIN * 2;
-      darkbox.bottom += PLAYLIST_INNER_MARGIN * 2;
-      DrawDarkTranslucentBox(&darkbox);
-
-      r.top += PLAYLIST_INNER_MARGIN;
-      r.left += PLAYLIST_INNER_MARGIN;
-      r.right += PLAYLIST_INNER_MARGIN;
-      r.bottom += PLAYLIST_INNER_MARGIN;
-      m_pCurMenu->DrawMenu(r, xR, *lower_right_corner_y);
+      // Menu is rendered entirely via the overlay window (GDI layered window).
+      // Data is fed to the overlay thread earlier in this function.
+      // No DX12 rendering needed here.
     }
     else if (m_UI_mode == UI_UPGRADE_PIXEL_SHADER) {
       RECT rect = { 0 };
