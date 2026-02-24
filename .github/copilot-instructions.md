@@ -1,34 +1,16 @@
-﻿# GitHub Copilot Instructions for MDropDX12 Project
+# GitHub Copilot Instructions for MDropDX12
 
 ## Critical: Windows API Constants
 
-⚠️ **IMPORTANT**: The correct constant is `HWND_NOTOPMOST` (one T), NOT `HWND_NOTTOPMOST` (two T's)
-
-This is a Windows API constant defined in `winuser.h`. Always use the correct spelling.
+**IMPORTANT**: The correct constant is `HWND_NOTOPMOST` (one T), NOT `HWND_NOTTOPMOST` (two T's)
 
 ## Code Standards
 
-### C++ Code
 - **Standard**: C++17
 - **Platform**: Windows (Win32 API)
 - **Graphics**: DirectX 12 (D3D11on12 for Direct2D text)
 - **Audio**: WASAPI loopback capture
-
-### .NET Code  
-- **Framework**: .NET 8
-- **Language**: C#
-
-## Project Structure
-
-### Visualizer (C++)
-- Ground-up DirectX 12 rebuild of the MilkDrop2 visualizer engine
-- Uses DirectX 12 for rendering (D3D11on12 interop for Direct2D text)
-- Audio capture via WASAPI loopback
-- Spout integration for texture sharing
-
-### Remote (C#/.NET 8)
-- WPF-based remote control application
-- Communicates with visualizer via named pipes and window messages
+- **Main source**: `src/vis_milk2/`
 
 ## Common Patterns
 
@@ -46,18 +28,15 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 - Render thread: Main window and DirectX rendering
 - Setup thread: Shader precompilation
 - Audio thread: WASAPI loopback capture
+- Overlay thread: GDI layered window for HUD text
 - Use `std::atomic` for thread-safe flags
 
 ## Naming Conventions
 
-### C++ Code
 - Classes: `PascalCase` (e.g., `CPlugin`, `MDropDX12`)
 - Member variables: `m_camelCase` (e.g., `m_WindowWidth`)
 - Functions: `PascalCase` (e.g., `StartRenderThread`)
 - Constants: `UPPER_CASE` (e.g., `SAMPLE_SIZE`)
-
-### C# Code
-- Follow standard C# conventions (PascalCase for public members)
 
 ## Important Notes
 
@@ -68,6 +47,7 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 
 ## Build Configuration
 
+- Build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
 - Debug: Uses `../../Release` as working directory
 - Release: Uses executable directory as base path
 - Always append backslash to base directory paths

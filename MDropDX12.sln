@@ -2,37 +2,23 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.0.11217.181
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MDropDX12Visualizer", "Visualizer\vis_milk2\plugin.vcxproj", "{881FB534-7396-485A-ADC2-6FBEBED7A0F4}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12Remote", "Remote\MDropDX12Remote.csproj", "{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}"
-	ProjectSection(ProjectDependencies) = postProject
-		{881FB534-7396-485A-ADC2-6FBEBED7A0F4} = {881FB534-7396-485A-ADC2-6FBEBED7A0F4}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MDropDX12Visualizer", "src\vis_milk2\plugin.vcxproj", "{881FB534-7396-485A-ADC2-6FBEBED7A0F4}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
 	ProjectSection(SolutionItems) = preProject
-		Build\1-copy-presets-beatdrop-to-release.cmd = Build\1-copy-presets-beatdrop-to-release.cmd
-		Build\2-copy-presets-release-to-visualizer.cmd = Build\2-copy-presets-release-to-visualizer.cmd
+		config\1-copy-presets-beatdrop-to-release.cmd = config\1-copy-presets-beatdrop-to-release.cmd
+		config\2-copy-presets-release-to-visualizer.cmd = config\2-copy-presets-release-to-visualizer.cmd
 		Changes.md = Changes.md
 		Manual.md = Manual.md
-		Build\messages.ini = Build\messages.ini
-		Build\notes.md = Build\notes.md
-		Build\precompile.txt = Build\precompile.txt
+		config\messages.ini = config\messages.ini
+		config\precompile.txt = config\precompile.txt
 		README.md = README.md
-		Build\README.txt = Build\README.txt
-		Install\release-zip.cmd = Install\release-zip.cmd
-		Build\release.cmd = Build\release.cmd
-		Build\script-default.txt = Build\script-default.txt
-		Build\settings-remote.json = Build\settings-remote.json
-		Build\settings.ini = Build\settings.ini
-		Build\sprites.ini = Build\sprites.ini
-	EndProjectSection
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12RemoteTests", "RemoteTests\MDropDX12RemoteTests.csproj", "{79CA1E64-42BC-47B1-A247-4C10B7A3855E}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12MessageEditor", "MessageEditor\MDropDX12MessageEditor.csproj", "{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}"
-	ProjectSection(ProjectDependencies) = postProject
-		{881FB534-7396-485A-ADC2-6FBEBED7A0F4} = {881FB534-7396-485A-ADC2-6FBEBED7A0F4}
+		config\README.txt = config\README.txt
+		install\release-zip.cmd = install\release-zip.cmd
+		config\release.cmd = config\release.cmd
+		config\script-default.txt = config\script-default.txt
+		config\settings.ini = config\settings.ini
+		config\sprites.ini = config\sprites.ini
 	EndProjectSection
 EndProject
 Global
@@ -45,18 +31,6 @@ Global
 		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Debug|Win32.Build.0 = Debug|Win32
 		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Release|Win32.ActiveCfg = Release|Win32
 		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Release|Win32.Build.0 = Release|Win32
-		{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}.Debug|Win32.ActiveCfg = Debug|Any CPU
-		{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}.Debug|Win32.Build.0 = Debug|Any CPU
-		{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}.Release|Win32.ActiveCfg = Release|Any CPU
-		{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}.Release|Win32.Build.0 = Release|Any CPU
-		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Debug|Win32.ActiveCfg = Debug|Any CPU
-		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Debug|Win32.Build.0 = Debug|Any CPU
-		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Release|Win32.ActiveCfg = Release|Any CPU
-		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Release|Win32.Build.0 = Release|Any CPU
-		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Debug|Win32.ActiveCfg = Debug|Any CPU
-		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Debug|Win32.Build.0 = Debug|Any CPU
-		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Release|Win32.ActiveCfg = Release|Any CPU
-		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Release|Win32.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

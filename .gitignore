@@ -1,7 +1,5 @@
-Remote/**/Debug
-Remote/**/Release
-Visualizer/**/Debug
-Visualizer/**/Release
+src/**/Debug
+src/**/Release
 **/.vs
 **/*.opendb
 **/*.aps
@@ -9,26 +7,21 @@ Visualizer/**/Release
 **/*.db
 vis_milk2/bin
 /MDropDX12.slnLaunch.user
-/Visualizer/vis_milk2/log
-/Install/_Archiv
-/Build/roadmap.md
+/src/vis_milk2/log
+/install/_Archiv
+/config/roadmap.md
 *.exe
-/Install/*.zip
+/install/*.zip
 /.gitattributes
 /.idea/.idea.MDropDX12/.idea
-/Remote/.idea/.idea.Remote.dir/.idea
-/Install/sign.cmd
-/Build/notes.md
+/install/sign.cmd
+/config/notes.md
 /Release/*
 !/Release/Developer*.*
-/MDropDX12RemoteTests/bin
-/MDropDX12RemoteTests/obj
-/RemoteTests/bin
-/RemoteTests/obj
 /packages
 enc_temp_folder/
 
 # Runtime-generated files
 *.log
-Visualizer/settings.ini
-Visualizer/messages.ini
+src/settings.ini
+src/messages.ini
