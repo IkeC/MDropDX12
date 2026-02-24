@@ -22,6 +22,29 @@ struct OverlayData {
     bool bEnableMouseInteraction;
     bool bPresetLocked;
 
+    // HUD: preset name (top-right, above FPS)
+    bool    bShowPresetName;
+    DWORD   presetNameColor;            // 0x00RRGGBB — passed to SetTextColor via DrawShadowText
+    wchar_t szPresetName[256];          // lock-symbol prefix already included if locked
+
+    // HUD: rating (top-right, below preset name)
+    bool    bShowRating;
+    wchar_t szRating[64];               // pre-formatted e.g. L" Rating: 3 "
+
+    // HUD: song title (bottom-left)
+    bool    bShowSongTitle;
+    wchar_t szSongTitle[256];
+
+    // HUD: notifications / error messages
+    static const int OVERLAY_MAX_NOTIFICATIONS = 32;
+    struct OverlayNotification {
+        wchar_t text[256];
+        DWORD   color;      // 0x00RRGGBB
+        int     corner;     // MTO_UPPER_RIGHT=0, MTO_UPPER_LEFT=1, MTO_LOWER_RIGHT=2, MTO_LOWER_LEFT=3
+    };
+    int                  nNotifications;
+    OverlayNotification  notifications[OVERLAY_MAX_NOTIFICATIONS];
+
     int clientWidth;
     int clientHeight;
 
@@ -86,8 +109,10 @@ private:
     void PostProcessAlpha();
 
     // GDI text helper: draw text with 1px shadow (debug info)
+    // rgbColor defaults to white (0xFFFFFF); existing callers need no changes.
     void DrawShadowText(const wchar_t* text, bool alignRight,
-                        int marginX, int* pY, int rightEdge, bool fromBottom = false);
+                        int marginX, int* pY, int rightEdge,
+                        bool fromBottom = false, DWORD rgbColor = 0xFFFFFF);
 
     // Menu rendering
     void RenderMenuToDIB();
@@ -123,6 +148,8 @@ private:
     HBITMAP             m_hDIB = nullptr;
     BYTE*               m_pDIBBits = nullptr;
     HFONT               m_hFont = nullptr;
+    HFONT               m_hHUDFont = nullptr;   // Segoe UI, for preset name / song title
+    int                 m_hudFontH = 0;
     HFONT               m_hMenuFont = nullptr;
     int                 m_menuFontHeight = 0;
     UINT                m_texWidth = 0;

@@ -818,6 +818,7 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_MSG_INTERVAL_LBL 2096
 #define IDC_MW_MSG_JITTER_LBL   2097
 #define IDC_MW_MSG_OPENINI      2098
+#define IDC_MW_MSG_AUTOSIZE     2099
 
 // Message Edit Dialog controls
 #define IDC_MSGEDIT_TEXT         2100
@@ -2836,7 +2837,10 @@ int CPlugin::AllocateMyDX9Stuff() {
       m_lpDX->CreateBindingBlockForTexture(m_dx12Title[i]);
     }
 
-    // Create shared upload buffer for title textures
+    // Create per-slot upload buffers (one per supertext slot).
+    // A single shared buffer caused corruption when multiple supertexts redrew
+    // in the same frame: both CopyTextureRegion commands executed after the last
+    // CPU write, so the first texture got the second message's data.
     if (titleOK) {
       UINT rowPitch = (tw * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
                       & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
@@ -2854,10 +2858,13 @@ int CPlugin::AllocateMyDX9Stuff() {
       bufDesc.SampleDesc.Count = 1;
       bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-      dev->CreateCommittedResource(
-          &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
-          D3D12_RESOURCE_STATE_GENERIC_READ,
-          nullptr, IID_PPV_ARGS(&m_dx12TitleUploadBuf));
+      for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+        m_dx12TitleUploadBuf[i].Reset();
+        dev->CreateCommittedResource(
+            &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&m_dx12TitleUploadBuf[i]));
+      }
     }
 
     for (int i = 0; i < NUM_SUPERTEXTS; i++) {
@@ -5637,8 +5644,8 @@ void CPlugin::MyRenderUI(
   // 1. render text in upper-right corner - EXCEPT USER MESSAGE - it goes last b/c it draws a box under itself
   //                                        and it should be visible over everything else (usually an error msg)
   {
-    // a) preset name
-    if (m_bShowPresetInfo && !m_blackmode) {
+    // a) preset name — rendered by overlay thread; CTextManager used only as fallback
+    if (m_bShowPresetInfo && !m_blackmode && !m_overlay.IsAlive()) {
       SelectFont(DECORATIVE_FONT);
       swprintf(
         buf,
@@ -5652,11 +5659,10 @@ void CPlugin::MyRenderUI(
       DWORD cb = m_fontinfo[DECORATIVE_FONT].B;
       DWORD color = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
       MyTextOut_Color(buf, MTO_UPPER_RIGHT, color);
-      // MyTextOut_Shadow(buf, MTO_UPPER_RIGHT, color);
     }
 
-    // b) preset rating
-    if (m_bShowRating || GetTime() < m_fShowRatingUntilThisTime) {
+    // b) preset rating — rendered by overlay thread; CTextManager used only as fallback
+    if ((m_bShowRating || GetTime() < m_fShowRatingUntilThisTime) && !m_overlay.IsAlive()) {
       // see also: SetCurrentPresetRating() in milkdrop.cpp
       SelectFont(SIMPLE_FONT);
       swprintf(buf, L" %s: %d ", wasabiApiLangString(IDS_RATING), (int)m_pState->m_fRating);
@@ -5704,6 +5710,54 @@ void CPlugin::MyRenderUI(
       od.mouseX          = m_mouseX;
       od.mouseY          = m_mouseY;
       od.mouseDown       = m_mouseDown;
+
+      // HUD: preset name
+      od.bShowPresetName = m_bShowPresetInfo && !m_blackmode;
+      if (od.bShowPresetName) {
+        swprintf(od.szPresetName, 256, L"%s%s ",
+          (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\xD83D\xDD12 " : L"",
+          (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
+        od.presetNameColor = ((DWORD)m_fontinfo[DECORATIVE_FONT].R << 16)
+                           | ((DWORD)m_fontinfo[DECORATIVE_FONT].G << 8)
+                           |  (DWORD)m_fontinfo[DECORATIVE_FONT].B;
+      }
+
+      // HUD: rating
+      od.bShowRating = m_bShowRating || GetTime() < m_fShowRatingUntilThisTime;
+      if (od.bShowRating && m_pState) {
+        swprintf(od.szRating, 64, L" %s: %d ", wasabiApiLangString(IDS_RATING), (int)m_pState->m_fRating);
+        if (!m_bEnableRating) lstrcatW(od.szRating, wasabiApiLangString(IDS_DISABLED));
+      }
+
+      // HUD: song title
+      od.bShowSongTitle = m_bShowSongTitle;
+      if (od.bShowSongTitle)
+        GetSongTitle(od.szSongTitle, sizeof(od.szSongTitle));
+
+      // HUD: notifications
+      od.nNotifications = 0;
+      if (!m_bWarningsDisabled2) {
+        float tN = GetTime();
+        int nErr = (int)m_errors.size();
+        for (int i = 0; i < nErr && od.nNotifications < OverlayData::OVERLAY_MAX_NOTIFICATIONS; i++) {
+          if (tN < m_errors[i].birthTime || tN >= m_errors[i].expireTime) continue;
+          int cat = m_errors[i].category;
+          if (cat == ERR_MSG_BOTTOM_EXTRA_1 || cat == ERR_MSG_BOTTOM_EXTRA_2 || cat == ERR_MSG_BOTTOM_EXTRA_3) {
+            auto& n = od.notifications[od.nNotifications++];
+            swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
+            int fi = NUM_BASIC_FONTS + cat - ERR_MSG_BOTTOM_EXTRA_1;
+            n.color = ((DWORD)m_fontinfo[fi].R << 16) | ((DWORD)m_fontinfo[fi].G << 8) | (DWORD)m_fontinfo[fi].B;
+            int sc = m_SongInfoDisplayCorner;
+            n.corner = (sc == 1) ? MTO_UPPER_LEFT : (sc == 2) ? MTO_UPPER_RIGHT : (sc == 4) ? MTO_LOWER_RIGHT : MTO_LOWER_LEFT;
+          }
+          else if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
+            auto& n = od.notifications[od.nNotifications++];
+            swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
+            n.color = m_errors[i].color ? (m_errors[i].color & 0x00FFFFFF) : 0x00FFFFFF;
+            n.corner = MTO_UPPER_RIGHT;
+          }
+        }
+      }
 
       // Menu data extraction — replicate DrawMenu layout for overlay rendering
       if (m_UI_mode == UI_MENU && m_pCurMenu) {
@@ -5920,8 +5974,8 @@ void CPlugin::MyRenderUI(
     wchar_t buf2[512] = { 0 };
     wchar_t buf3[512 + 1] = { 0 }; // add two extra spaces to end, so italicized fonts don't get clipped
 
-    // render song title in lower-left corner:
-    if (m_bShowSongTitle) {
+    // render song title in lower-left corner — overlay thread handles it; CTextManager is fallback
+    if (m_bShowSongTitle && !m_overlay.IsAlive()) {
       wchar_t buf4[512] = { 0 };
       SelectFont(DECORATIVE_FONT);
       GetSongTitle(buf4, sizeof(buf4)); // defined in utility.h/cpp
@@ -6795,7 +6849,7 @@ void CPlugin::MyRenderUI(
 
   // 5. render *remaining* text to upper-right corner
   {
-    // e) custom timed message:
+    // e) custom timed message — overlay thread handles rendering; keep erase + remote-send logic always
     if (!m_bWarningsDisabled2) {
       wchar_t buf[512] = { 0 };
       float t = GetTime();
@@ -6803,63 +6857,57 @@ void CPlugin::MyRenderUI(
       for (int i = 0; i < N; i++) {
         if (t >= m_errors[i].birthTime && t < m_errors[i].expireTime) {
           if (m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_1 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_2 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_3) {
-            // ERR_MSG_BOTTOM_EXTRA_1 = 6
-            int fontIndex = NUM_BASIC_FONTS + m_errors[i].category - ERR_MSG_BOTTOM_EXTRA_1;
-            SelectFont(static_cast<eFontIndex>(fontIndex));
+            // Overlay thread renders these; CTextManager used only as fallback
+            if (!m_overlay.IsAlive()) {
+              int fontIndex = NUM_BASIC_FONTS + m_errors[i].category - ERR_MSG_BOTTOM_EXTRA_1;
+              SelectFont(static_cast<eFontIndex>(fontIndex));
 
-            swprintf(buf, L"%s ", m_errors[i].msg.c_str());
+              swprintf(buf, L"%s ", m_errors[i].msg.c_str());
 
-            // 0..1
-            float age_rel = (t - m_errors[i].birthTime) / (m_errors[i].expireTime - m_errors[i].birthTime);
-            DWORD cr = m_fontinfo[fontIndex].R;
-            DWORD cg = m_fontinfo[fontIndex].G;
-            DWORD cb = m_fontinfo[fontIndex].B;
-            DWORD alpha = 0;
-            if (age_rel >= 0.0f && age_rel < 0.05f) {
-              alpha = (DWORD)(255 * (age_rel / 0.05f));
-            }
-            else if (age_rel > 0.8f && age_rel <= 1.0f) {
-              alpha = (DWORD)(255 * ((1.0f - age_rel) / 0.2f));
-            }
-            else if (age_rel >= 0.05f && age_rel <= 0.8f) {
-              alpha = 255;
-            }
-            DWORD z = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
-            if (m_SongInfoDisplayCorner == 1) {
-              MyTextOut_Color(buf, MTO_UPPER_LEFT, z);
-            }
-            else if (m_SongInfoDisplayCorner == 2) {
-              MyTextOut_Color(buf, MTO_UPPER_RIGHT, z);
-            }
-            else if (m_SongInfoDisplayCorner == 4) {
-              MyTextOut_Color(buf, MTO_LOWER_RIGHT, z);
-            }
-            else {
-              MyTextOut_Color(buf, MTO_LOWER_LEFT, z);
+              // 0..1
+              float age_rel = (t - m_errors[i].birthTime) / (m_errors[i].expireTime - m_errors[i].birthTime);
+              DWORD cr = m_fontinfo[fontIndex].R;
+              DWORD cg = m_fontinfo[fontIndex].G;
+              DWORD cb = m_fontinfo[fontIndex].B;
+              DWORD alpha = 0;
+              if (age_rel >= 0.0f && age_rel < 0.05f) {
+                alpha = (DWORD)(255 * (age_rel / 0.05f));
+              }
+              else if (age_rel > 0.8f && age_rel <= 1.0f) {
+                alpha = (DWORD)(255 * ((1.0f - age_rel) / 0.2f));
+              }
+              else if (age_rel >= 0.05f && age_rel <= 0.8f) {
+                alpha = 255;
+              }
+              DWORD z = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
+              if (m_SongInfoDisplayCorner == 1) {
+                MyTextOut_Color(buf, MTO_UPPER_LEFT, z);
+              }
+              else if (m_SongInfoDisplayCorner == 2) {
+                MyTextOut_Color(buf, MTO_UPPER_RIGHT, z);
+              }
+              else if (m_SongInfoDisplayCorner == 4) {
+                MyTextOut_Color(buf, MTO_LOWER_RIGHT, z);
+              }
+              else {
+                MyTextOut_Color(buf, MTO_LOWER_LEFT, z);
+              }
             }
           }
           else {
-            float age = t - m_errors[i].birthTime;
+            // Always send to remote (regardless of overlay state)
             if (!m_errors[i].bSentToRemote) {
-              // send once
               int res = SendMessageToMDropDX12Remote((L"STATUS=" + m_errors[i].msg).c_str());
               m_errors[i].bSentToRemote = res != 0;
             }
-            if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
-              SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
-              swprintf(buf, L"%s ", m_errors[i].msg.c_str());
-              DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);
-              MyTextOut_Color(buf, MTO_UPPER_RIGHT, col);
-
-              /*
-              float age_rel = (age) / (m_errors[i].expireTime - m_errors[i].birthTime);
-              DWORD cr = (DWORD)(200 - 199 * powf(age_rel, 4));
-              DWORD cg = 0;//(DWORD)(136 - 135*powf(age_rel,1));
-              DWORD cb = 0;
-              DWORD z = 0xFF000000 | (cr << 16) | (cg << 8) | cb;
-              MyTextOut_BGCOLOR(buf, MTO_UPPER_RIGHT, false, m_errors[i].bBold ? z : 0xFF000000);
-              */
-
+            // Overlay thread renders these; CTextManager used only as fallback
+            if (!m_overlay.IsAlive()) {
+              if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
+                SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
+                swprintf(buf, L"%s ", m_errors[i].msg.c_str());
+                DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);
+                MyTextOut_Color(buf, MTO_UPPER_RIGHT, col);
+              }
             }
           }
         }
@@ -10193,6 +10241,10 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         p->m_nNextSequentialMsg = 0;
         p->SaveMsgAutoplaySettings();
         return 0;
+      case IDC_MW_MSG_AUTOSIZE:
+        p->m_bMessageAutoSize = bChecked;
+        p->SaveMsgAutoplaySettings();
+        return 0;
 
       // Messages tab button handlers (non-checkbox)
       case IDC_MW_MSG_PUSH: {
@@ -11148,6 +11200,8 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(5, CreateCheck(hw, L"Autoplay Messages", IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH, hFont, m_bMsgAutoplay, false));
   y += lineH + 2;
   PAGE_CTRL(5, CreateCheck(hw, L"Sequential Order", IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH, hFont, m_bMsgSequential, false));
+  y += lineH + 2;
+  PAGE_CTRL(5, CreateCheck(hw, L"Auto-size messages to fit screen width", IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH, hFont, m_bMessageAutoSize, false));
   y += lineH + gap;
 
   // Interval + Jitter on same row
@@ -11347,6 +11401,8 @@ void CPlugin::LayoutSettingsControls() {
     moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);
     y += lineH + 2;
     moveCtrl(IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH);
+    y += lineH + 2;
+    moveCtrl(IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH);
     y += lineH + gap;
     // Interval + Jitter labels and edits
     moveCtrl(IDC_MW_MSG_INTERVAL_LBL, x, y, 90, lineH);
@@ -13454,6 +13510,203 @@ void CPlugin::RemoveAngleBrackets(wchar_t* str) {
   wcscpy_s(str, MAX_PATH, cleaned); // Copy the cleaned string back to the original
 }
 
+// ---------------------------------------------------------------------------
+// .milk2 double-preset support
+// ---------------------------------------------------------------------------
+
+// Maps MilkDrop3 blend-pattern names to MDropDX12 RandomizeBlendPattern() mixtype indices.
+// Returns -1 (random) for any name that is not explicitly mapped.
+static int Milk2PatternNameToMixtype(const char* name) {
+  struct { const char* name; int type; } kMap[] = {
+    {"zoom",     0},  // uniform fade
+    {"side",     1},  // directional wipe
+    {"plasma",   2},  // fractal plasma
+    {"cercle",   3},  // radial / circle
+    {"clock",    4},  // angular clock sweep
+    {"snail",    5},  // spiral
+    {"snail2",   5},
+    {"snail3",   5},
+    {"triangle", 6},
+    {"plasma2",  2},  // plasma variants -> plasma
+    {"plasma3",  2},
+  };
+  for (auto& e : kMap)
+    if (_stricmp(name, e.name) == 0) return e.type;
+  return -1;
+}
+
+// Parses a .milk2 file and writes its two preset blocks to temporary .milk files.
+// On success, outTemp1/outTemp2 hold MAX_PATH paths to temp files that the caller must delete.
+// Returns false on parse failure (malformed .milk2); temp files are not written.
+bool CPlugin::ParseMilk2File(const wchar_t* szPath,
+                              wchar_t* outTemp1, wchar_t* outTemp2,
+                              int& outMixType, float& outProgress, int& outDirection) {
+  outMixType  = -1;
+  outProgress = 0.5f;
+  outDirection = 1;
+
+  // Read entire file into a string buffer.
+  FILE* f = _wfopen(szPath, L"rb");
+  if (!f) return false;
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  std::string buf(fsize, '\0');
+  fread(&buf[0], 1, fsize, f);
+  fclose(f);
+
+  // Parse header key=value lines before [PRESET1_BEGIN].
+  {
+    size_t hdrEnd = buf.find("[PRESET1_BEGIN]");
+    if (hdrEnd == std::string::npos) return false;
+    std::string hdr = buf.substr(0, hdrEnd);
+    auto getVal = [&](const char* key) -> std::string {
+      std::string k = std::string(key) + "=";
+      size_t pos = hdr.find(k);
+      if (pos == std::string::npos) return "";
+      size_t start = pos + k.size();
+      size_t end = hdr.find_first_of("\r\n", start);
+      return hdr.substr(start, end - start);
+    };
+    std::string pat = getVal("blending_pattern");
+    if (!pat.empty()) outMixType = Milk2PatternNameToMixtype(pat.c_str());
+    std::string prog = getVal("blending_progress");
+    if (!prog.empty()) outProgress = (float)atof(prog.c_str());
+    std::string dir = getVal("blending_direction");
+    if (!dir.empty()) outDirection = atoi(dir.c_str());
+  }
+
+  // Helper: extract text between two markers, starting from [preset00] or version header.
+  auto extractPreset = [&](const char* beginMarker, const char* endMarker) -> std::string {
+    size_t bPos = buf.find(beginMarker);
+    if (bPos == std::string::npos) return "";
+    size_t ePos = buf.find(endMarker, bPos);
+    if (ePos == std::string::npos) return "";
+    // The block between [PRESETn_BEGIN] and [PRESETn_END] starts with NAME= / version lines,
+    // then [preset00].  Pass everything from the version/name header so Import() can
+    // read MILKDROP_PRESET_VERSION and PSVERSION* before the [preset00] section.
+    size_t contentStart = bPos + strlen(beginMarker);
+    // Skip past the [PRESETn_BEGIN] line ending
+    contentStart = buf.find_first_of("\r\n", contentStart);
+    if (contentStart == std::string::npos) return "";
+    contentStart = buf.find_first_not_of("\r\n", contentStart);
+    if (contentStart == std::string::npos) return "";
+    return buf.substr(contentStart, ePos - contentStart);
+  };
+
+  std::string p1 = extractPreset("[PRESET1_BEGIN]", "[PRESET1_END]");
+  std::string p2 = extractPreset("[PRESET2_BEGIN]", "[PRESET2_END]");
+  if (p1.empty() || p2.empty()) return false;
+
+  // Write to Windows temp files.
+  wchar_t tempDir[MAX_PATH];
+  GetTempPathW(MAX_PATH, tempDir);
+
+  if (GetTempFileNameW(tempDir, L"mk2", 0, outTemp1) == 0) return false;
+  if (GetTempFileNameW(tempDir, L"mk2", 0, outTemp2) == 0) {
+    DeleteFileW(outTemp1);
+    return false;
+  }
+
+  auto writeTmp = [](const wchar_t* path, const std::string& text) -> bool {
+    FILE* out = _wfopen(path, L"wb");
+    if (!out) return false;
+    fwrite(text.data(), 1, text.size(), out);
+    fclose(out);
+    return true;
+  };
+
+  if (!writeTmp(outTemp1, p1) || !writeTmp(outTemp2, p2)) {
+    DeleteFileW(outTemp1);
+    DeleteFileW(outTemp2);
+    return false;
+  }
+  return true;
+}
+
+// Forward declaration: resets _GetLineByName's static FILE* cache in state.cpp.
+// Required to prevent stale data when two Import() calls use consecutively-allocated FILE*s.
+extern void GetFast_CLEAR();
+
+// Loads a .milk2 double-preset: imports both preset blocks, sets up the blend pattern
+// from the file's metadata, and starts the animated crossfade.
+void CPlugin::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) {
+  wchar_t temp1[MAX_PATH] = {}, temp2[MAX_PATH] = {};
+  int mixType = -1;
+  float progress = 0.5f;
+  int direction = 1;
+
+  if (!ParseMilk2File(szPresetFilename, temp1, temp2, mixType, progress, direction)) {
+    // Malformed .milk2 — log and bail
+    {
+      wchar_t dbgBuf[MAX_PATH + 64];
+      swprintf_s(dbgBuf, L"LoadMilk2Preset: failed to parse %s", szPresetFilename);
+      DebugLogW(dbgBuf);
+    }
+    return;
+  }
+
+  // Update current preset path
+  lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
+
+  // Import preset 1 into m_pOldState (the "from" state)
+  m_pOldState->Import(temp1, GetTime(), nullptr, STATE_ALL);
+
+  // IMPORTANT: _GetLineByName in state.cpp caches the last FILE* it saw. If the OS reuses
+  // the same FILE* address for the second temp file, it would return stale data from preset 1.
+  // GetFast_CLEAR() forces a re-scan on the next Import() call.
+  GetFast_CLEAR();
+
+  // Import preset 2 into m_pState (the "to" state), using m_pOldState for CBlendableFloat init
+  m_pState->Import(temp2, GetTime(), m_pOldState, STATE_ALL);
+
+  // Fix descriptions: Import() derives m_szDesc from the temp file path, which would show
+  // something like "mk2XXXX". Override with the .milk2 filename (without path or extension).
+  {
+    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
+    if (!p) p = szPresetFilename; else p++;
+    // m_pState shows the .milk2 name in the UI overlay
+    wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
+    // Strip .milk2 extension
+    wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
+    if (dot) *dot = L'\0';
+    // m_pOldState (blend source) can share the same display name
+    wcscpy_s(m_pOldState->m_szDesc, m_pState->m_szDesc);
+  }
+
+  // Apply the blend pattern from the .milk2 metadata, then restore user's mixtype preference
+  int savedMixType = m_nMixType;
+  m_nMixType = mixType;
+  RandomizeBlendPattern();
+  m_nMixType = savedMixType;
+
+  // Start animated crossfade
+  if (fBlendTime >= 0.001f)
+    m_pState->StartBlendFrom(m_pOldState, GetTime(), fBlendTime);
+
+  // Compile shaders for m_pOldState -> m_OldShaders
+  m_OldShaders.warp.Clear();
+  m_OldShaders.comp.Clear();
+  LoadShaders(&m_OldShaders, m_pOldState, false, false);
+
+  // Compile shaders for m_pState -> m_shaders
+  m_shaders.warp.Clear();
+  m_shaders.comp.Clear();
+  LoadShaders(&m_shaders, m_pState, false, false);
+  CreateDX12PresetPSOs();
+
+  m_fPresetStartTime = GetTime();
+  m_fNextPresetTime  = -1.0f;
+  NumTotalPresetsLoaded++;
+  OnFinishedLoadingPreset();
+
+  // Clean up temp files
+  DeleteFileW(temp1);
+  DeleteFileW(temp2);
+}
+
+// ---------------------------------------------------------------------------
+
 void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   // clear old error msg...
   if (m_nFramesSinceResize > 4)
@@ -13490,6 +13743,15 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     }
     else {
       // we're retracing our steps, either forward or backward...
+    }
+  }
+
+  // .milk2 double-preset: route to dedicated loader
+  {
+    int fnLen = lstrlenW(szPresetFilename);
+    if (fnLen >= 6 && wcsicmp(szPresetFilename + fnLen - 6, L".milk2") == 0) {
+      LoadMilk2Preset(szPresetFilename, fBlendTime);
+      return;
     }
   }
 
@@ -13864,12 +14126,14 @@ retry:
         swprintf(szFilename, L"*%s", fd.cFileName);
     }
     else {
-      // skip normal files not ending in ".milk"
+      // skip normal files not ending in ".milk" or ".milk2"
       int len = lstrlenW(fd.cFileName);
-      if (len < 5 || wcsicmp(fd.cFileName + len - 5, L".milk") != 0)
+      bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
+      bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
+      if (!bIsMilk && !bIsMilk2)
         bSkip = true;
 
-      // if it is .milk, make sure we know how to run its pixel shaders -
+      // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
       // otherwise we don't want to show it in the preset list!
       if (!bSkip) {
         // If the first line of the file is not "MILKDROP_PRESET_VERSION XXX",
@@ -14736,6 +15000,8 @@ void CPlugin::SaveMsgAutoplaySettings() {
   WritePrivateProfileStringW(L"Milkwave", L"MsgSequential", val, pIni);
   WritePrivateProfileFloatW(m_fMsgAutoplayInterval, (wchar_t*)L"MsgAutoplayInterval", pIni, (wchar_t*)L"Milkwave");
   WritePrivateProfileFloatW(m_fMsgAutoplayJitter, (wchar_t*)L"MsgAutoplayJitter", pIni, (wchar_t*)L"Milkwave");
+  swprintf(val, 32, L"%d", m_bMessageAutoSize ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MessageAutoSize", val, pIni);
 
   // Save playback order
   swprintf(val, 32, L"%d", m_nMsgAutoplayCount);
@@ -14755,6 +15021,7 @@ void CPlugin::LoadMsgAutoplaySettings() {
   m_bMsgSequential = GetPrivateProfileIntW(L"Milkwave", L"MsgSequential", 0, pIni) != 0;
   m_fMsgAutoplayInterval = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayInterval", 30.0f, pIni);
   m_fMsgAutoplayJitter = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayJitter", 5.0f, pIni);
+  m_bMessageAutoSize = GetPrivateProfileIntW(L"Milkwave", L"MessageAutoSize", 0, pIni) != 0;
 
   // Load playback order (if saved); otherwise use default order
   int count = GetPrivateProfileIntW(L"MsgOrder", L"Count", 0, pIni);

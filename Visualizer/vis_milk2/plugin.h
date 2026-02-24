@@ -658,7 +658,7 @@ public:
   DX12Texture m_dx12VS[2];                    // double-buffered visualizer canvas
   DX12Texture m_dx12Blur[NUM_BLUR_TEX];       // blur pyramid (6 levels)
   DX12Texture m_dx12Title[NUM_SUPERTEXTS];    // title overlays
-  ComPtr<ID3D12Resource> m_dx12TitleUploadBuf; // shared upload buffer for title textures
+  ComPtr<ID3D12Resource> m_dx12TitleUploadBuf[NUM_SUPERTEXTS]; // per-slot upload buffers (avoids cross-slot corruption)
   HDC         m_titleDC = nullptr;             // GDI memory DC for title text rendering
   HBITMAP     m_titleDIB = nullptr;            // DIB section for title text
   BYTE*       m_titleDIBBits = nullptr;        // pixel data pointer
@@ -752,6 +752,8 @@ public:
   void        Randomize();
   void        LoadRandomPreset(float fBlendTime);
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
+  bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
+  void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
   void        FindValidPresetDir();
   wchar_t* GetMsgIniFile() { return m_szMsgIniFile; };
@@ -880,6 +882,7 @@ public:
   bool    m_bMsgSequential = false;           // true=sequential, false=random
   float   m_fMsgAutoplayInterval = 30.0f;     // base seconds between messages
   float   m_fMsgAutoplayJitter = 5.0f;        // +/- randomness (seconds)
+  bool    m_bMessageAutoSize = false;         // global: auto-fit messages to screen width
   float   m_fNextAutoMsgTime = -1.0f;         // scheduled time for next auto message
   int     m_nNextSequentialMsg = 0;           // index into playback order
   int     m_nMsgAutoplayOrder[MAX_CUSTOM_MESSAGES]; // playback order array

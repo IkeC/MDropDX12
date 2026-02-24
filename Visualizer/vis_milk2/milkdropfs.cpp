@@ -176,7 +176,7 @@ bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
   if (m_supertexts[supertextIndex].szTextW[0] == 0)
     return false;
 
-  if (!m_titleDC || !m_titleDIBBits || !m_dx12TitleUploadBuf || !m_lpDX)
+  if (!m_titleDC || !m_titleDIBBits || !m_dx12TitleUploadBuf[texIndex] || !m_lpDX)
     return false;
 
   wchar_t szTextToDraw[512];
@@ -260,6 +260,15 @@ bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
       DWORD flags = (lineCount == 1) ? (DT_SINGLELINE | DT_CENTER) : (DT_WORDBREAK | DT_CENTER);
       m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, flags);
 
+      // Global autosize: compute fFontSize so text fills ~90% of screen width
+      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
+        const float kFill = 0.9f;
+        float ratio = kFill * (float)m_supertexts[supertextIndex].nFontSizeUsed
+                      / ((float)m_nTexSizeX / 1024.0f * 100.0f);
+        float computed = 50.0f + logf(ratio) / logf(1.033f);
+        m_supertexts[supertextIndex].fFontSize = max(0.0f, min(100.0f, computed));
+      }
+
       SelectObject(m_titleDC, oldFont);
       DeleteObject(bestFont);
     } else {
@@ -310,12 +319,12 @@ bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
                   & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
 
   BYTE* uploadPtr = nullptr;
-  m_dx12TitleUploadBuf->Map(0, nullptr, (void**)&uploadPtr);
+  m_dx12TitleUploadBuf[texIndex]->Map(0, nullptr, (void**)&uploadPtr);
   if (uploadPtr) {
     for (UINT y = 0; y < th; y++) {
       memcpy(uploadPtr + y * rowPitch, m_titleDIBBits + y * tw * 4, tw * 4);
     }
-    m_dx12TitleUploadBuf->Unmap(0, nullptr);
+    m_dx12TitleUploadBuf[texIndex]->Unmap(0, nullptr);
   }
 
   auto* cmdList = m_lpDX->m_commandList.Get();
@@ -323,7 +332,7 @@ bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
   m_lpDX->TransitionResource(m_dx12Title[texIndex], D3D12_RESOURCE_STATE_COPY_DEST);
 
   D3D12_TEXTURE_COPY_LOCATION src = {};
-  src.pResource = m_dx12TitleUploadBuf.Get();
+  src.pResource = m_dx12TitleUploadBuf[texIndex].Get();
   src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   src.PlacedFootprint.Offset = 0;
   src.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;

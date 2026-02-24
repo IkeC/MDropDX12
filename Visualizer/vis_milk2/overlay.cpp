@@ -225,11 +225,19 @@ void COverlayThread::CreateDIB(UINT w, UINT h) {
     if (m_hFont)
         SelectObject(m_hMemDC, m_hFont);
 
+    // HUD font: Segoe UI, proportional to window height, for preset name / song title
+    m_hudFontH = max(20, (int)h / 30);
+    m_hHUDFont = CreateFontW(
+        -m_hudFontH, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
     SetBkMode(m_hMemDC, TRANSPARENT);
 }
 
 void COverlayThread::ReleaseDIB() {
     if (m_hMenuFont) { DeleteObject(m_hMenuFont); m_hMenuFont = nullptr; m_menuFontHeight = 0; }
+    if (m_hHUDFont)  { DeleteObject(m_hHUDFont);  m_hHUDFont = nullptr;  m_hudFontH = 0; }
     if (m_hFont) { DeleteObject(m_hFont); m_hFont = nullptr; }
     if (m_hDIB)  { DeleteObject(m_hDIB);  m_hDIB = nullptr; }
     if (m_hMemDC){ DeleteDC(m_hMemDC);    m_hMemDC = nullptr; }
@@ -275,7 +283,9 @@ void COverlayThread::ThreadFunc() {
                 m_bDataAvailable.store(false, std::memory_order_release);
 
                 if (m_hMemDC && m_pDIBBits &&
-                    (m_currentData.bShowFPS || m_currentData.bShowDebugInfo || m_currentData.bShowMenu)) {
+                    (m_currentData.bShowFPS || m_currentData.bShowDebugInfo || m_currentData.bShowMenu ||
+                     m_currentData.bShowPresetName || m_currentData.bShowRating ||
+                     m_currentData.bShowSongTitle  || m_currentData.nNotifications > 0)) {
                     RenderOverlayToDIB();
                     PostProcessAlpha();
                     PresentToLayeredWindow();
@@ -307,7 +317,7 @@ void COverlayThread::ThreadFunc() {
 // ---------------------------------------------------------------------------
 void COverlayThread::DrawShadowText(const wchar_t* text, bool alignRight,
                                      int marginX, int* pY, int rightEdge,
-                                     bool fromBottom) {
+                                     bool fromBottom, DWORD rgbColor) {
     if (!m_hMemDC || !text || !text[0]) return;
 
     // Measure text
@@ -343,8 +353,11 @@ void COverlayThread::DrawShadowText(const wchar_t* text, bool alignRight,
     SetTextColor(m_hMemDC, RGB(64, 64, 64));
     ::DrawTextW(m_hMemDC, text, -1, &rShadow, DT_SINGLELINE | DT_NOPREFIX);
 
-    // Main text: white
-    SetTextColor(m_hMemDC, RGB(255, 255, 255));
+    // Main text: caller-specified color (default white)
+    BYTE cr = (BYTE)((rgbColor >> 16) & 0xFF);
+    BYTE cg = (BYTE)((rgbColor >> 8) & 0xFF);
+    BYTE cb = (BYTE)(rgbColor & 0xFF);
+    SetTextColor(m_hMemDC, RGB(cr, cg, cb));
     ::DrawTextW(m_hMemDC, text, -1, &r, DT_SINGLELINE | DT_NOPREFIX);
 }
 
@@ -360,8 +373,22 @@ void COverlayThread::RenderOverlayToDIB() {
     int upperRightY = margin;
     int upperLeftY = margin;
     int lowerRightY = (int)h - margin;
+    int lowerLeftY  = (int)h - margin;
 
-    wchar_t buf[128];
+    wchar_t buf[256];
+
+    // --- HUD: Preset name (top-right, above FPS) ---
+    if (m_currentData.bShowPresetName && m_currentData.szPresetName[0] && m_hHUDFont) {
+        HFONT hPrev = (HFONT)SelectObject(m_hMemDC, m_hHUDFont);
+        DrawShadowText(m_currentData.szPresetName, true, margin, &upperRightY,
+                       (int)w - margin, false, m_currentData.presetNameColor);
+        SelectObject(m_hMemDC, hPrev);
+    }
+
+    // --- HUD: Rating (top-right, below preset name, above FPS) ---
+    if (m_currentData.bShowRating && m_currentData.szRating[0]) {
+        DrawShadowText(m_currentData.szRating, true, margin, &upperRightY, (int)w - margin);
+    }
 
     // FPS display (upper-right)
     if (m_currentData.bShowFPS) {
@@ -415,6 +442,28 @@ void COverlayThread::RenderOverlayToDIB() {
                      m_currentData.mouseX, m_currentData.mouseY,
                      m_currentData.mouseDown ? L"1" : L"0");
             DrawShadowText(buf, true, margin, &lowerRightY, (int)w - margin, true);
+        }
+    }
+
+    // --- HUD: Song title (bottom-left) ---
+    if (m_currentData.bShowSongTitle && m_currentData.szSongTitle[0] && m_hHUDFont) {
+        HFONT hPrev = (HFONT)SelectObject(m_hMemDC, m_hHUDFont);
+        DrawShadowText(m_currentData.szSongTitle, false, margin, &lowerLeftY,
+                       (int)w - margin, true);
+        SelectObject(m_hMemDC, hPrev);
+    }
+
+    // --- HUD: Notifications (per-corner stacking) ---
+    if (m_currentData.nNotifications > 0) {
+        int notifY[4] = { upperRightY, upperLeftY, lowerRightY, lowerLeftY };
+        for (int i = 0; i < m_currentData.nNotifications; i++) {
+            const auto& n = m_currentData.notifications[i];
+            if (!n.text[0]) continue;
+            int  c       = n.corner;
+            if (c < 0 || c > 3) c = 0;
+            bool right   = (c == 0 || c == 2);
+            bool fromBot = (c == 2 || c == 3);
+            DrawShadowText(n.text, right, margin, &notifY[c], (int)w - margin, fromBot, n.color);
         }
     }
 
