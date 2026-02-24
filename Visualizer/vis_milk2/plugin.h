@@ -142,7 +142,7 @@ typedef struct {
 }
 td_custom_msg;
 
-typedef struct {
+typedef struct td_supertext {
   float	fStartTime = -1.0f; // off state
   int 	bRedrawSuperText;	// true if it needs redraw
   int 	bIsSongTitle;		// false for custom message, true for song title
@@ -197,7 +197,7 @@ typedef struct {
   int        w, h;
 } TexSizeParamInfo;
 
-typedef struct {
+typedef struct SamplerInfo {
   LPDIRECT3DBASETEXTURE9 texptr;
   bool               bBilinear;
   bool               bWrap;

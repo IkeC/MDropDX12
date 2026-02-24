@@ -101,12 +101,6 @@ int8_t GetChannelSample(const BYTE* pData, int BlockOffset, int ChannelOffset, c
 //   pwfx->wBitsPerSample;     /* 16 or 32 number of bits per sample of mono data */
 
 void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFORMATEX* pwfx, const bool bInt16) {
-  int BlockOffset;
-
-  int8_t LeftSample8;
-  int8_t RightSample8;
-
-
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
   //memset(pcmLeftLpb, 0, SAMPLE_SIZE_LPB);
   //memset(pcmRightLpb, 0, SAMPLE_SIZE_LPB);
@@ -142,7 +136,7 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
     // Average samples for downsampling
     for (int j = 0; j < downsampleRatio; j++) {
       int inputIndex = i * downsampleRatio + j;
-      if (inputIndex >= nNumFramesToRead) break;
+      if (inputIndex >= (int)nNumFramesToRead) break;
 
       int blockOffset = inputIndex * pwfx->nBlockAlign;
 

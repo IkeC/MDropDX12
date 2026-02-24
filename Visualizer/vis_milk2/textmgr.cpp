@@ -208,11 +208,14 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
     if (tightW > (float)cellW) tightW = (float)cellW;
     if (tightW < 1.0f) tightW = 1.0f;
 
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+
     GlyphInfo& g = atlas.glyphs[c];
-    g.u0       = (float)x / (float)atlasW;
-    g.v0       = (float)y / (float)atlasH;
-    g.u1       = (float)(x + (int)ceilf(tightW)) / (float)atlasW;
-    g.v1       = (float)(y + cellH) / (float)atlasH;
+    g.u0       = (float)x / (float)atlasW + halfTexelU;
+    g.v0       = (float)y / (float)atlasH + halfTexelV;
+    g.u1       = (float)(x + (int)ceilf(tightW)) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(y + cellH) / (float)atlasH - halfTexelV;
     g.advanceX = advance;
     g.bearingX = (float)abcWidths[c].abcA;
     g.glyphWidth  = tightW;

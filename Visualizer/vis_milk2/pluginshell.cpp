@@ -215,7 +215,7 @@ int       CPluginShell::GetFrame() {
   return m_frame;
 };
 float     CPluginShell::GetTime() {
-  return m_time * m_timeFactor;
+  return (float)(m_time * m_timeFactor);
 };
 float     CPluginShell::GetFps() {
   return m_fps * m_fpsFactor;
@@ -1330,7 +1330,7 @@ void CPluginShell::DrawAndDisplay(int redraw) {
     float q = GetEffectiveRenderQuality(cx, cy);
     cx = (int)(cx * q);
     cy = (int)(cy * q);
-    textMargin *= q;
+    textMargin = (int)(textMargin * q);
   }
 
   int marginTop = textMargin + GetCanvasMarginY();
@@ -2777,7 +2777,7 @@ void CPluginShell::UpdateBackBufferTracking(int width, int height) {
 }
 
 float CPluginShell::GetEffectiveRenderQuality(int width, int height) {
-  float q = clamp(m_fRenderQuality, 0.01, 1);
+  float q = clamp(m_fRenderQuality, 0.01f, 1.0f);
   if (bQualityAuto) {
     // adjust quality based on window/screen ratio
     // Use runtime GetProcAddress to avoid depending on an import thunk (xGetSystemMetrics)
@@ -2798,11 +2798,11 @@ float CPluginShell::GetEffectiveRenderQuality(int width, int height) {
       }
       m_screen_pixels = cxScreen * cyScreen;
     }
-    float avg_pixels = m_screen_pixels / 4;
+    float avg_pixels = m_screen_pixels / 4.0f;
     float window_pixels = (float)width * (float)height;
-    q = q * sqrt(avg_pixels / window_pixels);
+    q = q * sqrtf(avg_pixels / window_pixels);
   }
-  return clamp(q, 0.01, 1);
+  return clamp(q, 0.01f, 1.0f);
 }
 
 void CPluginShell::ResetBufferAndFonts() {
