@@ -796,6 +796,8 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
 #define IDC_MW_FILE_DESC        2066   // Description label on Files tab
 #define IDC_MW_DARK_THEME       2067   // Dark Theme checkbox on General tab
+#define IDC_MW_PRESET_UP        2068   // Navigate to parent directory
+#define IDC_MW_PRESET_INTO      2069   // Enter selected subdirectory
 #define IDC_MW_RANDTEX_LABEL    2070   // Random textures dir label
 #define IDC_MW_RANDTEX_EDIT     2071   // Random textures dir edit control
 #define IDC_MW_RANDTEX_BROWSE   2072   // Random textures dir Browse button
@@ -848,6 +850,7 @@ static SettingDesc g_settingsDesc[] = {
 #define WM_MW_RESET_BUFFERS     (WM_APP + 4)
 #define WM_MW_SPOUT_FIXEDSIZE   (WM_APP + 5)
 #define WM_MW_PUSH_MESSAGE      (WM_APP + 6)
+#define WM_MW_PRESET_CHANGED    (WM_APP + 7)
 static const wchar_t* SETTINGS_WND_CLASS = L"MDropDX12SettingsWnd";
 static bool g_bSettingsWndClassRegistered = false;
 
@@ -9791,6 +9794,15 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     PostQuitMessage(0);  // exit the settings thread's message loop
     return 0;
 
+  case WM_MW_PRESET_CHANGED:
+    // Render thread changed the active preset — sync the Settings listbox
+    if (p) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList && p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
+        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+    }
+    return 0;
+
   case WM_NOTIFY:
   {
     NMHDR* pnm = (NMHDR*)lParam;
@@ -9947,6 +9959,62 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
             SetClipboardData(CF_UNICODETEXT, hMem);
           }
           CloseClipboard();
+        }
+      }
+      return 0;
+    }
+
+    // Directory nav: go up to parent directory
+    if (id == IDC_MW_PRESET_UP && code == BN_CLICKED) {
+      wchar_t* pDir = p->GetPresetDir();
+      int dirLen = lstrlenW(pDir);
+      // Need at least "X:\" + one subdir to go up
+      if (dirLen > 3) {
+        // Strip trailing backslash, find previous one, truncate after it
+        wchar_t* p2 = wcsrchr(pDir, L'\\');
+        if (p2 && p2 > pDir) {
+          *p2 = 0;  // remove trailing '\'
+          p2 = wcsrchr(pDir, L'\\');
+          if (p2) *(p2 + 1) = 0;  // keep the parent's trailing '\'
+        }
+        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
+        p->UpdatePresetList(false, true, false);
+        p->m_nCurrentPreset = -1;  // current preset no longer in this directory
+        // Update UI
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
+        HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+        if (hList) {
+          SendMessage(hList, LB_RESETCONTENT, 0, 0);
+          for (int i = 0; i < p->m_nPresets; i++) {
+            if (p->m_presets[i].szFilename.empty()) continue;
+            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+          }
+        }
+      }
+      return 0;
+    }
+
+    // Directory nav: enter selected subdirectory
+    if (id == IDC_MW_PRESET_INTO && code == BN_CLICKED) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
+      if (sel >= 0 && sel < p->m_nPresets &&
+          p->m_presets[sel].szFilename.c_str()[0] == L'*') {
+        // Append subdirectory name (skip the leading '*')
+        wchar_t* pDir = p->GetPresetDir();
+        lstrcatW(pDir, &p->m_presets[sel].szFilename.c_str()[1]);
+        lstrcatW(pDir, L"\\");
+        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
+        p->UpdatePresetList(false, true, false);
+        p->m_nCurrentPreset = -1;
+        // Update UI
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
+        if (hList) {
+          SendMessage(hList, LB_RESETCONTENT, 0, 0);
+          for (int i = 0; i < p->m_nPresets; i++) {
+            if (p->m_presets[i].szFilename.empty()) continue;
+            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+          }
         }
       }
       return 0;
@@ -10924,13 +10992,18 @@ void CPlugin::BuildSettingsControls() {
     y += listH + gap;
   }
 
-  // Nav buttons: ◄  ►  ✂ (copy path)
+  // Nav buttons: ◄  ►  ✂ (copy path)  |  ▲ Up  ▼ Into
   {
     int btnW = 40;
     int btnGap = 6;
     PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
+    // Directory navigation: Up (parent) and Into (selected subfolder)
+    int dirBtnX = x + 3 * (btnW + btnGap) + 10;
+    int dirBtnW = 55;
+    PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
+    PAGE_CTRL(0, CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont));
     y += lineH + 4 + gap + 4;
   }
 
@@ -13649,6 +13722,17 @@ void CPlugin::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime)
   // Update current preset path
   lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
 
+  // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+  {
+    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+    name = name ? name + 1 : m_szCurrentPresetFile;
+    char dbg[512];
+    sprintf(dbg, "Render: Active preset: %ls", name);
+    OutputDebugStringA(dbg);
+    DebugLogA(dbg);
+  }
+
   // Import preset 1 into m_pOldState (the "from" state)
   m_pOldState->Import(temp1, GetTime(), nullptr, STATE_ALL);
 
@@ -13764,6 +13848,17 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     if (szPresetFilename != m_szCurrentPresetFile) //[sic]
       lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
 
+    // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+    {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "Render: Active preset: %ls", name);
+      OutputDebugStringA(dbg);
+      DebugLogA(dbg);
+    }
+
     CState* temp = m_pState;
     m_pState = m_pOldState;
     m_pOldState = temp;
@@ -13854,6 +13949,10 @@ void CPlugin::OnFinishedLoadingPreset() {
 
   SendPresetChangedInfoToMDropDX12Remote();
 
+  // Notify Settings window so its preset listbox stays in sync
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd))
+    PostMessage(m_hSettingsWnd, WM_MW_PRESET_CHANGED, 0, 0);
+
   // Auto-refresh resource viewer if open
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
@@ -13932,6 +14031,17 @@ void CPlugin::LoadPresetTick() {
     // Apply the preset: swap state pointers
     lstrcpyW(m_szCurrentPresetFile, m_szLoadingPreset);
     m_szLoadingPreset[0] = 0;
+
+    // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+    {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "Render: Active preset: %ls", name);
+      OutputDebugStringA(dbg);
+      DebugLogA(dbg);
+    }
 
     CState* temp = m_pState;
     m_pState = m_pOldState;
