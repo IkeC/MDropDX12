@@ -383,8 +383,9 @@ void DXContext::EndFrame()
         DebugLogA(buf);
         if (hrPresent == DXGI_ERROR_DEVICE_REMOVED || hrPresent == DXGI_ERROR_DEVICE_RESET) {
             HRESULT reason = m_device->GetDeviceRemovedReason();
-            sprintf(buf, "DX12: Device removed reason: 0x%08X", (unsigned)reason);
+            sprintf(buf, "DX12: Device removed reason: 0x%08X (TDR — GPU timeout or driver crash)", (unsigned)reason);
             DebugLogA(buf);
+            OutputDebugStringA(buf);
             m_lastErr = hrPresent;
             m_ready = 0;
             return;
@@ -1023,6 +1024,75 @@ bool DXContext::CreateNullTexture()
     m_nullTexture.height = 1;
     m_nullTexture.depth = 1;
     m_nullTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    // --- White texture (1x1 white) for missing disk textures ---
+    hr = m_device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&m_whiteTexture.resource));
+    if (FAILED(hr)) return false;
+
+    UINT8 whitePixel[4] = { 255, 255, 255, 255 };
+
+    ComPtr<ID3D12Resource> uploadBufW;
+    hr = m_device->CreateCommittedResource(
+        &uploadHeapProps, D3D12_HEAP_FLAG_NONE, &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&uploadBufW));
+    if (FAILED(hr)) return false;
+
+    UINT8* mappedW = nullptr;
+    uploadBufW->Map(0, nullptr, (void**)&mappedW);
+    memcpy(mappedW, whitePixel, 4);
+    uploadBufW->Unmap(0, nullptr);
+
+    m_commandAllocators[0]->Reset();
+    m_commandList->Reset(m_commandAllocators[0].Get(), nullptr);
+
+    D3D12_TEXTURE_COPY_LOCATION srcW = {};
+    srcW.pResource = uploadBufW.Get();
+    srcW.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcW.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srcW.PlacedFootprint.Footprint.Width = 1;
+    srcW.PlacedFootprint.Footprint.Height = 1;
+    srcW.PlacedFootprint.Footprint.Depth = 1;
+    srcW.PlacedFootprint.Footprint.RowPitch = 256;
+
+    D3D12_TEXTURE_COPY_LOCATION dstW = {};
+    dstW.pResource = m_whiteTexture.resource.Get();
+    dstW.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstW.SubresourceIndex = 0;
+
+    m_commandList->CopyTextureRegion(&dstW, 0, 0, 0, &srcW, nullptr);
+
+    D3D12_RESOURCE_BARRIER barrierW = {};
+    barrierW.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrierW.Transition.pResource = m_whiteTexture.resource.Get();
+    barrierW.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barrierW.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrierW.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1, &barrierW);
+
+    m_commandList->Close();
+    ID3D12CommandList* listsW[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(1, listsW);
+
+    m_fenceValues[0]++;
+    m_commandQueue->Signal(m_fence.Get(), m_fenceValues[0]);
+    m_fence->SetEventOnCompletion(m_fenceValues[0], m_fenceEvent);
+    WaitForSingleObject(m_fenceEvent, INFINITE);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE whiteSrvCpu = AllocateSrvCpu();
+    m_whiteTexture.srvIndex = m_nextFreeSrvSlot;
+
+    m_device->CreateShaderResourceView(m_whiteTexture.resource.Get(), &srvDesc, whiteSrvCpu);
+    AllocateSrvGpu();
+
+    m_whiteTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    m_whiteTexture.width = 1;
+    m_whiteTexture.height = 1;
+    m_whiteTexture.depth = 1;
+    m_whiteTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     return true;
 }

@@ -822,6 +822,14 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_MSG_OPENINI      2098
 #define IDC_MW_MSG_AUTOSIZE     2099
 
+// -- GPU Protection controls (Visual tab) --
+#define IDC_MW_GPU_MAX_INST         2100
+#define IDC_MW_GPU_SCALE_BY_RES     2101
+#define IDC_MW_GPU_SCALE_BASE       2102
+#define IDC_MW_GPU_SKIP_HEAVY       2103
+#define IDC_MW_GPU_HEAVY_THRESHOLD  2104
+#define IDC_MW_GPU_RELOAD_PRESET    2105
+
 // Message Edit Dialog controls
 #define IDC_MSGEDIT_TEXT         2100
 #define IDC_MSGEDIT_FONT_COMBO  2101
@@ -1432,11 +1440,11 @@ void CPlugin::MyPreInitialize() {
   m_lpVS[0] = NULL;
   m_lpVS[1] = NULL;
 #if (NUM_BLUR_TEX>0)
-  for (i = 0; i < NUM_BLUR_TEX; i++)
+  for (int i = 0; i < NUM_BLUR_TEX; i++)
     m_lpBlur[i] = NULL;
 #endif
 
-  for (i = 0; i < NUM_SUPERTEXTS; i++) {
+  for (int i = 0; i < NUM_SUPERTEXTS; i++) {
     m_lpDDSTitle[i] = NULL;
   }
 
@@ -1650,6 +1658,16 @@ void CPlugin::MyReadConfig() {
 
   m_ShowUpArrowInDescriptionIfPSMinVersionForced = GetPrivateProfileBoolW(L"Milkwave", L"ShowUpArrowInDescriptionIfPSMinVersionForced", m_ShowUpArrowInDescriptionIfPSMinVersionForced, pIni);
 
+  // GPU Protection
+  m_nMaxShapeInstances = GetPrivateProfileIntW(L"Milkwave", L"MaxShapeInstances", m_nMaxShapeInstances, pIni);
+  if (m_nMaxShapeInstances < 0) m_nMaxShapeInstances = 0;
+  m_bScaleInstancesByResolution = GetPrivateProfileBoolW(L"Milkwave", L"ScaleInstancesByResolution", m_bScaleInstancesByResolution, pIni);
+  m_nInstanceScaleBaseWidth = GetPrivateProfileIntW(L"Milkwave", L"InstanceScaleBaseWidth", m_nInstanceScaleBaseWidth, pIni);
+  if (m_nInstanceScaleBaseWidth < 640) m_nInstanceScaleBaseWidth = 640;
+  m_bSkipHeavyPresets = GetPrivateProfileBoolW(L"Milkwave", L"SkipHeavyPresets", m_bSkipHeavyPresets, pIni);
+  m_nHeavyPresetMaxInstances = GetPrivateProfileIntW(L"Milkwave", L"HeavyPresetMaxInstances", m_nHeavyPresetMaxInstances, pIni);
+  if (m_nHeavyPresetMaxInstances < 64) m_nHeavyPresetMaxInstances = 64;
+
   m_WindowBorderless = GetPrivateProfileBoolW(L"Milkwave", L"WindowBorderless", m_WindowBorderless, pIni);
   m_bAlwaysOnTop = GetPrivateProfileBoolW(L"Milkwave", L"WindowAlwaysOnTop", m_bAlwaysOnTop, pIni);
 
@@ -1822,6 +1840,13 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
+
+  // GPU Protection
+  WritePrivateProfileIntW(m_nMaxShapeInstances, L"MaxShapeInstances", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bScaleInstancesByResolution, L"ScaleInstancesByResolution", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nInstanceScaleBaseWidth, L"InstanceScaleBaseWidth", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bSkipHeavyPresets, L"SkipHeavyPresets", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nHeavyPresetMaxInstances, L"HeavyPresetMaxInstances", pIni, L"Milkwave");
 }
 
 void CPlugin::SaveWindowSizeAndPosition(HWND hwnd) {
@@ -2012,7 +2037,7 @@ void CPlugin::CleanUpMyNonDx9Stuff() {
   m_menuPost.Finish();
   for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
     m_menuWavecode[i].Finish();
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++)
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++)
     m_menuShapecode[i].Finish();
 
   //dumpmsg("Finish: cleanup complete.");
@@ -2595,6 +2620,9 @@ int CPlugin::AllocateMyDX9Stuff() {
     }
 
     // Inject effect pixel shader PSO
+    // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
+    // mode.y = per-preset effect bitmask (bit0=brighten, bit1=darken, bit2=solarize, bit3=invert)
+    //          Per-preset effects use DX9-compatible math (blend-state equivalent).
     if (m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
       static const char szInjectPS[] =
         "Texture2D<float4> tex : register(t0);\n"
@@ -2602,6 +2630,12 @@ int CPlugin::AllocateMyDX9Stuff() {
         "cbuffer cbInject : register(b0) { uint4 mode; }\n"
         "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
         "    float4 ret = tex.Sample(samp, uv);\n"
+        "    // Per-preset post-process effects (DX9 blend-state equivalent math)\n"
+        "    if (mode.y & 1u) ret.rgb = ret.rgb * (2.0 - ret.rgb);\n"         // brighten = invert→square→invert
+        "    if (mode.y & 2u) ret.rgb = ret.rgb * ret.rgb;\n"                  // darken = square
+        "    if (mode.y & 4u) ret.rgb = ret.rgb * (1.0 - ret.rgb) * 2.0;\n"   // solarize = invdest + dest*dest
+        "    if (mode.y & 8u) ret.rgb = 1.0 - ret.rgb;\n"                     // invert
+        "    // F11 inject effect (global, user-toggled)\n"
         "    if (mode.x == 1u) ret.rgb = sqrt(max(ret.rgb, 0.0));\n"
         "    else if (mode.x == 2u) ret.rgb = ret.rgb * ret.rgb;\n"
         "    else if (mode.x == 3u) ret.rgb = ret.rgb * (1.0 - ret.rgb) * 4.0;\n"
@@ -2641,8 +2675,11 @@ int CPlugin::AllocateMyDX9Stuff() {
   ZeroMemory(m_comp_verts, sizeof(MYVERTEX) * FCGSX * FCGSY);
   //float fOnePlusInvWidth  = 1.0f + 1.0f/(float)GetWidth();
   //float fOnePlusInvHeight = 1.0f + 1.0f/(float)GetHeight();
-  float fHalfTexelW = 0.5f / (float)GetWidth();   // 2.5: 2 pixels bad @ bottom right
-  float fHalfTexelH = 0.5f / (float)GetHeight();
+  // DX9 half-texel offset: needed because DX9 pixel centers are at integers.
+  // DX12 pixel centers are at integer+0.5, so the offset is NOT needed and causes
+  // sub-pixel sampling misalignment (universal blur with bilinear filtering).
+  float fHalfTexelW = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)GetWidth();
+  float fHalfTexelH = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)GetHeight();
   float fDivX = 1.0f / (float)(FCGSX - 2);
   float fDivY = 1.0f / (float)(FCGSY - 2);
   for (int j = 0; j < FCGSY; j++) {
@@ -2929,9 +2966,10 @@ int CPlugin::AllocateMyDX9Stuff() {
   }
 
   int nVert = 0;
-  float texel_offset_x = 0.5f / (float)m_nTexSizeX;
-  float texel_offset_y = 0.5f / (float)m_nTexSizeY;
-  for (y = 0; y <= m_nGridY; y++) {
+  // DX9 half-texel offset for UV alignment; not needed in DX12 (pixel centers at +0.5).
+  float texel_offset_x = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeX;
+  float texel_offset_y = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeY;
+  for (int y = 0; y <= m_nGridY; y++) {
     for (int x = 0; x <= m_nGridX; x++) {
       // precompute x,y,z
       m_verts[nVert].x = x / (float)m_nGridX * 2.0f - 1.0f;
@@ -3229,7 +3267,7 @@ bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
         (((DWORD)(rand() % RANGE) + RANGE / 2));
     }
     // swap some pixels randomly, to improve 'randomness'
-    for (x = 0; x < size; x++) {
+    for (int x = 0; x < size; x++) {
       int x1 = (rand() ^ q.LowPart) % size;
       int x2 = (rand() ^ q.HighPart) % size;
       DWORD temp = dst[x2];
@@ -3453,7 +3491,7 @@ bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
           (((DWORD)(rand() % RANGE) + RANGE / 2));
       }
       // swap some pixels randomly, to improve 'randomness'
-      for (x = 0; x < size; x++) {
+      for (int x = 0; x < size; x++) {
         int x1 = (rand() ^ q.LowPart) % size;
         int x2 = (rand() ^ q.HighPart) % size;
         DWORD temp = dst[x2];
@@ -3487,7 +3525,7 @@ bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
           }
 
     // next go down, doing cubic interp along Y, on the main slices.
-    for (z = 0; z < size; z += zoom_factor)
+    for (int z = 0; z < size; z += zoom_factor)
       for (int x = 0; x < size; x++)
         for (int y = 0; y < size; y++)
           if (y % zoom_factor) {
@@ -3639,7 +3677,7 @@ bool CPlugin::EvictSomeTexture() {
   // are HALF as big as the oldest textures, and thus, less likely to get booted.
   int biggest_bytes = 0;
   int biggest_index = -1;
-  for (i = 0; i < N; i++)
+  for (int i = 0; i < N; i++)
     if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 && m_textures[i].nAge < m_nPresetsLoadedTotal - 1) // note: -1 here keeps images around for the blend-from preset, too...
     {
       float size_mult = 1.0f + (m_textures[i].nAge - newest) / (float)(oldest - newest);
@@ -3658,7 +3696,7 @@ bool CPlugin::EvictSomeTexture() {
 
   // notify all CShaderParams classes that we're releasing a bindable texture!!
   N = global_CShaderParams_master_list.size();
-  for (i = 0; i < N; i++)
+  for (int i = 0; i < N; i++)
     global_CShaderParams_master_list[i]->OnTextureEvict(m_textures[biggest_index].texptr);
 
   // 2. erase the texture itself
@@ -3749,7 +3787,7 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
     if (N == 0)
       return false;
     // pick randomly from the subset
-    i = rng % temp_list.size();
+    int i = rng % temp_list.size();
     lstrcpyW(szRetTextureFilename, temp_list[i].c_str());
   }
   return true;
@@ -3980,18 +4018,39 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             // DX12 path: load via WIC
             wchar_t szFilename[MAX_PATH];
             bool found = false;
+            {
+              char dbg[512];
+              sprintf(dbg, "CacheParams: searching for texture '%ls'", szRootName);
+              DebugLogA(dbg);
+            }
             for (int z = 0; z < sizeof(texture_exts) / sizeof(texture_exts[0]); z++) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                  // Search fallback paths (paths already have trailing backslash)
-                  bool fbFound = false;
-                  for (auto& fbPath : g_plugin.m_fallbackPaths) {
-                    swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
-                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                  // Check for textures\ sibling of preset directory
+                  bool siblingFound = false;
+                  {
+                    wchar_t siblingTexDir[MAX_PATH];
+                    wcscpy_s(siblingTexDir, MAX_PATH, g_plugin.m_szPresetDir);
+                    int len = (int)wcslen(siblingTexDir);
+                    if (len > 0 && siblingTexDir[len - 1] == L'\\') siblingTexDir[--len] = 0;
+                    wchar_t* lastSlash = wcsrchr(siblingTexDir, L'\\');
+                    if (lastSlash) {
+                      wcscpy(lastSlash + 1, L"textures\\");
+                      swprintf(szFilename, L"%s%s.%s", siblingTexDir, szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) siblingFound = true;
+                    }
                   }
-                  if (!fbFound) continue;
+                  if (!siblingFound) {
+                    // Search fallback paths (paths already have trailing backslash)
+                    bool fbFound = false;
+                    for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                      swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                    }
+                    if (!fbFound) continue;
+                  }
                 }
               }
               x.dx12Tex = g_plugin.m_lpDX->LoadTextureFromFile(szFilename);
@@ -4003,6 +4062,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 x.nAge = g_plugin.m_nPresetsLoadedTotal;
                 x.nSizeInBytes = x.w * x.h * 4 + 16384;
                 found = true;
+                char dbg[512];
+                sprintf(dbg, "CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
+                DebugLogA(dbg);
                 break;
               }
               // WIC couldn't decode this format (e.g. .dds) — try next extension
@@ -4012,6 +4074,13 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
               g_plugin.dumpmsg(buf);
+              {
+                char dbg[512];
+                sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
+                        szRootName, g_plugin.m_szMilkdrop2Path, g_plugin.m_szPresetDir,
+                        (int)g_plugin.m_fallbackPaths.size());
+                DebugLogA(dbg);
+              }
               if (bHardErrors)
                 MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
@@ -4107,7 +4176,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
   DebugLogA("DX12: CacheParams: pass 1 done, entering pass 2");
 
   // pass 2: bind all the float4's.  "texsize_XYZ" params will be filled out via knowledge of loaded texture sizes.
-  for (i = 0; i < d.Constants; i++) {
+  for (UINT i = 0; i < d.Constants; i++) {
     D3DXHANDLE h = pCT->GetConstant(NULL, i);
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
@@ -4855,7 +4924,7 @@ void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
 
   // DON'T RELEASE blur textures - they were already released because they're in m_textures[].
 #if (NUM_BLUR_TEX>0)
-  for (i = 0; i < NUM_BLUR_TEX; i++)
+  for (int i = 0; i < NUM_BLUR_TEX; i++)
     m_lpBlur[i] = NULL;//SafeRelease(m_lpBlur[i]);
 #endif
 
@@ -5321,9 +5390,21 @@ void CPlugin::MyRenderFn(int redraw) {
 
 void CPlugin::RenderInjectEffect()
 {
-  // F11 inject effect: applies a full-screen post-process pass on the composite back buffer.
+  // Post-process pass: applies per-preset effects (brighten/darken/solarize/invert)
+  // and the F11 inject effect on the composite back buffer.
   // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
-  if (m_nInjectEffectMode == 0) return;
+
+  // Build per-preset effect bitmask from per-frame equation outputs
+  UINT presetFxMask = 0;
+  if (m_pState) {
+    if (m_pState->var_pf_brighten && *m_pState->var_pf_brighten > 0.5) presetFxMask |= 1u;
+    if (m_pState->var_pf_darken   && *m_pState->var_pf_darken   > 0.5) presetFxMask |= 2u;
+    if (m_pState->var_pf_solarize && *m_pState->var_pf_solarize > 0.5) presetFxMask |= 4u;
+    if (m_pState->var_pf_invert   && *m_pState->var_pf_invert   > 0.5) presetFxMask |= 8u;
+  }
+
+  // Skip if nothing to do
+  if (m_nInjectEffectMode == 0 && presetFxMask == 0) return;
   if (!m_pInjectEffectPSO || !m_injectEffectTex.IsValid()) return;
   if (!m_lpDX || !m_lpDX->m_ready) return;
 
@@ -5384,7 +5465,8 @@ void CPlugin::RenderInjectEffect()
   cl->SetDescriptorHeaps(_countof(heaps), heaps);
 
   // 10. Upload mode CBV (b0 = uint4 mode)
-  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, 0, 0, 0 } };
+  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask
+  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, 0, 0 } };
   D3D12_GPU_VIRTUAL_ADDRESS cbva = m_lpDX->UploadConstantBuffer(&cbData, sizeof(cbData));
   if (cbva)
     cl->SetGraphicsRootConstantBufferView(0, cbva);
@@ -6505,7 +6587,6 @@ void CPlugin::MyRenderUI(
           m_bUserPagedUp = false;
         }
 
-        int i;
         int first_line = m_nMashPreset[m_nMashSlot] - (m_nMashPreset[m_nMashSlot] % lines_available);
         int last_line = first_line + lines_available;
         wchar_t str[512], str2[512];
@@ -6542,7 +6623,7 @@ void CPlugin::MyRenderUI(
           int h = 0;
 
           int start_y = orig_rect.top;
-          for (mash = 0; mash < MASH_SLOTS; mash++) {
+          for (int mash = 0; mash < MASH_SLOTS; mash++) {
             int idx = m_nMashPreset[mash];
 
             wchar_t buf[1024];
@@ -6570,12 +6651,12 @@ void CPlugin::MyRenderUI(
         box.bottom = box.top;
 
         // draw a directory listing box right after...
-        for (pass = 0; pass < 2; pass++) {
+        for (int pass = 0; pass < 2; pass++) {
           //if (pass==1)
           //    GetFont(SIMPLE_FONT)->Begin();
 
           rect = orig_rect;
-          for (i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
+          for (int i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
             // remove the extension before displaying the filename.  also pad w/spaces.
             //lstrcpy(str, m_pPresetAddr[i]);
             bool bIsDir = (m_presets[i].szFilename.c_str()[0] == '*');
@@ -6694,7 +6775,6 @@ void CPlugin::MyRenderUI(
           m_bUserPagedUp = false;
         }
 
-        int i;
         int first_line = m_nPresetListCurPos - (m_nPresetListCurPos % lines_available);
         int last_line = first_line + lines_available;
         wchar_t str[512], str2[512];
@@ -6722,7 +6802,7 @@ void CPlugin::MyRenderUI(
           //    GetFont(SIMPLE_FONT)->Begin();
 
           rect = orig_rect;
-          for (i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
+          for (int i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
             // remove the extension before displaying the filename.  also pad w/spaces.
             //lstrcpy(str, m_pPresetAddr[i]);
             bool bIsDir = (m_presets[i].szFilename.c_str()[0] == '*');
@@ -7134,7 +7214,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   bool bCtrlHeldDown = (GetKeyState(VK_CONTROL) & mask) != 0;
 
   int nRepeat = 1;  //updated as appropriate
-  int rep;
 
   switch (uMsg) {
   // Settings window thread-safe side effects
@@ -7230,7 +7309,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
             if (m_waitstring.bOvertypeMode) {
               // overtype mode
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 if (m_waitstring.nCursorPos == len) {
                   lstrcatA((char*)m_waitstring.szText, buf);
                   len++;
@@ -7245,7 +7324,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
             else {
               // insert mode:
               char* ptr = (char*)m_waitstring.szText;
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 for (int i = len; i >= m_waitstring.nCursorPos; i--)
                   *(ptr + i + 1) = *(ptr + i);
                 *(ptr + m_waitstring.nCursorPos) = buf[0];
@@ -7263,7 +7342,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
             if (m_waitstring.bOvertypeMode) {
               // overtype mode
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 if (m_waitstring.nCursorPos == len) {
                   lstrcatW(m_waitstring.szText, buf);
                   len++;
@@ -7275,7 +7354,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
             }
             else {
               // insert mode:
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 for (int i = len; i >= m_waitstring.nCursorPos; i--)
                   m_waitstring.szText[i + 1] = m_waitstring.szText[i];
                 m_waitstring.szText[m_waitstring.nCursorPos] = buf[0];
@@ -7778,13 +7857,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           return 0; // we processed (or absorbed) the key
 
         case VK_LEFT:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             if (m_waitstring.nCursorPos > 0)
               m_waitstring.nCursorPos--;
           return 0; // we processed (or absorbed) the key
 
         case VK_RIGHT:
-          for (rep = 0; rep < nRepeat; rep++) {
+          for (int rep = 0; rep < nRepeat; rep++) {
             if (m_waitstring.bDisplayAsCode) {
               if (m_waitstring.nCursorPos < (int)lstrlenA((char*)m_waitstring.szText))
                 m_waitstring.nCursorPos++;
@@ -7805,12 +7884,12 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           return 0; // we processed (or absorbed) the key
 
         case VK_UP:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             WaitString_SeekUpOneLine();
           return 0; // we processed (or absorbed) the key
 
         case VK_DOWN:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             WaitString_SeekDownOneLine();
           return 0; // we processed (or absorbed) the key
 
@@ -8134,13 +8213,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case VK_UP:
       if (m_UI_mode == UI_MASHUP) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           m_nMashPreset[m_nMashSlot] = max(m_nMashPreset[m_nMashSlot] - 1, m_nDirs);
         m_nLastMashChangeFrame[m_nMashSlot] = GetFrame();  // causes delayed apply
         return 0; // we processed (or absorbed) the key
       }
       else if (m_UI_mode == UI_LOAD) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           if (m_nPresetListCurPos > 0)
             m_nPresetListCurPos--;
         return 0; // we processed (or absorbed) the key
@@ -8155,13 +8234,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case VK_DOWN:
       if (m_UI_mode == UI_MASHUP) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           m_nMashPreset[m_nMashSlot] = min(m_nMashPreset[m_nMashSlot] + 1, m_nPresets - 1);
         m_nLastMashChangeFrame[m_nMashSlot] = GetFrame();  // causes delayed apply
         return 0; // we processed (or absorbed) the key
       }
       else if (m_UI_mode == UI_LOAD) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           if (m_nPresetListCurPos < m_nPresets - 1)
             m_nPresetListCurPos++;
         return 0; // we processed (or absorbed) the key
@@ -9162,7 +9241,7 @@ void CPlugin::BuildMenus() {
     swprintf(buf, wasabiApiLangString(IDS_CUSTOM_WAVE_X), i + 1);
     m_menuWavecode[i].Init(buf);
   }
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     swprintf(buf, wasabiApiLangString(IDS_CUSTOM_SHAPE_X), i + 1);
     m_menuShapecode[i].Init(buf);
   }
@@ -9178,9 +9257,9 @@ void CPlugin::BuildMenus() {
   m_menuPreset.AddChildMenu(&m_menuAugment);
   m_menuPreset.AddChildMenu(&m_menuPost);
 
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++)
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++)
     m_menuCustomShape.AddChildMenu(&m_menuShapecode[i]);
-  for (i = 0; i < MAX_CUSTOM_WAVES; i++)
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
     m_menuCustomWave.AddChildMenu(&m_menuWavecode[i]);
 
   // NOTE: all of the eval menuitems use a CALLBACK function to register the user's changes (see last param)
@@ -9297,7 +9376,7 @@ void CPlugin::BuildMenus() {
   m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MIN_COLOR_VALUE), &m_pState->m_fBlur3Min, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MIN_COLOR_VALUE_TT), 0.0f, 1.0f);
   m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MAX_COLOR_VALUE), &m_pState->m_fBlur3Max, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MAX_COLOR_VALUE_TT), 0.0f, 1.0f);
 
-  for (i = 0; i < MAX_CUSTOM_WAVES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
     // blending: do both; fade opacities in/out (w/exagerrated weighting)
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_wave[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_TT)); // bool
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_SAMPLES), &m_pState->m_wave[i].samples, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_SAMPLES_TT), 2, 512);        // 0-512
@@ -9319,7 +9398,7 @@ void CPlugin::BuildMenus() {
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EDIT_PER_POINT_CODE), &m_pState->m_wave[i].m_szPerPoint, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_PER_POINT_CODE_TT), 256, 0, &OnUserEditedWavecode, sizeof(m_pState->m_wave[i].m_szPerPoint), 0);
   }
 
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     // blending: do both; fade opacities in/out (w/exagerrated weighting)
     m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_shape[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_SHAPE_TT)); // bool
     m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_INSTANCES), &m_pState->m_shape[i].instances, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_INSTANCES_TT), 1, 1024);
@@ -10025,6 +10104,12 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       return 0;
     }
 
+    if (id == IDC_MW_GPU_RELOAD_PRESET && code == BN_CLICKED) {
+      // Re-render the current preset with updated GPU protection settings
+      p->NextPreset(0.0f);
+      return 0;
+    }
+
     if (id == IDC_MW_RESET_VISUAL && code == BN_CLICKED) {
       p->fOpacity = 1.0f;
       p->m_fRenderQuality = 1.0f;
@@ -10049,6 +10134,17 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), L"1.00");
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), L"0.00");
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), L"1");
+      // Reset GPU protection
+      p->m_nMaxShapeInstances = 0;
+      p->m_bScaleInstancesByResolution = false;
+      p->m_nInstanceScaleBaseWidth = 1920;
+      p->m_bSkipHeavyPresets = false;
+      p->m_nHeavyPresetMaxInstances = 4096;
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), L"0");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, BST_UNCHECKED, 0);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), L"1920");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, BST_UNCHECKED, 0);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), L"4096");
       // Apply side-effects
       HWND hw = p->GetPluginWindow();
       if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
@@ -10281,6 +10377,12 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+        return 0;
+      case IDC_MW_GPU_SCALE_BY_RES:
+        p->m_bScaleInstancesByResolution = bChecked;
+        return 0;
+      case IDC_MW_GPU_SKIP_HEAVY:
+        p->m_bSkipHeavyPresets = bChecked;
         return 0;
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
@@ -10526,6 +10628,19 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         return 0;
       case IDC_MW_VIS_VERSION:
         p->m_VisVersion = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_GPU_MAX_INST:
+        p->m_nMaxShapeInstances = _wtoi(buf);
+        if (p->m_nMaxShapeInstances < 0) p->m_nMaxShapeInstances = 0;
+        return 0;
+      case IDC_MW_GPU_SCALE_BASE:
+        p->m_nInstanceScaleBaseWidth = _wtoi(buf);
+        if (p->m_nInstanceScaleBaseWidth < 320) p->m_nInstanceScaleBaseWidth = 320;
+        if (p->m_nInstanceScaleBaseWidth > 7680) p->m_nInstanceScaleBaseWidth = 7680;
+        return 0;
+      case IDC_MW_GPU_HEAVY_THRESHOLD:
+        p->m_nHeavyPresetMaxInstances = _wtoi(buf);
+        if (p->m_nHeavyPresetMaxInstances < 16) p->m_nHeavyPresetMaxInstances = 16;
         return 0;
       case IDC_MW_AUTO_HUE_SEC:
         p->m_AutoHueSeconds = (float)_wtof(buf);
@@ -11096,6 +11211,35 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
   PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, 80, lineH, hFont));
+  y += lineH + gap + 8;
+
+  // -- GPU Protection section --
+  PAGE_CTRL(1, CreateLabel(hw, L"GPU Protection", x, y, rw, lineH, hFont, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Max Instances:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nMaxShapeInstances);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_MAX_INST, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(1, CreateLabel(hw, L"(0=unlimited)", x + lw + 70, y, 100, lineH, hFont, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateCheck(hw, L"Scale Instances by Resolution", IDC_MW_GPU_SCALE_BY_RES, x, y, rw, lineH, hFont, m_bScaleInstancesByResolution, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Scale Base Width:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nInstanceScaleBaseWidth);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_SCALE_BASE, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateCheck(hw, L"Skip Heavy Presets", IDC_MW_GPU_SKIP_HEAVY, x, y, rw, lineH, hFont, m_bSkipHeavyPresets, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Heavy Threshold:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nHeavyPresetMaxInstances);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap + 4;
+
+  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, 110, lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
@@ -11521,6 +11665,15 @@ void CPlugin::UpdateVisualUI(HWND hWnd) {
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), buf);
   swprintf(buf, 32, L"%.0f", m_VisVersion);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), buf);
+  // GPU Protection controls
+  swprintf(buf, 32, L"%d", m_nMaxShapeInstances);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, m_bScaleInstancesByResolution ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", m_nInstanceScaleBaseWidth);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", m_nHeavyPresetMaxInstances);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), buf);
   HWND hw = GetPluginWindow();
   if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
   if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
@@ -13943,6 +14096,25 @@ void CPlugin::OnFinishedLoadingPreset() {
 
   SetMenusForPresetVersion(m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
   m_nPresetsLoadedTotal++; //only increment this on COMPLETION of the load.
+
+  // GPU Protection: warn about heavy presets
+  {
+    int totalInstances = 0;
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+      if (m_pState->m_shape[i].enabled)
+        totalInstances += m_pState->m_shape[i].instances;
+    }
+    if (totalInstances > 512) {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
+              totalInstances, name, m_nTexSizeX, m_nTexSizeY);
+      OutputDebugStringA(dbg);
+      DebugLogA(dbg);
+    }
+  }
 
   for (int mash = 0; mash < MASH_SLOTS; mash++)
     m_nMashPreset[mash] = m_nCurrentPreset;
@@ -16834,7 +17006,7 @@ void CPlugin::DoCustomSoundAnalysis() {
   int recentBufferSize = (int)GetFps();
 
   // do temporal blending to create attenuated and super-attenuated versions
-  for (i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++) {
     float rate;
 
     if (mysound.imm[i] > mysound.avg[i])

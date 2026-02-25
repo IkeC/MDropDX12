@@ -986,7 +986,7 @@ int CPluginShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance
   m_force_accept_WM_WINDOWPOSCHANGING = 0;
 
   // PRIVATE - GDI STUFF
-  for (i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++)
+  for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++)
     m_font[i] = NULL;
   m_font_desktop = NULL;
 
@@ -1299,8 +1299,13 @@ int CPluginShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, 
   // DXGI Present returns DXGI_ERROR_DEVICE_REMOVED/RESET in catastrophic cases,
   // which are handled inside DXContext::EndFrame() and surfaced via m_lastErr.
   if (m_lpDX->m_lastErr != S_OK) {
-    // Unrecoverable device error — exit plugin
-    return false;
+    char dbg[512];
+    sprintf(dbg, "TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
+            (unsigned)m_lpDX->m_lastErr);
+    OutputDebugStringA(dbg);
+    DebugLogA(dbg);
+    m_bDeviceRecoveryPending = true;
+    return false;  // signal caller to attempt recovery
   }
 
   DoTime();
@@ -1775,14 +1780,14 @@ void CPluginShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR)
   // multiply by long-term, empirically-determined inverse averages:
   // (for a trial of 244 songs, 10 seconds each, somewhere in the 2nd or 3rd minute,
   //  the average levels were: 0.326781557	0.38087377	0.199888934
-  for (ch = 0; ch < 2; ch++) {
+  for (int ch = 0; ch < 2; ch++) {
     m_sound.imm[ch][0] /= 0.326781557f;//0.270f;
     m_sound.imm[ch][1] /= 0.380873770f;//0.343f;
     m_sound.imm[ch][2] /= 0.199888934f;//0.295f;
   }
 
   // do temporal blending to create attenuated and super-attenuated versions
-  for (ch = 0; ch < 2; ch++) {
+  for (int ch = 0; ch < 2; ch++) {
     for (i = 0; i < 3; i++) {
       // m_sound.avg[i]
       {
@@ -2600,7 +2605,7 @@ void CPluginShell::AlignWaves() {
 
     if (!m_align_weights_ready) {
       m_align_weights_ready = 1;
-      for (octave = 0; octave < octaves; octave++) {
+      for (int octave = 0; octave < octaves; octave++) {
         int compare_samples = spls[octave] - space[octave];
         for (int n = 0; n < compare_samples; n++) {
           // start with pyramid-shaped pdf, from 0..1..0
@@ -2617,7 +2622,7 @@ void CPluginShell::AlignWaves() {
           if (temp_weight[octave][n] < 0) temp_weight[octave][n] = 0;
         }
 
-        n = 0;
+        int n = 0;
         while (temp_weight[octave][n] == 0 && n < compare_samples)
           n++;
         first_nonzero_weight[octave] = n;
@@ -2631,7 +2636,7 @@ void CPluginShell::AlignWaves() {
 
     int n1 = 0;
     int n2 = space[octaves - 1];
-    for (octave = octaves - 1; octave >= 0; octave--) {
+    for (int octave = octaves - 1; octave >= 0; octave--) {
       // for example:
       //  space[octave] == 4
       //  spls[octave] == 36
@@ -2682,7 +2687,7 @@ void CPluginShell::AlignWaves() {
 
   // finally, apply the results: modify m_sound.fWaveform[2][0..576]
   // by scooting the aligned samples so that they start at m_sound.fWaveform[2][0].
-  for (ch = 0; ch < 2; ch++)
+  for (int ch = 0; ch < 2; ch++)
     if (align_offset[ch] > 0) {
       for (int i = 0; i < nSamples; i++)
         m_sound.fWaveform[ch][i] = m_sound.fWaveform[ch][i + align_offset[ch]];

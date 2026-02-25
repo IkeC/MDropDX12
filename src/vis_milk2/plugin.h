@@ -430,6 +430,13 @@ public:
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
   bool m_IsAMD = false;
 
+  // GPU Protection Settings
+  int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
+  bool m_bScaleInstancesByResolution = false; // Scale down num_inst at resolutions above base
+  int  m_nInstanceScaleBaseWidth = 1920; // Reference width for instance scaling (instances scale down above this)
+  bool m_bSkipHeavyPresets = false;      // Auto-skip presets exceeding GPU safety thresholds
+  int  m_nHeavyPresetMaxInstances = 4096; // Total shape instances across all shapes that triggers skip
+
   //bool		m_bAlways3D;
   //float       m_fStereoSep;
   //bool		m_bAlwaysOnTop;
