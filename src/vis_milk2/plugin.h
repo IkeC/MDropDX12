@@ -832,6 +832,8 @@ public:
   void        EnsureSettingsVisible();
   void        ResetSettingsWindow();
   void        RebuildSettingsFonts();
+  void        NavigatePresetDirUp(HWND hSettingsWnd);
+  void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   // Messages tab
   void        PopulateMsgListBox(HWND hList);

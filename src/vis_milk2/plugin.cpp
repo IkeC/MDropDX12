@@ -8507,20 +8507,14 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           wchar_t* p = GetPresetDir();
 
           if (wcscmp(m_presets[m_nPresetListCurPos].szFilename.c_str(), L"*..") == 0) {
-            // back up one dir, but don't go above the presets root
-            wchar_t szPresetsRoot[MAX_PATH];
-            swprintf(szPresetsRoot, L"%spresets\\", m_szMilkdrop2Path);
-            int rootLen = lstrlenW(szPresetsRoot);
-
-            if (lstrlenW(p) > rootLen) {
-              wchar_t* p2 = wcsrchr(p, L'\\');
-              if (p2) {
-                *p2 = 0;
-                p2 = wcsrchr(p, L'\\');
-                if (p2) *(p2 + 1) = 0;
-              }
+            // back up one dir
+            wchar_t* p2 = wcsrchr(p, L'\\');
+            if (p2 && p2 > p) {
+              *p2 = 0;
+              p2 = wcsrchr(p, L'\\');
+              if (p2) *(p2 + 1) = 0;
+              else lstrcatW(p, L"\\");  // keep drive root as "X:\"
             }
-            // else: already at presets root — don't go higher
           }
           else {
             // open subdir
@@ -8553,6 +8547,22 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       break;
 
     case VK_BACK:
+      if (m_UI_mode == UI_LOAD) {
+        // Navigate up one directory in the preset browser
+        wchar_t* p = GetPresetDir();
+        int dirLen = lstrlenW(p);
+        wchar_t* p2 = wcsrchr(p, L'\\');
+        if (p2 && p2 > p) {
+          *p2 = 0;
+          p2 = wcsrchr(p, L'\\');
+          if (p2) *(p2 + 1) = 0;
+          else lstrcatW(p, L"\\");  // keep drive root as "X:\"
+          WritePrivateProfileStringW(L"Settings", L"szPresetDir", GetPresetDir(), GetConfigIniFile());
+          UpdatePresetList(true, true, false);
+          m_nCurrentPreset = -1;
+        }
+        return 0;
+      }
       // pass on to parent
       //PostMessage(m_hWndParent,message,wParam,lParam);
       PrevPreset(0);
@@ -10089,10 +10099,34 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
       if (sel >= 0 && sel < p->m_nPresets) {
+        // Skip directory entries (prefixed with '*') — don't try to load them
+        if (p->m_presets[sel].szFilename.c_str()[0] == L'*')
+          return 0;
         p->m_nCurrentPreset = sel;
         wchar_t szFile[MAX_PATH];
         swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
         p->LoadPreset(szFile, p->m_fBlendTimeUser);
+      }
+      return 0;
+    }
+
+    // Preset listbox double-click: navigate into directories or load preset
+    if (id == IDC_MW_PRESET_LIST && code == LBN_DBLCLK) {
+      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < p->m_nPresets) {
+        if (p->m_presets[sel].szFilename.c_str()[0] == L'*') {
+          // Directory entry
+          if (wcscmp(p->m_presets[sel].szFilename.c_str(), L"*..") == 0)
+            p->NavigatePresetDirUp(hWnd);
+          else
+            p->NavigatePresetDirInto(hWnd, sel);
+        } else {
+          // Regular preset — load it
+          p->m_nCurrentPreset = sel;
+          wchar_t szFile[MAX_PATH];
+          swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+          p->LoadPreset(szFile, p->m_fBlendTimeUser);
+        }
       }
       return 0;
     }
@@ -10139,31 +10173,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
     // Directory nav: go up to parent directory
     if (id == IDC_MW_PRESET_UP && code == BN_CLICKED) {
-      wchar_t* pDir = p->GetPresetDir();
-      int dirLen = lstrlenW(pDir);
-      // Need at least "X:\" + one subdir to go up
-      if (dirLen > 3) {
-        // Strip trailing backslash, find previous one, truncate after it
-        wchar_t* p2 = wcsrchr(pDir, L'\\');
-        if (p2 && p2 > pDir) {
-          *p2 = 0;  // remove trailing '\'
-          p2 = wcsrchr(pDir, L'\\');
-          if (p2) *(p2 + 1) = 0;  // keep the parent's trailing '\'
-        }
-        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-        p->UpdatePresetList(false, true, false);
-        p->m_nCurrentPreset = -1;  // current preset no longer in this directory
-        // Update UI
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
-        HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-        if (hList) {
-          SendMessage(hList, LB_RESETCONTENT, 0, 0);
-          for (int i = 0; i < p->m_nPresets; i++) {
-            if (p->m_presets[i].szFilename.empty()) continue;
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-          }
-        }
-      }
+      p->NavigatePresetDirUp(hWnd);
       return 0;
     }
 
@@ -10171,25 +10181,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (id == IDC_MW_PRESET_INTO && code == BN_CLICKED) {
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
       int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
-      if (sel >= 0 && sel < p->m_nPresets &&
-          p->m_presets[sel].szFilename.c_str()[0] == L'*') {
-        // Append subdirectory name (skip the leading '*')
-        wchar_t* pDir = p->GetPresetDir();
-        lstrcatW(pDir, &p->m_presets[sel].szFilename.c_str()[1]);
-        lstrcatW(pDir, L"\\");
-        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-        p->UpdatePresetList(false, true, false);
-        p->m_nCurrentPreset = -1;
-        // Update UI
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
-        if (hList) {
-          SendMessage(hList, LB_RESETCONTENT, 0, 0);
-          for (int i = 0; i < p->m_nPresets; i++) {
-            if (p->m_presets[i].szFilename.empty()) continue;
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-          }
-        }
-      }
+      p->NavigatePresetDirInto(hWnd, sel);
       return 0;
     }
 
@@ -12036,6 +12028,61 @@ void CPlugin::RebuildSettingsFonts() {
     SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
 
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
+}
+
+void CPlugin::NavigatePresetDirUp(HWND hSettingsWnd) {
+  wchar_t* pDir = GetPresetDir();
+  int dirLen = lstrlenW(pDir);
+
+  // Strip trailing backslash, find previous one, truncate after it
+  wchar_t* p2 = wcsrchr(pDir, L'\\');
+  if (p2 && p2 > pDir) {
+    *p2 = 0;
+    p2 = wcsrchr(pDir, L'\\');
+    if (p2) *(p2 + 1) = 0;
+    else lstrcatW(pDir, L"\\");  // keep drive root as "X:\"
+  } else {
+    return;  // nowhere to go
+  }
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
+  UpdatePresetList(false, true, false);
+  m_nCurrentPreset = -1;
+
+  if (hSettingsWnd) {
+    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
+    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
+    if (hList) {
+      SendMessage(hList, LB_RESETCONTENT, 0, 0);
+      for (int i = 0; i < m_nPresets; i++) {
+        if (m_presets[i].szFilename.empty()) continue;
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+      }
+    }
+  }
+}
+
+void CPlugin::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
+  if (sel < 0 || sel >= m_nPresets) return;
+  if (m_presets[sel].szFilename.c_str()[0] != L'*') return;
+
+  wchar_t* pDir = GetPresetDir();
+  lstrcatW(pDir, &m_presets[sel].szFilename.c_str()[1]);
+  lstrcatW(pDir, L"\\");
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
+  UpdatePresetList(false, true, false);
+  m_nCurrentPreset = -1;
+
+  if (hSettingsWnd) {
+    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
+    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
+    if (hList) {
+      SendMessage(hList, LB_RESETCONTENT, 0, 0);
+      for (int i = 0; i < m_nPresets; i++) {
+        if (m_presets[i].szFilename.empty()) continue;
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+      }
+    }
+  }
 }
 
 void CPlugin::EnsureSettingsVisible() {
