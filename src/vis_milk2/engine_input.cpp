@@ -432,31 +432,6 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       EnsureSettingsVisible();
     break; // let base class handle resize too
 
-  case WM_COPYDATA:
-  {
-    // Fallback: direct WM_COPYDATA to render window (if IPC hidden window didn't intercept)
-    PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
-    if (pCopyData->dwData == 1) {
-      wchar_t* receivedMessage = (wchar_t*)pCopyData->lpData;
-      size_t messageLength = pCopyData->cbData / sizeof(wchar_t);
-      if (messageLength > 0) {
-        if (receivedMessage[messageLength - 1] != L'\0') {
-          receivedMessage[messageLength] = L'\0';
-        }
-      }
-      // Capture for IPC monitor
-      {
-        SYSTEMTIME st; GetLocalTime(&st);
-        swprintf_s(g_szLastIPCTime, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
-        wcsncpy_s(g_szLastIPCMessage, receivedMessage, _TRUNCATE);
-        g_lastIPCMessageSeq.fetch_add(1);
-      }
-      LaunchMessage(receivedMessage);
-      return 0;
-    }
-    break;
-  }
-
   case WM_MW_IPC_MESSAGE:
   {
     // Forwarded from hidden IPC window thread — lParam is heap-allocated wchar_t*
