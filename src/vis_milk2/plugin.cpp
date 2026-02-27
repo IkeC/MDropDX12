@@ -4658,6 +4658,21 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     *d = 0; writePos++;
   }
 
+  // MilkDrop3 UNORM intermediate clamping simulation.
+  // MilkDrop3 applies "Color Mode", "Burn Mode", etc. as separate render passes
+  // through UNORM (8-bit) textures, so negative intermediate values are clamped to 0
+  // between each mode. In our single-pass shader, negative intermediates from
+  // (1 - blur1.x*1.85) survive through division by negatives, producing a red bias.
+  // Fix: replace MilkDrop3 mode markers with saturate() calls before StripComments
+  // removes them. In-place replacement (same length) avoids buffer shifts.
+  if (shaderType == SHADER_COMP) {
+    char* q;
+    q = strstr(&szShaderText[shaderStartPos], "//MilkDrop3 Color Mode:");
+    if (q) memcpy(q, "ret=saturate(ret);      ", 24);  // 24 chars, matches marker length
+    q = strstr(&szShaderText[shaderStartPos], "//MilkDrop3 Burn Mode:");
+    if (q) memcpy(q, "ret=saturate(ret);     ", 23);   // 23 chars, matches marker length
+  }
+
   // strip out all comments - but cheat a little - start at the shader test.
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);

@@ -67,10 +67,10 @@ int8_t FltToInt(float flt) {
       s_adaptivePeak = absFlt;               // Instant attack
     else
       s_adaptivePeak *= 0.99998f;            // Slow decay (~1.5s at 48kHz)
-    // Target 70% of full range, clamped to [1, 256]
+    // Target 70% of full range, clamped to [1, 64]
     gain = 0.7f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
     if (gain < 1.0f)  gain = 1.0f;
-    if (gain > 256.0f) gain = 256.0f;
+    if (gain > 64.0f) gain = 64.0f;
     s_adaptiveGain = gain;
   } else {
     gain = mdropdx12_audio_sensitivity;       // Fixed gain from INI
