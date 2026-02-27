@@ -852,6 +852,19 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MSGEDIT_CANCEL      2113
 #define IDC_MSGEDIT_COLOR_SWATCH 2114
 
+// Message Overrides Dialog controls
+#define IDC_MSGOVERRIDE_RAND_FONT     4000
+#define IDC_MSGOVERRIDE_RAND_COLOR    4001
+#define IDC_MSGOVERRIDE_RAND_SIZE     4002
+#define IDC_MSGOVERRIDE_RAND_EFFECTS  4003
+#define IDC_MSGOVERRIDE_SIZE_MIN      4004
+#define IDC_MSGOVERRIDE_SIZE_MAX      4005
+#define IDC_MSGOVERRIDE_MAX_ONSCREEN  4006
+#define IDC_MSGOVERRIDE_OK            4007
+#define IDC_MSGOVERRIDE_CANCEL        4008
+#define IDC_MW_MSG_OVERRIDES          4009   // "Overrides" button on Messages tab
+#define IDC_MW_MSG_PLAY               4010   // "Play/Stop" toggle button on Messages tab
+
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -8212,7 +8225,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           AdjustSetting(g_settingsDesc[m_nSettingsCurSel].id, 1);
         return 0;
       case VK_ESCAPE:
-      case VK_F2:
         m_UI_mode = UI_REGULAR;
         return 0;
       }
@@ -8507,20 +8519,14 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           wchar_t* p = GetPresetDir();
 
           if (wcscmp(m_presets[m_nPresetListCurPos].szFilename.c_str(), L"*..") == 0) {
-            // back up one dir, but don't go above the presets root
-            wchar_t szPresetsRoot[MAX_PATH];
-            swprintf(szPresetsRoot, L"%spresets\\", m_szMilkdrop2Path);
-            int rootLen = lstrlenW(szPresetsRoot);
-
-            if (lstrlenW(p) > rootLen) {
-              wchar_t* p2 = wcsrchr(p, L'\\');
-              if (p2) {
-                *p2 = 0;
-                p2 = wcsrchr(p, L'\\');
-                if (p2) *(p2 + 1) = 0;
-              }
+            // back up one dir
+            wchar_t* p2 = wcsrchr(p, L'\\');
+            if (p2 && p2 > p) {
+              *p2 = 0;
+              p2 = wcsrchr(p, L'\\');
+              if (p2) *(p2 + 1) = 0;
+              else lstrcatW(p, L"\\");  // keep drive root as "X:\"
             }
-            // else: already at presets root — don't go higher
           }
           else {
             // open subdir
@@ -8553,6 +8559,22 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       break;
 
     case VK_BACK:
+      if (m_UI_mode == UI_LOAD) {
+        // Navigate up one directory in the preset browser
+        wchar_t* p = GetPresetDir();
+        int dirLen = lstrlenW(p);
+        wchar_t* p2 = wcsrchr(p, L'\\');
+        if (p2 && p2 > p) {
+          *p2 = 0;
+          p2 = wcsrchr(p, L'\\');
+          if (p2) *(p2 + 1) = 0;
+          else lstrcatW(p, L"\\");  // keep drive root as "X:\"
+          WritePrivateProfileStringW(L"Settings", L"szPresetDir", GetPresetDir(), GetConfigIniFile());
+          UpdatePresetList(true, true, false);
+          m_nCurrentPreset = -1;
+        }
+        return 0;
+      }
       // pass on to parent
       //PostMessage(m_hWndParent,message,wParam,lParam);
       PrevPreset(0);
@@ -9752,9 +9774,10 @@ static void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, 
   FillRect(hdc, &rc, hBrBg);
   DeleteObject(hBrBg);
 
-  // Draw checkbox indicator square (13x13, vertically centered)
-  int boxSize = 13;
-  int boxY = rc.top + (rc.bottom - rc.top - boxSize) / 2;
+  // Draw checkbox indicator square, scaled to control height
+  int ctrlH = rc.bottom - rc.top;
+  int boxSize = max(ctrlH / 2, 11);
+  int boxY = rc.top + (ctrlH - boxSize) / 2;
   RECT rcBox = { rc.left + 1, boxY, rc.left + 1 + boxSize, boxY + boxSize };
 
   if (bDark) {
@@ -9779,15 +9802,15 @@ static void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, 
     return;
   }
 
-  // Draw checkmark in dark mode
+  // Draw checkmark in dark mode (scaled proportionally to boxSize)
   if (bChecked) {
-    HPEN hPen = CreatePen(PS_SOLID, 2, colText);
+    int pw = max(boxSize / 7, 1) + 1;
+    HPEN hPen = CreatePen(PS_SOLID, pw, colText);
     HPEN hOld = (HPEN)SelectObject(hdc, hPen);
-    // Draw a checkmark: short stroke down-right, then long stroke up-right
-    int cx = rcBox.left + 3, cy = rcBox.top + 6;
-    MoveToEx(hdc, cx, cy, NULL);
-    LineTo(hdc, cx + 2, cy + 3);
-    LineTo(hdc, cx + 8, cy - 3);
+    int pad = max(boxSize / 4, 2);
+    MoveToEx(hdc, rcBox.left + pad, rcBox.top + boxSize * 6 / 10, NULL);
+    LineTo(hdc, rcBox.left + boxSize * 4 / 10, rcBox.bottom - pad);
+    LineTo(hdc, rcBox.right - pad, rcBox.top + pad);
     SelectObject(hdc, hOld);
     DeleteObject(hPen);
   }
@@ -10089,10 +10112,34 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
       if (sel >= 0 && sel < p->m_nPresets) {
+        // Skip directory entries (prefixed with '*') — don't try to load them
+        if (p->m_presets[sel].szFilename.c_str()[0] == L'*')
+          return 0;
         p->m_nCurrentPreset = sel;
         wchar_t szFile[MAX_PATH];
         swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
         p->LoadPreset(szFile, p->m_fBlendTimeUser);
+      }
+      return 0;
+    }
+
+    // Preset listbox double-click: navigate into directories or load preset
+    if (id == IDC_MW_PRESET_LIST && code == LBN_DBLCLK) {
+      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < p->m_nPresets) {
+        if (p->m_presets[sel].szFilename.c_str()[0] == L'*') {
+          // Directory entry
+          if (wcscmp(p->m_presets[sel].szFilename.c_str(), L"*..") == 0)
+            p->NavigatePresetDirUp(hWnd);
+          else
+            p->NavigatePresetDirInto(hWnd, sel);
+        } else {
+          // Regular preset — load it
+          p->m_nCurrentPreset = sel;
+          wchar_t szFile[MAX_PATH];
+          swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+          p->LoadPreset(szFile, p->m_fBlendTimeUser);
+        }
       }
       return 0;
     }
@@ -10139,31 +10186,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
     // Directory nav: go up to parent directory
     if (id == IDC_MW_PRESET_UP && code == BN_CLICKED) {
-      wchar_t* pDir = p->GetPresetDir();
-      int dirLen = lstrlenW(pDir);
-      // Need at least "X:\" + one subdir to go up
-      if (dirLen > 3) {
-        // Strip trailing backslash, find previous one, truncate after it
-        wchar_t* p2 = wcsrchr(pDir, L'\\');
-        if (p2 && p2 > pDir) {
-          *p2 = 0;  // remove trailing '\'
-          p2 = wcsrchr(pDir, L'\\');
-          if (p2) *(p2 + 1) = 0;  // keep the parent's trailing '\'
-        }
-        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-        p->UpdatePresetList(false, true, false);
-        p->m_nCurrentPreset = -1;  // current preset no longer in this directory
-        // Update UI
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
-        HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-        if (hList) {
-          SendMessage(hList, LB_RESETCONTENT, 0, 0);
-          for (int i = 0; i < p->m_nPresets; i++) {
-            if (p->m_presets[i].szFilename.empty()) continue;
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-          }
-        }
-      }
+      p->NavigatePresetDirUp(hWnd);
       return 0;
     }
 
@@ -10171,25 +10194,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (id == IDC_MW_PRESET_INTO && code == BN_CLICKED) {
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
       int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
-      if (sel >= 0 && sel < p->m_nPresets &&
-          p->m_presets[sel].szFilename.c_str()[0] == L'*') {
-        // Append subdirectory name (skip the leading '*')
-        wchar_t* pDir = p->GetPresetDir();
-        lstrcatW(pDir, &p->m_presets[sel].szFilename.c_str()[1]);
-        lstrcatW(pDir, L"\\");
-        WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-        p->UpdatePresetList(false, true, false);
-        p->m_nCurrentPreset = -1;
-        // Update UI
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), pDir);
-        if (hList) {
-          SendMessage(hList, LB_RESETCONTENT, 0, 0);
-          for (int i = 0; i < p->m_nPresets; i++) {
-            if (p->m_presets[i].szFilename.empty()) continue;
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-          }
-        }
-      }
+      p->NavigatePresetDirInto(hWnd, sel);
       return 0;
     }
 
@@ -10515,6 +10520,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         return 0;
       case IDC_MW_MSG_AUTOPLAY:
         p->m_bMsgAutoplay = bChecked;
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), bChecked ? L"Stop" : L"Play");
         if (bChecked)
           p->ScheduleNextAutoMessage();
         else
@@ -10689,6 +10695,21 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         } else {
           MessageBoxW(hWnd, L"No text found on clipboard (or all slots full).", L"Messages", MB_OK);
         }
+        return 0;
+      }
+      case IDC_MW_MSG_PLAY: {
+        p->m_bMsgAutoplay = !p->m_bMsgAutoplay;
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), p->m_bMsgAutoplay ? L"Stop" : L"Play");
+        CheckDlgButton(hWnd, IDC_MW_MSG_AUTOPLAY, p->m_bMsgAutoplay ? BST_CHECKED : BST_UNCHECKED);
+        if (p->m_bMsgAutoplay)
+          p->ScheduleNextAutoMessage();
+        else
+          p->m_fNextAutoMsgTime = -1.0f;
+        p->SaveMsgAutoplaySettings();
+        return 0;
+      }
+      case IDC_MW_MSG_OVERRIDES: {
+        p->ShowMsgOverridesDialog(hWnd);
         return 0;
       }
       }
@@ -11189,7 +11210,9 @@ void CPlugin::BuildSettingsControls() {
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int tabTop = rcDisplay.top;
 
-  int x = 16, lw = 160, lineH = 26, gap = 6;
+  int lineH = GetSettingsLineHeight();
+  int gap = 6, x = 16;
+  int lw = MulDiv(160, lineH, 26);
   int rw = clientW - 36;
   int sliderW = rw - lw - 60;
   wchar_t buf[64];
@@ -11230,14 +11253,14 @@ void CPlugin::BuildSettingsControls() {
 
   // Nav buttons: ◄  ►  ✂ (copy path)  |  ▲ Up  ▼ Into
   {
-    int btnW = 40;
+    int btnW = MulDiv(40, lineH, 26);
     int btnGap = 6;
     PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
     // Directory navigation: Up (parent) and Into (selected subfolder)
     int dirBtnX = x + 3 * (btnW + btnGap) + 10;
-    int dirBtnW = 55;
+    int dirBtnW = MulDiv(55, lineH, 26);
     PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont));
     y += lineH + 4 + gap + 4;
@@ -11269,14 +11292,22 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Dark Theme",              IDC_MW_DARK_THEME,   x, y, rw, lineH, hFont, m_bSettingsDarkTheme));
   y += lineH + gap + 4;
-  PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 95, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, x + 168, y, 80, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, x + 252, y, 80, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(95, lineH, 26), bw2 = MulDiv(65, lineH, 26), bw3 = MulDiv(80, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, bx, y, bw3, lineH, hFont));
+  }
   y += lineH + gap;
-  PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, x, y, 100, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, x + 104, y, 55, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, x + 163, y, 55, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(100, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
+  }
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
@@ -11335,7 +11366,7 @@ void CPlugin::BuildSettingsControls() {
   swprintf(buf, 64, L"%.0f", m_VisVersion);
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, 80, lineH, hFont));
+  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, MulDiv(80, lineH, 26), lineH, hFont));
   y += lineH + gap + 8;
 
   // -- GPU Protection section --
@@ -11364,7 +11395,7 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
 
-  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, 110, lineH, hFont));
+  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
@@ -11418,7 +11449,7 @@ void CPlugin::BuildSettingsControls() {
   swprintf(buf, 64, L"%.3f", m_AutoHueSeconds);
   PAGE_CTRL(2, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, 80, lineH, hFont));
+  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
 
   // ====== PAGE 3: Sound (created hidden) ======
   y = tabTop + 10;
@@ -11465,8 +11496,12 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(4, hList);
   }
   y += 204;
-  PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, x, y, 70, lineH, hFont));
-  PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, x + 74, y, 70, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int fbw = MulDiv(70, lineH, 26);
+    PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, bx, y, fbw, lineH, hFont)); bx += fbw + bg;
+    PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, bx, y, fbw, lineH, hFont));
+  }
   y += lineH + gap;
   {
     HWND hDesc = CreateWindowExW(0, L"STATIC",
@@ -11496,8 +11531,12 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(4, hEdit);
   }
   y += lineH + 6;
-  PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, x, y, 80, lineH, hFont));
-  PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, x + 84, y, 60, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
+    PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, bx, y, bw2, lineH, hFont));
+  }
 
   // ===== Messages tab (page 5) =====
   y = tabTop + 10;
@@ -11516,26 +11555,36 @@ void CPlugin::BuildSettingsControls() {
   }
   y += 10 * lineH + 4;
 
-  // Button row 1: Push Now, Up, Down, Add, Edit, Delete
+  // Button row 1: Push Now, Up, Down, Add, Edit, Delete, Play
   {
-    int bx = x, btnW = 65, arrowW = 30, btnGap = 4;
-    PAGE_CTRL(5, CreateBtn(hw, L"Push Now", IDC_MW_MSG_PUSH, bx, y, btnW, lineH, hFont));
-    bx += btnW + btnGap;
+    int bx = x, btnGap = 4;
+    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
+    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
+    PAGE_CTRL(5, CreateBtn(hw, L"Push Now", IDC_MW_MSG_PUSH, bx, y, pushW, lineH, hFont));
+    bx += pushW + btnGap;
     PAGE_CTRL(5, CreateBtn(hw, L"\x25B2", IDC_MW_MSG_UP, bx, y, arrowW, lineH, hFont));
     bx += arrowW + btnGap;
     PAGE_CTRL(5, CreateBtn(hw, L"\x25BC", IDC_MW_MSG_DOWN, bx, y, arrowW, lineH, hFont));
     bx += arrowW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Add", IDC_MW_MSG_ADD, bx, y, 40, lineH, hFont));
-    bx += 40 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, 40, lineH, hFont));
-    bx += 40 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, 50, lineH, hFont));
+    PAGE_CTRL(5, CreateBtn(hw, L"Add", IDC_MW_MSG_ADD, bx, y, smallW, lineH, hFont));
+    bx += smallW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, smallW, lineH, hFont));
+    bx += smallW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, medW, lineH, hFont));
+    bx += medW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, m_bMsgAutoplay ? L"Stop" : L"Play", IDC_MW_MSG_PLAY, bx, y, medW, lineH, hFont));
   }
   y += lineH + gap;
 
-  PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, x, y, 130, lineH, hFont));
-  PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, x + 134, y, 55, lineH, hFont));
-  PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH, hFont));
+  {
+    int bx = x, btnGap = 4;
+    int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+    int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
+    PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, bx, y, bw1, lineH, hFont)); bx += bw1 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, bx, y, bw2, lineH, hFont)); bx += bw2 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, bx, y, bw3, lineH, hFont)); bx += bw3 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Overrides", IDC_MW_MSG_OVERRIDES, bx, y, bw4, lineH, hFont));
+  }
   y += lineH + gap + 4;
 
   // Autoplay controls
@@ -11619,6 +11668,19 @@ void CPlugin::ShowSettingsPage(int page) {
   m_nSettingsActivePage = page;
 }
 
+int CPlugin::GetSettingsLineHeight() {
+  if (!m_hSettingsFont || !m_hSettingsWnd) return 26;
+  HDC hdc = GetDC(m_hSettingsWnd);
+  if (!hdc) return 26;
+  HFONT hOld = (HFONT)SelectObject(hdc, m_hSettingsFont);
+  TEXTMETRIC tm = {};
+  GetTextMetrics(hdc, &tm);
+  SelectObject(hdc, hOld);
+  ReleaseDC(m_hSettingsWnd, hdc);
+  int h = tm.tmHeight + tm.tmExternalLeading + 6;
+  return max(h, 20);
+}
+
 void CPlugin::LayoutSettingsControls() {
   if (!m_hSettingsWnd || !m_hSettingsTab) return;
 
@@ -11629,8 +11691,9 @@ void CPlugin::LayoutSettingsControls() {
   // Get the content area inside the tab control
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  int lineH = GetSettingsLineHeight();
   int rw = rc.right - 36;  // 16px left + 20px right margin
-  int lw = 160;
+  int lw = MulDiv(160, lineH, 26);
   int newSliderW = rw - lw - 60;
   if (newSliderW < 80) newSliderW = 80;
 
@@ -11679,7 +11742,7 @@ void CPlugin::LayoutSettingsControls() {
   if (hFileList) {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    int lineH = 24, gap = 6;
+    int gap = 6;
     int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH;  // buttons + desc + randtex label + edit + browse/clear
     int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
@@ -11688,8 +11751,9 @@ void CPlugin::LayoutSettingsControls() {
     int btnY = listBottom + 4;
     HWND hAdd = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_ADD);
     HWND hRem = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_REMOVE);
-    if (hAdd) MoveWindow(hAdd, r.left, btnY, 70, lineH, TRUE);
-    if (hRem) MoveWindow(hRem, r.left + 74, btnY, 70, lineH, TRUE);
+    int fbw = MulDiv(70, lineH, 26), fbg = 4;
+    if (hAdd) MoveWindow(hAdd, r.left, btnY, fbw, lineH, TRUE);
+    if (hRem) MoveWindow(hRem, r.left + fbw + fbg, btnY, fbw, lineH, TRUE);
 
     HWND hDesc = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_DESC);
     if (hDesc) MoveWindow(hDesc, r.left, btnY + lineH + gap, rw, lineH * 2, TRUE);
@@ -11702,8 +11766,9 @@ void CPlugin::LayoutSettingsControls() {
     HWND hRandClear = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_CLEAR);
     if (hRandLabel) MoveWindow(hRandLabel, r.left, randY, rw, lineH, TRUE);
     if (hRandEdit) MoveWindow(hRandEdit, r.left, randY + lineH + 2, rw, lineH + 4, TRUE);
-    if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, 80, lineH, TRUE);
-    if (hRandClear) MoveWindow(hRandClear, r.left + 84, randY + lineH + 2 + lineH + 6, 60, lineH, TRUE);
+    int rbw1 = MulDiv(80, lineH, 26), rbw2 = MulDiv(60, lineH, 26);
+    if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, rbw1, lineH, TRUE);
+    if (hRandClear) MoveWindow(hRandClear, r.left + rbw1 + 4, randY + lineH + 2 + lineH + 6, rbw2, lineH, TRUE);
   }
 
   // Stretch Messages tab ListBox and reposition all controls below it
@@ -11711,7 +11776,7 @@ void CPlugin::LayoutSettingsControls() {
   if (hMsgList) {
     RECT r; GetWindowRect(hMsgList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    int lineH = 24, gap = 6;
+    int gap = 6;
     // Reserve: gap + buttons + gap + reload + gap+4 + autoplay + 2 + sequential + gap + interval + gap + preview
     int reserveBelow = 4 + (lineH + gap) + (lineH + gap + 4) + (lineH + 2) + (lineH + gap) + (lineH + gap) + lineH * 3;
     int listBottom = rcDisplay.bottom - reserveBelow;
@@ -11722,22 +11787,31 @@ void CPlugin::LayoutSettingsControls() {
     int y = listBottom + 4;
     int x = r.left;
     // Button row
-    int bx = x, btnW = 65, arrowW = 30, btnGap = 4;
+    int bx = x, btnGap = 4;
+    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
+    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
     auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
       HWND h = GetDlgItem(m_hSettingsWnd, id);
       if (h) MoveWindow(h, cx, cy, cw, ch, TRUE);
     };
-    moveCtrl(IDC_MW_MSG_PUSH, bx, y, btnW, lineH); bx += btnW + btnGap;
+    moveCtrl(IDC_MW_MSG_PUSH, bx, y, pushW, lineH); bx += pushW + btnGap;
     moveCtrl(IDC_MW_MSG_UP, bx, y, arrowW, lineH); bx += arrowW + btnGap;
     moveCtrl(IDC_MW_MSG_DOWN, bx, y, arrowW, lineH); bx += arrowW + btnGap;
-    moveCtrl(IDC_MW_MSG_ADD, bx, y, 40, lineH); bx += 40 + btnGap;
-    moveCtrl(IDC_MW_MSG_EDIT, bx, y, 40, lineH); bx += 40 + btnGap;
-    moveCtrl(IDC_MW_MSG_DELETE, bx, y, 50, lineH);
+    moveCtrl(IDC_MW_MSG_ADD, bx, y, smallW, lineH); bx += smallW + btnGap;
+    moveCtrl(IDC_MW_MSG_EDIT, bx, y, smallW, lineH); bx += smallW + btnGap;
+    moveCtrl(IDC_MW_MSG_DELETE, bx, y, medW, lineH); bx += medW + btnGap;
+    moveCtrl(IDC_MW_MSG_PLAY, bx, y, medW, lineH);
     y += lineH + gap;
-    // Reload + Paste + Open INI
-    moveCtrl(IDC_MW_MSG_RELOAD, x, y, 130, lineH);
-    moveCtrl(IDC_MW_MSG_PASTE, x + 134, y, 55, lineH);
-    moveCtrl(IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH);
+    // Reload + Paste + Open INI + Overrides
+    {
+      int rbx = x;
+      int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+      int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
+      moveCtrl(IDC_MW_MSG_RELOAD, rbx, y, bw1, lineH); rbx += bw1 + btnGap;
+      moveCtrl(IDC_MW_MSG_PASTE, rbx, y, bw2, lineH); rbx += bw2 + btnGap;
+      moveCtrl(IDC_MW_MSG_OPENINI, rbx, y, bw3, lineH); rbx += bw3 + btnGap;
+      moveCtrl(IDC_MW_MSG_OVERRIDES, rbx, y, bw4, lineH);
+    }
     y += lineH + gap + 4;
     // Checkboxes
     moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);
@@ -12017,25 +12091,84 @@ static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
 void CPlugin::RebuildSettingsFonts() {
   if (!m_hSettingsWnd) return;
 
-  // Recreate fonts at new size
-  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
-  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  // Save current tab selection
+  int curTab = m_hSettingsTab ? TabCtrl_GetCurSel(m_hSettingsTab) : 0;
 
-  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
-  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  // Destroy all child windows (tab, controls, etc.)
+  HWND hChild = GetWindow(m_hSettingsWnd, GW_CHILD);
+  while (hChild) {
+    HWND hNext = GetWindow(hChild, GW_HWNDNEXT);
+    DestroyWindow(hChild);
+    hChild = hNext;
+  }
+  m_hSettingsTab = NULL;
+  for (int i = 0; i < 7; i++) m_settingsPageCtrls[i].clear();
 
-  // Apply to all child controls
-  EnumChildWindows(m_hSettingsWnd, SetFontProc, (LPARAM)m_hSettingsFont);
+  // Rebuild all controls at the new font size
+  // (BuildSettingsControls recreates fonts, tab, and all controls)
+  BuildSettingsControls();
+  ApplySettingsDarkTheme();
 
-  // Tab control needs the font too for header sizing
-  if (m_hSettingsTab)
-    SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+  // Restore tab selection
+  if (m_hSettingsTab && curTab > 0) {
+    TabCtrl_SetCurSel(m_hSettingsTab, curTab);
+    ShowSettingsPage(curTab);
+  }
+}
 
-  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
+void CPlugin::NavigatePresetDirUp(HWND hSettingsWnd) {
+  wchar_t* pDir = GetPresetDir();
+  int dirLen = lstrlenW(pDir);
+
+  // Strip trailing backslash, find previous one, truncate after it
+  wchar_t* p2 = wcsrchr(pDir, L'\\');
+  if (p2 && p2 > pDir) {
+    *p2 = 0;
+    p2 = wcsrchr(pDir, L'\\');
+    if (p2) *(p2 + 1) = 0;
+    else lstrcatW(pDir, L"\\");  // keep drive root as "X:\"
+  } else {
+    return;  // nowhere to go
+  }
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
+  UpdatePresetList(false, true, false);
+  m_nCurrentPreset = -1;
+
+  if (hSettingsWnd) {
+    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
+    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
+    if (hList) {
+      SendMessage(hList, LB_RESETCONTENT, 0, 0);
+      for (int i = 0; i < m_nPresets; i++) {
+        if (m_presets[i].szFilename.empty()) continue;
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+      }
+    }
+  }
+}
+
+void CPlugin::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
+  if (sel < 0 || sel >= m_nPresets) return;
+  if (m_presets[sel].szFilename.c_str()[0] != L'*') return;
+
+  wchar_t* pDir = GetPresetDir();
+  lstrcatW(pDir, &m_presets[sel].szFilename.c_str()[1]);
+  lstrcatW(pDir, L"\\");
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
+  UpdatePresetList(false, true, false);
+  m_nCurrentPreset = -1;
+
+  if (hSettingsWnd) {
+    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
+    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
+    if (hList) {
+      SendMessage(hList, LB_RESETCONTENT, 0, 0);
+      for (int i = 0; i < m_nPresets; i++) {
+        if (m_presets[i].szFilename.empty()) continue;
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+      }
+    }
+  }
 }
 
 void CPlugin::EnsureSettingsVisible() {
@@ -15446,6 +15579,22 @@ void CPlugin::SaveMsgAutoplaySettings() {
   swprintf(val, 32, L"%d", m_bMessageAutoSize ? 1 : 0);
   WritePrivateProfileStringW(L"Milkwave", L"MessageAutoSize", val, pIni);
 
+  // Save override settings
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomFont ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomFont", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomColor ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomColor", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomSize ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomSize", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomEffects ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomEffects", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMin);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMin", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMax);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMax", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgMaxOnScreen);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgMaxOnScreen", val, pIni);
+
   // Save playback order
   swprintf(val, 32, L"%d", m_nMsgAutoplayCount);
   WritePrivateProfileStringW(L"MsgOrder", L"Count", val, pIni);
@@ -15465,6 +15614,20 @@ void CPlugin::LoadMsgAutoplaySettings() {
   m_fMsgAutoplayInterval = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayInterval", 30.0f, pIni);
   m_fMsgAutoplayJitter = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayJitter", 5.0f, pIni);
   m_bMessageAutoSize = GetPrivateProfileIntW(L"Milkwave", L"MessageAutoSize", 0, pIni) != 0;
+
+  // Load override settings
+  m_bMsgOverrideRandomFont = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomFont", 0, pIni) != 0;
+  m_bMsgOverrideRandomColor = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomColor", 0, pIni) != 0;
+  m_bMsgOverrideRandomSize = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomSize", 0, pIni) != 0;
+  m_bMsgOverrideRandomEffects = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomEffects", 0, pIni) != 0;
+  m_nMsgOverrideSizeMin = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMin", 10, pIni);
+  m_nMsgOverrideSizeMax = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMax", 40, pIni);
+  m_nMsgMaxOnScreen = GetPrivateProfileIntW(L"Milkwave", L"MsgMaxOnScreen", 1, pIni);
+  if (m_nMsgOverrideSizeMin < 5) m_nMsgOverrideSizeMin = 5;
+  if (m_nMsgOverrideSizeMax > 50) m_nMsgOverrideSizeMax = 50;
+  if (m_nMsgOverrideSizeMin >= m_nMsgOverrideSizeMax) m_nMsgOverrideSizeMin = m_nMsgOverrideSizeMax - 1;
+  if (m_nMsgMaxOnScreen < 1) m_nMsgMaxOnScreen = 1;
+  if (m_nMsgMaxOnScreen > NUM_SUPERTEXTS) m_nMsgMaxOnScreen = NUM_SUPERTEXTS;
 
   // Load playback order (if saved); otherwise use default order
   int count = GetPrivateProfileIntW(L"MsgOrder", L"Count", 0, pIni);
@@ -15805,8 +15968,24 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     data.nColorB = -1;
   }
 
-  // Size the window for the desired client area, accounting for borders/title
-  int clientW = 440, clientH = 400;
+  // Create font for controls (use settings font size)
+  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute line height from font metrics for proportional layout
+  HDC hdcTmp = GetDC(hParent);
+  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
+  TEXTMETRIC tmDlg = {};
+  GetTextMetrics(hdcTmp, &tmDlg);
+  SelectObject(hdcTmp, hOldTmp);
+  ReleaseDC(hParent, hdcTmp);
+  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  if (dlgLineH < 20) dlgLineH = 20;
+
+  // Scale dialog dimensions from baseline (440x400 at lineH=20)
+  int clientW = MulDiv(440, dlgLineH, 20);
+  int clientH = MulDiv(400, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -15832,33 +16011,35 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   HWND hDlg = CreateWindowExW(dwExStyle,
     WND_CLASS, title, dwStyle,
     px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) return false;
+  if (!hDlg) { DeleteObject(hFont); return false; }
 
   data.hDlgWnd = hDlg;
   SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
 
-  // Create font for controls
-  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  int margin = 12, rw = dlgW - margin * 2 - 8;
-  int lblW = 90, editW = 60, y = 10;
+  // Scale layout constants from baseline (designed at lineH=20)
+  int margin = MulDiv(12, dlgLineH, 20);
+  int rw = clientW - margin * 2;
+  int lblW = MulDiv(90, dlgLineH, 20), editW = MulDiv(60, dlgLineH, 20);
+  int y = MulDiv(10, dlgLineH, 20);
   int xVal = margin + lblW + 4;
+  int smallH = dlgLineH - 4;      // label height
+  int editH = dlgLineH;           // edit control height
+  int btnH = dlgLineH + 4;        // button height
+  int textEditH = dlgLineH * 2 + 8; // multiline text edit
   wchar_t buf[64];
 
   // Text label + edit
-  CreateLabel(hDlg, L"Message Text:", margin, y, rw, 16, hFont);
-  y += 18;
-  HWND hText = CreateEdit(hDlg, data.szText, IDC_MSGEDIT_TEXT, margin, y, rw, 48, hFont,
+  CreateLabel(hDlg, L"Message Text:", margin, y, rw, smallH, hFont);
+  y += smallH + 2;
+  HWND hText = CreateEdit(hDlg, data.szText, IDC_MSGEDIT_TEXT, margin, y, rw, textEditH, hFont,
     ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL);
-  y += 54;
+  y += textEditH + 6;
 
   // Font section
-  CreateLabel(hDlg, L"Base Font:", margin, y + 2, 70, 20, hFont);
+  CreateLabel(hDlg, L"Base Font:", margin, y + 2, MulDiv(70, dlgLineH, 20), smallH, hFont);
   HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
     WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-    margin + 74, y, rw - 74, 300, hDlg, (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO,
+    margin + MulDiv(74, dlgLineH, 20), y, rw - MulDiv(74, dlgLineH, 20), 300, hDlg, (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO,
     GetModuleHandle(NULL), NULL);
   if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
   for (int i = 0; i < MAX_CUSTOM_MESSAGE_FONTS; i++) {
@@ -15870,63 +16051,67 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)entry);
   }
   SendMessage(hCombo, CB_SETCURSEL, data.nFont, 0);
-  y += 28;
+  y += dlgLineH + 4;
 
   // Choose Font, Choose Color, Color Swatch
-  CreateBtn(hDlg, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, y, 110, 24, hFont);
-  CreateBtn(hDlg, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + 116, y, 110, 24, hFont);
+  int chooseBtnW = MulDiv(110, dlgLineH, 20);
+  CreateBtn(hDlg, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, y, chooseBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + chooseBtnW + 6, y, chooseBtnW, btnH, hFont);
   // Color swatch (owner-drawn button)
+  int swatchSize = smallH;
   HWND hSwatch = CreateWindowExW(0, L"BUTTON", L"",
     WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-    margin + 232, y + 2, 20, 20, hDlg,
+    margin + chooseBtnW * 2 + 12, y + 2, swatchSize, swatchSize, hDlg,
     (HMENU)(INT_PTR)IDC_MSGEDIT_COLOR_SWATCH, GetModuleHandle(NULL), NULL);
-  y += 30;
+  y += btnH + 6;
 
   // Font preview
-  HWND hPreview = CreateLabel(hDlg, L"", margin, y, rw, 20, hFont);
+  HWND hPreview = CreateLabel(hDlg, L"", margin, y, rw, smallH, hFont);
   SetWindowLongPtr(hPreview, GWL_ID, IDC_MSGEDIT_FONT_PREVIEW);
-  y += 28;
+  y += dlgLineH + 4;
 
   // Separator
   y += 4;
 
   // Size, X, Y on same row
-  CreateLabel(hDlg, L"Size (0-100):", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Size (0-100):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.0f", data.fSize);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_SIZE, xVal, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"X:", xVal + editW + 10, y + 2, 16, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_SIZE, xVal, y, editW, editH, hFont);
+  int smallLblW = MulDiv(16, dlgLineH, 20);
+  CreateLabel(hDlg, L"X:", xVal + editW + 10, y + 2, smallLblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.x);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_XPOS, xVal + editW + 28, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"Y:", xVal + editW * 2 + 38, y + 2, 16, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_XPOS, xVal + editW + 10 + smallLblW + 2, y, editW, editH, hFont);
+  CreateLabel(hDlg, L"Y:", xVal + editW * 2 + 10 + smallLblW + 12, y + 2, smallLblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.y);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 56, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 10 + smallLblW * 2 + 14, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Growth
-  CreateLabel(hDlg, L"Growth:", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Growth:", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.growth);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_GROWTH, xVal, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_GROWTH, xVal, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Duration
-  CreateLabel(hDlg, L"Duration (s):", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Duration (s):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fTime);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_TIME, xVal, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_TIME, xVal, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Fade In, Fade Out on same row
-  CreateLabel(hDlg, L"Fade In (s):", margin, y + 2, lblW, 20, hFont);
+  int fadeOutLblW = MulDiv(70, dlgLineH, 20);
+  CreateLabel(hDlg, L"Fade In (s):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFade);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEIN, xVal, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, 70, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEIN, xVal, y, editW, editH, hFont);
+  CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, fadeOutLblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFadeOut);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 82, y, editW, 22, hFont);
-  y += 36;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, y, editW, editH, hFont);
+  y += dlgLineH + 12;
 
   // OK / Cancel buttons
-  int btnW = 80, btnH = 28;
-  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, dlgW / 2 - btnW - 10, y, btnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, dlgW / 2 + 10, y, btnW, btnH, hFont);
+  int okBtnW = MulDiv(80, dlgLineH, 20);
+  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
 
   // Update the font preview
   UpdateMsgEditFontPreview(&data);
@@ -15984,6 +16169,306 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     m->nColorR = data.nColorR;
     m->nColorG = data.nColorG;
     m->nColorB = data.nColorB;
+  }
+
+  return data.bResult;
+}
+
+// ======== Message Overrides Dialog ========
+
+struct MsgOverridesDlgData {
+  CPlugin*    plugin;
+  HWND        hDlgWnd;
+  bool        bResult;
+  bool        bDone;
+
+  // Working copies
+  bool        bRandomFont;
+  bool        bRandomColor;
+  bool        bRandomSize;
+  bool        bRandomEffects;
+  int         nSizeMin;
+  int         nSizeMax;
+  int         nMaxOnScreen;
+};
+
+static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  MsgOverridesDlgData* data = (MsgOverridesDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+  switch (msg) {
+  case WM_COMMAND: {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    // Owner-drawn checkbox toggle
+    if (code == BN_CLICKED) {
+      HWND hCtrl = (HWND)lParam;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
+      if (bIsCheckbox) {
+        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
+        InvalidateRect(hCtrl, NULL, TRUE);
+      }
+    }
+
+    if (id == IDC_MSGOVERRIDE_OK && code == BN_CLICKED) {
+      wchar_t buf[32];
+      data->bRandomFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_FONT), L"Checked");
+      data->bRandomColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_COLOR), L"Checked");
+      data->bRandomSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_SIZE), L"Checked");
+      data->bRandomEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_EFFECTS), L"Checked");
+
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
+      data->nSizeMin = _wtoi(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MAX), buf, 32);
+      data->nSizeMax = _wtoi(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
+      data->nMaxOnScreen = _wtoi(buf);
+
+      // Clamp values
+      if (data->nSizeMin < 5) data->nSizeMin = 5;
+      if (data->nSizeMax > 50) data->nSizeMax = 50;
+      if (data->nSizeMin >= data->nSizeMax) data->nSizeMin = data->nSizeMax - 1;
+      if (data->nSizeMin < 5) { data->nSizeMin = 5; data->nSizeMax = 6; }
+      if (data->nMaxOnScreen < 1) data->nMaxOnScreen = 1;
+      if (data->nMaxOnScreen > NUM_SUPERTEXTS) data->nMaxOnScreen = NUM_SUPERTEXTS;
+
+      data->bResult = true;
+      data->bDone = true;
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_CANCEL && code == BN_CLICKED) {
+      data->bResult = false;
+      data->bDone = true;
+      return 0;
+    }
+    break;
+  }
+
+  case WM_DRAWITEM: {
+    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
+      CPlugin* p = data->plugin;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+      if (bIsCheckbox) {
+        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+      } else {
+        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+      }
+      return TRUE;
+    }
+    break;
+  }
+
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
+      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
+      return (LRESULT)data->plugin->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORBTN:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
+      return (LRESULT)data->plugin->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_ERASEBKGND:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+      RECT rc; GetClientRect(hWnd, &rc);
+      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
+      FillRect((HDC)wParam, &rc, hBr);
+      DeleteObject(hBr);
+      return 1;
+    }
+    break;
+
+  case WM_CLOSE:
+    if (data) { data->bResult = false; data->bDone = true; }
+    return 0;
+
+  case WM_KEYDOWN:
+    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
+    if (wParam == VK_RETURN && data) {
+      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_MSGOVERRIDE_OK, BN_CLICKED), 0);
+      return 0;
+    }
+    break;
+  }
+  return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
+bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
+  // Register window class (once)
+  static bool registered = false;
+  static const wchar_t* WND_CLASS = L"MDropDX12MsgOverrides";
+  if (!registered) {
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = MsgOverridesWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = WND_CLASS;
+    RegisterClassExW(&wc);
+    registered = true;
+  }
+
+  // Initialize working copy from current settings
+  MsgOverridesDlgData data = {};
+  data.plugin = this;
+  data.bResult = false;
+  data.bDone = false;
+  data.bRandomFont = m_bMsgOverrideRandomFont;
+  data.bRandomColor = m_bMsgOverrideRandomColor;
+  data.bRandomSize = m_bMsgOverrideRandomSize;
+  data.bRandomEffects = m_bMsgOverrideRandomEffects;
+  data.nSizeMin = m_nMsgOverrideSizeMin;
+  data.nSizeMax = m_nMsgOverrideSizeMax;
+  data.nMaxOnScreen = m_nMsgMaxOnScreen;
+
+  // Create font for controls (use settings font size)
+  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute line height from font metrics for proportional layout
+  HDC hdcTmp = GetDC(hParent);
+  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
+  TEXTMETRIC tmDlg = {};
+  GetTextMetrics(hdcTmp, &tmDlg);
+  SelectObject(hdcTmp, hOldTmp);
+  ReleaseDC(hParent, hdcTmp);
+  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  if (dlgLineH < 20) dlgLineH = 20;
+
+  // Scale dialog dimensions from baseline (350x280 at lineH=20)
+  int clientW = MulDiv(350, dlgLineH, 20);
+  int clientH = MulDiv(280, dlgLineH, 20);
+  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
+  RECT rcSize = { 0, 0, clientW, clientH };
+  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
+  int dlgW = rcSize.right - rcSize.left;
+  int dlgH = rcSize.bottom - rcSize.top;
+
+  // Center on parent
+  RECT rcParent;
+  GetWindowRect(hParent, &rcParent);
+  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  GetMonitorInfo(hMon, &mi);
+  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
+  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
+  if (px < mi.rcWork.left) px = mi.rcWork.left;
+  if (py < mi.rcWork.top) py = mi.rcWork.top;
+  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
+  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
+
+  HWND hDlg = CreateWindowExW(dwExStyle,
+    WND_CLASS, L"Message Overrides", dwStyle,
+    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
+  if (!hDlg) { DeleteObject(hFont); return false; }
+
+  data.hDlgWnd = hDlg;
+  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
+
+  // Scale layout constants from baseline (designed at lineH=20)
+  int margin = MulDiv(16, dlgLineH, 20), rw = clientW - margin * 2;
+  int editH = dlgLineH;
+  int smallH = dlgLineH - 4;
+  int btnH = dlgLineH + 4;
+  int y = MulDiv(14, dlgLineH, 20);
+  wchar_t buf[32];
+
+  // Checkboxes
+  CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, margin, y, rw, editH, hFont, data.bRandomFont, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, margin, y, rw, editH, hFont, data.bRandomColor, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, margin, y, rw, editH, hFont, data.bRandomEffects, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, margin, y, rw, editH, hFont, data.bRandomSize, true);
+  y += dlgLineH + 4;
+
+  // Size min/max
+  int lblW2 = MulDiv(70, dlgLineH, 20), editW2 = MulDiv(50, dlgLineH, 20);
+  int indent = MulDiv(20, dlgLineH, 20);
+  CreateLabel(hDlg, L"Min size:", margin + indent, y + 2, lblW2, smallH, hFont);
+  swprintf(buf, 32, L"%d", data.nSizeMin);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + indent + lblW2, y, editW2, editH, hFont, 0);
+  CreateLabel(hDlg, L"Max size:", margin + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont);
+  swprintf(buf, 32, L"%d", data.nSizeMax);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0);
+  y += dlgLineH + 4;
+
+  CreateLabel(hDlg, L"(min \x2265 5, max \x2264 50)", margin + indent, y, rw, smallH, hFont);
+  y += dlgLineH + 2;
+
+  // Max on screen
+  int maxLblW = MulDiv(170, dlgLineH, 20);
+  CreateLabel(hDlg, L"Max messages on screen:", margin, y + 2, maxLblW, smallH, hFont);
+  swprintf(buf, 32, L"%d", data.nMaxOnScreen);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0);
+  CreateLabel(hDlg, L"(1-10)", margin + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont);
+  y += dlgLineH + 12;
+
+  // OK / Cancel
+  int okBtnW = MulDiv(80, dlgLineH, 20);
+  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
+
+  // Show dialog and make parent modal
+  ShowWindow(hDlg, SW_SHOW);
+  UpdateWindow(hDlg);
+  EnableWindow(hParent, FALSE);
+
+  // Local message loop
+  MSG msg2;
+  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
+      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
+      if (hNext) SetFocus(hNext);
+      continue;
+    }
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
+      data.bResult = false;
+      data.bDone = true;
+      break;
+    }
+    TranslateMessage(&msg2);
+    DispatchMessage(&msg2);
+  }
+
+  // Cleanup
+  EnableWindow(hParent, TRUE);
+  SetForegroundWindow(hParent);
+  DestroyWindow(hDlg);
+  if (hFont) DeleteObject(hFont);
+
+  // Apply if OK
+  if (data.bResult) {
+    m_bMsgOverrideRandomFont = data.bRandomFont;
+    m_bMsgOverrideRandomColor = data.bRandomColor;
+    m_bMsgOverrideRandomSize = data.bRandomSize;
+    m_bMsgOverrideRandomEffects = data.bRandomEffects;
+    m_nMsgOverrideSizeMin = data.nSizeMin;
+    m_nMsgOverrideSizeMax = data.nSizeMax;
+    m_nMsgMaxOnScreen = data.nMaxOnScreen;
+    SaveMsgAutoplaySettings();
   }
 
   return data.bResult;
@@ -16159,23 +16644,34 @@ void CPlugin::LaunchCustomMessage(int nMsgNum) {
     if (m_supertexts[nextFreeSupertextIndex].nColorG > 255) m_supertexts[nextFreeSupertextIndex].nColorG = 255;
     if (m_supertexts[nextFreeSupertextIndex].nColorB > 255) m_supertexts[nextFreeSupertextIndex].nColorB = 255;
 
-    // fix &'s for display:
-    /*
-    {
-      int pos = 0;
-      int len = lstrlen(m_supertext[nextFreeSupertextIndex].szText);
-      while (m_supertext[nextFreeSupertextIndex].szText[pos] && pos<255)
-      {
-        if (m_supertext[nextFreeSupertextIndex].szText[pos] == '&')
-        {
-          for (int x=len; x>=pos; x--)
-            m_supertext[nextFreeSupertextIndex].szText[x+1] = m_supertext[nextFreeSupertextIndex].szText[x];
-          len++;
-          pos++;
-        }
-        pos++;
+    // Apply global randomization overrides
+    if (m_bMsgOverrideRandomFont) {
+      int candidates[MAX_CUSTOM_MESSAGE_FONTS], nCandidates = 0;
+      for (int f = 0; f < MAX_CUSTOM_MESSAGE_FONTS; f++)
+        if (m_CustomMessageFont[f].szFace[0])
+          candidates[nCandidates++] = f;
+      if (nCandidates > 0) {
+        int pick = candidates[rand() % nCandidates];
+        lstrcpyW(m_supertexts[nextFreeSupertextIndex].nFontFace, m_CustomMessageFont[pick].szFace);
       }
-    }*/
+    }
+    if (m_bMsgOverrideRandomColor) {
+      int pick = rand() % MAX_CUSTOM_MESSAGE_FONTS;
+      m_supertexts[nextFreeSupertextIndex].nColorR = m_CustomMessageFont[pick].nColorR;
+      m_supertexts[nextFreeSupertextIndex].nColorG = m_CustomMessageFont[pick].nColorG;
+      m_supertexts[nextFreeSupertextIndex].nColorB = m_CustomMessageFont[pick].nColorB;
+      if (m_supertexts[nextFreeSupertextIndex].nColorR < 0) m_supertexts[nextFreeSupertextIndex].nColorR = 255;
+      if (m_supertexts[nextFreeSupertextIndex].nColorG < 0) m_supertexts[nextFreeSupertextIndex].nColorG = 255;
+      if (m_supertexts[nextFreeSupertextIndex].nColorB < 0) m_supertexts[nextFreeSupertextIndex].nColorB = 255;
+    }
+    if (m_bMsgOverrideRandomEffects) {
+      m_supertexts[nextFreeSupertextIndex].bBold = (rand() % 2) != 0;
+      m_supertexts[nextFreeSupertextIndex].bItal = (rand() % 2) != 0;
+    }
+    if (m_bMsgOverrideRandomSize) {
+      float range = (float)(m_nMsgOverrideSizeMax - m_nMsgOverrideSizeMin);
+      m_supertexts[nextFreeSupertextIndex].fFontSize = m_nMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
+    }
 
     m_supertexts[nextFreeSupertextIndex].fStartTime = GetTime();
 
