@@ -4662,20 +4662,11 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     *d = 0; writePos++;
   }
 
-  // MilkDrop3 UNORM intermediate clamping simulation.
-  // MilkDrop3 applies "Color Mode", "Burn Mode", etc. as separate render passes
-  // through UNORM (8-bit) textures, so negative intermediate values are clamped to 0
-  // between each mode. In our single-pass shader, negative intermediates from
-  // (1 - blur1.x*1.85) survive through division by negatives, producing a red bias.
-  // Fix: replace MilkDrop3 mode markers with saturate() calls before StripComments
-  // removes them. In-place replacement (same length) avoids buffer shifts.
-  if (shaderType == SHADER_COMP) {
-    char* q;
-    q = strstr(&szShaderText[shaderStartPos], "//MilkDrop3 Color Mode:");
-    if (q) memcpy(q, "ret=saturate(ret);      ", 24);  // 24 chars, matches marker length
-    q = strstr(&szShaderText[shaderStartPos], "//MilkDrop3 Burn Mode:");
-    if (q) memcpy(q, "ret=saturate(ret);     ", 23);   // 23 chars, matches marker length
-  }
+  // MilkDrop3 mode markers ("//MilkDrop3 Color Mode:", "//MilkDrop3 Burn Mode:", etc.)
+  // are just comments in the preset shader code. The actual operations (division by
+  // negatives, lerp, etc.) follow on subsequent lines and execute correctly as-is.
+  // Do NOT replace these markers with saturate() calls — doing so destroys color
+  // information by clamping intermediate values before sign-flipping operations.
 
   // strip out all comments - but cheat a little - start at the shader test.
   // (the include file was already stripped of comments)
@@ -4753,10 +4744,11 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
         p = strrchr(p, '}');
         // add the last line - "    _return_value = float4(ret.xyz, _vDiffuse.w);"
         if (p) {
-          // For comp shaders, apply gamma_adj before output (dynamic constant, no recompile needed)
-          const char* szGammaLine = (shaderType == SHADER_COMP) ? "    ret *= gamma_adj;\n" : "";
+          // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
+          // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
+          // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
           char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-          sprintf(p, " %s%s\n}\n", szGammaLine, szLastLine);
+          sprintf(p, " %s\n}\n", szLastLine);
         }
       }
     }
