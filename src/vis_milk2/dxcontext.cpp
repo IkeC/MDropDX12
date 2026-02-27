@@ -834,7 +834,33 @@ bool DXContext::CreateRootSignature()
     hr = m_device->CreateRootSignature(0, signature->GetBufferPointer(),
                                         signature->GetBufferSize(),
                                         IID_PPV_ARGS(&m_rootSignature));
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) return false;
+
+    // Create blur root signature: identical but s0 = CLAMP + LINEAR.
+    // SM5.0 backwards compat assigns the blur shader's single sampler to s0,
+    // but blur passes require CLAMP addressing (DX9 explicitly sets CLAMP).
+    staticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+
+    ComPtr<ID3DBlob> blurSig;
+    ComPtr<ID3DBlob> blurErr;
+    hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                      &blurSig, &blurErr);
+    if (FAILED(hr)) {
+        if (blurErr) DebugLogA((const char*)blurErr->GetBufferPointer());
+        DebugLogA("DX12: WARNING - blur root signature serialization failed, using main root sig");
+        m_blurRootSignature = m_rootSignature; // fallback
+        return true;
+    }
+    hr = m_device->CreateRootSignature(0, blurSig->GetBufferPointer(),
+                                        blurSig->GetBufferSize(),
+                                        IID_PPV_ARGS(&m_blurRootSignature));
+    if (FAILED(hr)) {
+        DebugLogA("DX12: WARNING - blur root signature creation failed, using main root sig");
+        m_blurRootSignature = m_rootSignature; // fallback
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

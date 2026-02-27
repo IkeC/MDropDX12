@@ -14,6 +14,11 @@ signed int pcmPos = 0; // Position to write new data
 float mdropdx12_amp_left = 1.0f;
 float mdropdx12_amp_right = 1.0f;
 float mdropdx12_audio_sensitivity = 1.0f;  // Pre-quantization gain applied to WASAPI float data
+bool  mdropdx12_audio_adaptive = false;    // AudioSensitivity=-1: auto-normalize audio levels
+
+// Adaptive audio normalization state
+static float s_adaptivePeak = 0.01f;   // Tracked peak level (never zero to avoid div-by-zero)
+static float s_adaptiveGain = 32.0f;   // Current computed gain
 
 void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
@@ -54,13 +59,25 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
 }
 
 int8_t FltToInt(float flt) {
-  flt *= mdropdx12_audio_sensitivity;  // Apply gain before quantization
-  if (flt >= 1.0f) {
-    return +127; // 0x7f
+  float gain;
+  if (mdropdx12_audio_adaptive) {
+    // Adaptive mode: track peak level and auto-compute gain
+    float absFlt = fabsf(flt);
+    if (absFlt > s_adaptivePeak)
+      s_adaptivePeak = absFlt;               // Instant attack
+    else
+      s_adaptivePeak *= 0.99998f;            // Slow decay (~1.5s at 48kHz)
+    // Target 70% of full range, clamped to [1, 256]
+    gain = 0.7f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
+    if (gain < 1.0f)  gain = 1.0f;
+    if (gain > 256.0f) gain = 256.0f;
+    s_adaptiveGain = gain;
+  } else {
+    gain = mdropdx12_audio_sensitivity;       // Fixed gain from INI
   }
-  if (flt < -1.0f) {
-    return -128; // 0x80
-  }
+  flt *= gain;
+  if (flt >= 1.0f)  return +127;
+  if (flt < -1.0f)  return -128;
   return (int8_t)(flt * 128);
 };
 

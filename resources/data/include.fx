@@ -156,24 +156,28 @@ float4x3 rot_rand4;
 #define tex3d tex3D
 
 // previous-frame-image samplers:
+// register(sN) annotations match static samplers in DX12 root signature.
+// SM5.0 backwards compat splits sampler2D into SamplerState (s-register) +
+// Texture2D (t-register). The t-register is resolved separately via D3D_SIT_TEXTURE
+// reflection in d3dx9compat.h, so s-register annotations are independent of texture binding.
 texture PrevFrameImage;
-sampler2D sampler_main = sampler_state
+sampler2D sampler_main : register(s0) = sampler_state
 {
     Texture = <PrevFrameImage>;
 };
-sampler2D sampler_fc_main = sampler_state
+sampler2D sampler_fc_main : register(s1) = sampler_state
 {
     Texture = <PrevFrameImage>;
 };
-sampler2D sampler_pc_main = sampler_state
+sampler2D sampler_pc_main : register(s2) = sampler_state
 {
     Texture = <PrevFrameImage>;
 };
-sampler2D sampler_fw_main = sampler_state
+sampler2D sampler_fw_main : register(s3) = sampler_state
 {
     Texture = <PrevFrameImage>;
 };
-sampler2D sampler_pw_main = sampler_state
+sampler2D sampler_pw_main : register(s4) = sampler_state
 {
     Texture = <PrevFrameImage>;
 };
@@ -183,12 +187,12 @@ sampler2D sampler_pw_main = sampler_state
 #define sampler_PW_main sampler_pw_main
 
 // built-in noise textures:
-sampler2D sampler_noise_lq;
-sampler2D sampler_noise_lq_lite;
-sampler2D sampler_noise_mq;
-sampler2D sampler_noise_hq;
-sampler3D sampler_noisevol_lq;
-sampler3D sampler_noisevol_hq;
+sampler2D sampler_noise_lq : register(s5);
+sampler2D sampler_noise_lq_lite : register(s6);
+sampler2D sampler_noise_mq : register(s7);
+sampler2D sampler_noise_hq : register(s8);
+sampler3D sampler_noisevol_lq : register(s9);
+sampler3D sampler_noisevol_hq : register(s10);
 float4 texsize_noise_lq;
 float4 texsize_noise_lq_lite;
 float4 texsize_noise_mq;
@@ -197,9 +201,9 @@ float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
 // procedural blur textures:
-sampler2D sampler_blur1;
-sampler2D sampler_blur2;
-sampler2D sampler_blur3;
+sampler2D sampler_blur1 : register(s13);
+sampler2D sampler_blur2 : register(s14);
+sampler2D sampler_blur3 : register(s15);
 
 float3 shiftHSV(float3 c)
 {

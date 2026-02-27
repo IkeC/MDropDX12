@@ -180,6 +180,7 @@ public:
   // Root signature (Phase 3, updated Phase 4: static samplers + 1-SRV table)
   // Layout: [0] CBV (b0), [1] descriptor table 1 SRV (t0), + 4 static samplers s0-s3
   ComPtr<ID3D12RootSignature> m_rootSignature;
+  ComPtr<ID3D12RootSignature> m_blurRootSignature; // Same layout but s0 = CLAMP (blur passes need CLAMP, not WRAP)
   bool CreateRootSignature();
 
   // Pipeline state objects (Phase 3)

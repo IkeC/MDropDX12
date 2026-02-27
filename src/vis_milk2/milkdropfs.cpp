@@ -1765,9 +1765,11 @@ void CPlugin::DX12_BlurPasses()
   fbias[2] = -temp_min * fscale[2];
 
   // Ensure descriptor heaps are set
+  // Use blur root signature (s0 = CLAMP) — SM5.0 assigns the blur shader's
+  // single sampler to s0, and DX9 blur passes use CLAMP addressing.
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
   cmdList->SetDescriptorHeaps(1, heaps);
-  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_blurRootSignature.Get());
 
   // DIAG: log blur details once per preset load
   bool blurDiag = (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f);

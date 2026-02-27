@@ -719,7 +719,7 @@ enum {
 static SettingDesc g_settingsDesc[] = {
   { L"Preset Directory",       ST_PATH,     SET_PRESET_DIR,       0, 0, 0,       L"Settings",  L"szPresetDir" },
   { L"Audio Device",           ST_READONLY, SET_AUDIO_DEVICE,     0, 0, 0,       NULL,         NULL },
-  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, 1, 256, 4,    L"Milkwave",  L"AudioSensitivity" },
+  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, -1, 256, 4,   L"Milkwave",  L"AudioSensitivity" },
   { L"Blend Time",             ST_FLOAT,    SET_BLEND_TIME,       0.1f, 10, 0.1f, L"Settings", L"fBlendTimeAuto" },
   { L"Time Between Presets",   ST_FLOAT,    SET_TIME_BETWEEN,     1, 300, 5,     L"Settings",  L"fTimeBetweenPresets" },
   { L"Hard Cuts Disabled",     ST_BOOL,     SET_HARD_CUTS,        0, 0, 0,       L"Settings",  L"bHardCutsDisabled" },
@@ -1536,9 +1536,16 @@ void CPlugin::MyReadConfig() {
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
   m_fAudioSensitivity = (float)GetPrivateProfileIntW(L"Milkwave", L"AudioSensitivity", (int)m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < 1.0f) m_fAudioSensitivity = 1.0f;
+  if (m_fAudioSensitivity < -1.0f) m_fAudioSensitivity = -1.0f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  if (m_fAudioSensitivity == -1.0f) {
+    mdropdx12_audio_adaptive = true;
+    mdropdx12_audio_sensitivity = 32.0f;  // fallback, not used in adaptive mode
+  } else {
+    mdropdx12_audio_adaptive = false;
+    if (m_fAudioSensitivity < 1.0f) m_fAudioSensitivity = 1.0f;
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  }
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
@@ -2399,9 +2406,11 @@ int CPlugin::AllocateMyDX9Stuff() {
     }
 
     // DX12: Create blur PSOs from compiled blur shader bytecodes
-    if (m_lpDX && m_lpDX->m_device.Get() && m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
+    // Use blur root signature (s0 = CLAMP) because SM5.0 assigns the blur
+    // shader's single sampler to s0, and blur passes require CLAMP addressing.
+    if (m_lpDX && m_lpDX->m_device.Get() && m_lpDX->m_blurRootSignature.Get() && g_pBlurVSBlob) {
       ID3D12Device* dev = m_lpDX->m_device.Get();
-      ID3D12RootSignature* rs = m_lpDX->m_rootSignature.Get();
+      ID3D12RootSignature* rs = m_lpDX->m_blurRootSignature.Get();
       DXGI_FORMAT fmt = DXGI_FORMAT_R8G8B8A8_UNORM;
       for (int bi = 0; bi < 2; bi++) {
         m_dx12BlurPSO[bi].Reset();
@@ -5437,9 +5446,13 @@ void CPlugin::RenderInjectEffect()
   // per-preset brighten/darken/solarize/invert on the composite back buffer.
   // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
 
-  // Build per-preset effect bitmask from per-frame equation outputs
+  // Build per-preset effect bitmask from per-frame equation outputs.
+  // In DX9, brighten/darken/solarize/invert are only applied by ShowToUser_NoShaders()
+  // (milkdropfs.cpp line 6664-6744), which runs only for non-shader presets (PSVERSION_COMP=0).
+  // When a comp shader is present, ShowToUser_Shaders() is called instead, which does NOT
+  // apply these effects. Match that behavior: skip per-preset effects when comp PSO is active.
   UINT presetFxMask = 0;
-  if (m_pState) {
+  if (m_pState && !m_dx12CompPSO) {
     if (m_pState->var_pf_brighten && *m_pState->var_pf_brighten > 0.5) presetFxMask |= 1u;
     if (m_pState->var_pf_darken   && *m_pState->var_pf_darken   > 0.5) presetFxMask |= 2u;
     if (m_pState->var_pf_solarize && *m_pState->var_pf_solarize > 0.5) presetFxMask |= 4u;
@@ -9484,7 +9497,7 @@ void CPlugin::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
   switch (id) {
   case SET_PRESET_DIR:       lstrcpynW(buf, m_szPresetDir, bufLen); break;
   case SET_AUDIO_DEVICE:     lstrcpynW(buf, m_szAudioDevice, bufLen); break;
-  case SET_AUDIO_SENSITIVITY: swprintf(buf, L"%.0f", m_fAudioSensitivity); break;
+  case SET_AUDIO_SENSITIVITY: swprintf(buf, m_fAudioSensitivity == -1.0f ? L"Auto" : L"%.0f", m_fAudioSensitivity); break;
   case SET_BLEND_TIME:       swprintf(buf, L"%.1f s", m_fBlendTimeAuto); break;
   case SET_TIME_BETWEEN:     swprintf(buf, L"%.0f s", m_fTimeBetweenPresets); break;
   case SET_HARD_CUTS:        lstrcpyW(buf, m_bHardCutsDisabled ? L"yes" : L"no"); break;
@@ -9544,8 +9557,14 @@ void CPlugin::AdjustSetting(int id, int direction) {
   *pFloat += s.fStep * direction;
   if (*pFloat < s.fMin) *pFloat = s.fMin;
   if (*pFloat > s.fMax) *pFloat = s.fMax;
-  if (id == SET_AUDIO_SENSITIVITY)
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  if (id == SET_AUDIO_SENSITIVITY) {
+    if (m_fAudioSensitivity == -1.0f) {
+      mdropdx12_audio_adaptive = true;
+    } else {
+      mdropdx12_audio_adaptive = false;
+      mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+    }
+  }
   SaveSettingToINI(id);
 }
 
@@ -10635,9 +10654,15 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       switch (id) {
       case IDC_MW_AUDIO_SENS:
         p->m_fAudioSensitivity = (float)_wtof(buf);
-        if (p->m_fAudioSensitivity < 1) p->m_fAudioSensitivity = 1;
+        if (p->m_fAudioSensitivity < -1) p->m_fAudioSensitivity = -1;
         if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
-        mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
+        if (p->m_fAudioSensitivity == -1.0f) {
+          mdropdx12_audio_adaptive = true;
+        } else {
+          mdropdx12_audio_adaptive = false;
+          if (p->m_fAudioSensitivity < 1) p->m_fAudioSensitivity = 1;
+          mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
+        }
         p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
         return 0;
       case IDC_MW_BLEND_TIME:
@@ -11164,7 +11189,7 @@ void CPlugin::BuildSettingsControls() {
   }
 
   // Settings
-  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity:", x, y, lw, lineH, hFont));
+  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity (-1=Auto):", x, y, lw, lineH, hFont));
   swprintf(buf, 64, L"%.0f", m_fAudioSensitivity);
   PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont));
   y += lineH + gap;

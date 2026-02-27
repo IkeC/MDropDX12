@@ -380,7 +380,7 @@ public:
   int			m_nCustMsgsSpawned;
   bool    m_bEnablePresetStartup;
   bool    m_bEnableAudioCapture = true;
-  float   m_fAudioSensitivity = 32.0f;  // Pre-quantization gain for WASAPI float → 8-bit conversion
+  float   m_fAudioSensitivity = -1.0f;  // -1 = adaptive auto-normalize; 1-256 = fixed gain
   bool    m_bEnablePresetStartupSavingOnClose = true;
   bool    m_bAutoLockPresetWhenNoMusic;
   bool    m_bScreenDependentRenderMode;
