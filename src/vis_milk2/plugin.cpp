@@ -719,7 +719,7 @@ enum {
 static SettingDesc g_settingsDesc[] = {
   { L"Preset Directory",       ST_PATH,     SET_PRESET_DIR,       0, 0, 0,       L"Settings",  L"szPresetDir" },
   { L"Audio Device",           ST_READONLY, SET_AUDIO_DEVICE,     0, 0, 0,       NULL,         NULL },
-  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, 1, 256, 4,    L"Milkwave",  L"AudioSensitivity" },
+  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, -1, 256, 0.5f, L"Milkwave",  L"AudioSensitivity" },
   { L"Blend Time",             ST_FLOAT,    SET_BLEND_TIME,       0.1f, 10, 0.1f, L"Settings", L"fBlendTimeAuto" },
   { L"Time Between Presets",   ST_FLOAT,    SET_TIME_BETWEEN,     1, 300, 5,     L"Settings",  L"fTimeBetweenPresets" },
   { L"Hard Cuts Disabled",     ST_BOOL,     SET_HARD_CUTS,        0, 0, 0,       L"Settings",  L"bHardCutsDisabled" },
@@ -821,6 +821,19 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_MSG_JITTER_LBL   2097
 #define IDC_MW_MSG_OPENINI      2098
 #define IDC_MW_MSG_AUTOSIZE     2099
+
+// -- Settings window controls --
+#define IDC_MW_RESET_WINDOW         2110   // Reset Window Size button (General tab)
+#define IDC_MW_FONT_PLUS            2111   // Font size + button (General tab)
+#define IDC_MW_FONT_MINUS           2112   // Font size - button (General tab)
+
+// -- GPU Protection controls (Visual tab) --
+#define IDC_MW_GPU_MAX_INST         2100
+#define IDC_MW_GPU_SCALE_BY_RES     2101
+#define IDC_MW_GPU_SCALE_BASE       2102
+#define IDC_MW_GPU_SKIP_HEAVY       2103
+#define IDC_MW_GPU_HEAVY_THRESHOLD  2104
+#define IDC_MW_GPU_RELOAD_PRESET    2105
 
 // Message Edit Dialog controls
 #define IDC_MSGEDIT_TEXT         2100
@@ -1432,11 +1445,11 @@ void CPlugin::MyPreInitialize() {
   m_lpVS[0] = NULL;
   m_lpVS[1] = NULL;
 #if (NUM_BLUR_TEX>0)
-  for (i = 0; i < NUM_BLUR_TEX; i++)
+  for (int i = 0; i < NUM_BLUR_TEX; i++)
     m_lpBlur[i] = NULL;
 #endif
 
-  for (i = 0; i < NUM_SUPERTEXTS; i++) {
+  for (int i = 0; i < NUM_SUPERTEXTS; i++) {
     m_lpDDSTitle[i] = NULL;
   }
 
@@ -1527,10 +1540,20 @@ void CPlugin::MyReadConfig() {
   m_bEnablePresetStartup = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartup", m_bEnablePresetStartup, pIni);
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
-  m_fAudioSensitivity = (float)GetPrivateProfileIntW(L"Milkwave", L"AudioSensitivity", (int)m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < 1.0f) m_fAudioSensitivity = 1.0f;
+  m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
+  if (m_fAudioSensitivity < -1.0f) m_fAudioSensitivity = -1.0f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  if (m_fAudioSensitivity == -1.0f) {
+    mdropdx12_audio_adaptive = true;
+    mdropdx12_audio_sensitivity = 1.0f;   // fallback, not used in adaptive mode
+  } else {
+    mdropdx12_audio_adaptive = false;
+    if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  }
+  { char dbg[128]; sprintf(dbg, "AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
+    m_fAudioSensitivity, (int)mdropdx12_audio_adaptive, mdropdx12_audio_sensitivity);
+    DebugLogA(dbg); }
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
@@ -1650,6 +1673,16 @@ void CPlugin::MyReadConfig() {
 
   m_ShowUpArrowInDescriptionIfPSMinVersionForced = GetPrivateProfileBoolW(L"Milkwave", L"ShowUpArrowInDescriptionIfPSMinVersionForced", m_ShowUpArrowInDescriptionIfPSMinVersionForced, pIni);
 
+  // GPU Protection
+  m_nMaxShapeInstances = GetPrivateProfileIntW(L"Milkwave", L"MaxShapeInstances", m_nMaxShapeInstances, pIni);
+  if (m_nMaxShapeInstances < 0) m_nMaxShapeInstances = 0;
+  m_bScaleInstancesByResolution = GetPrivateProfileBoolW(L"Milkwave", L"ScaleInstancesByResolution", m_bScaleInstancesByResolution, pIni);
+  m_nInstanceScaleBaseWidth = GetPrivateProfileIntW(L"Milkwave", L"InstanceScaleBaseWidth", m_nInstanceScaleBaseWidth, pIni);
+  if (m_nInstanceScaleBaseWidth < 640) m_nInstanceScaleBaseWidth = 640;
+  m_bSkipHeavyPresets = GetPrivateProfileBoolW(L"Milkwave", L"SkipHeavyPresets", m_bSkipHeavyPresets, pIni);
+  m_nHeavyPresetMaxInstances = GetPrivateProfileIntW(L"Milkwave", L"HeavyPresetMaxInstances", m_nHeavyPresetMaxInstances, pIni);
+  if (m_nHeavyPresetMaxInstances < 64) m_nHeavyPresetMaxInstances = 64;
+
   m_WindowBorderless = GetPrivateProfileBoolW(L"Milkwave", L"WindowBorderless", m_WindowBorderless, pIni);
   m_bAlwaysOnTop = GetPrivateProfileBoolW(L"Milkwave", L"WindowAlwaysOnTop", m_bAlwaysOnTop, pIni);
 
@@ -1659,12 +1692,19 @@ void CPlugin::MyReadConfig() {
   m_WindowY = GetPrivateProfileIntW(L"Milkwave", L"WindowY", m_WindowY, pIni);
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
-  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 600, pIni);
-  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 800, pIni);
+  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 620, pIni);
+  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 700, pIni);
+  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
   if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
   if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
-  if (m_nSettingsWndW > 2000) m_nSettingsWndW = 2000;
-  if (m_nSettingsWndH > 2000) m_nSettingsWndH = 2000;
+  { // Cap to screen work area instead of hardcoded 2000
+    int scrW = GetSystemMetrics(SM_CXSCREEN);
+    int scrH = GetSystemMetrics(SM_CYSCREEN);
+    if (m_nSettingsWndW > scrW) m_nSettingsWndW = scrW;
+    if (m_nSettingsWndH > scrH) m_nSettingsWndH = scrH;
+  }
+  if (m_nSettingsFontSize > -12) m_nSettingsFontSize = -12;  // min font size
+  if (m_nSettingsFontSize < -24) m_nSettingsFontSize = -24;  // max font size
 
   // Settings window dark theme — just on/off toggle, colors come from code defaults
   m_bSettingsDarkTheme = GetPrivateProfileBoolW(L"SettingsTheme", L"DarkTheme", m_bSettingsDarkTheme, pIni);
@@ -1802,7 +1842,8 @@ void CPlugin::MyWriteConfig() {
   // MDropDX12:
   WritePrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, pIni);
   WritePrivateProfileIntW(m_nAudioDeviceRequestType, L"AudioDeviceRequestType", pIni, L"Milkwave");
-  WritePrivateProfileIntW((int)m_fAudioSensitivity, L"AudioSensitivity", pIni, L"Milkwave");
+  { wchar_t asBuf[32]; swprintf(asBuf, 32, L"%g", (double)m_fAudioSensitivity);
+    WritePrivateProfileStringW(L"Milkwave", L"AudioSensitivity", asBuf, pIni); }
   WritePrivateProfileIntW(m_SongInfoPollingEnabled, L"SongInfoPollingEnabled", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_SongInfoDisplayCorner, L"SongInfoDisplayCorner", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_ChangePresetWithSong, L"ChangePresetWithSong", pIni, L"Milkwave");
@@ -1822,6 +1863,14 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsFontSize, L"SettingsFontSize", pIni, L"Milkwave");
+
+  // GPU Protection
+  WritePrivateProfileIntW(m_nMaxShapeInstances, L"MaxShapeInstances", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bScaleInstancesByResolution, L"ScaleInstancesByResolution", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nInstanceScaleBaseWidth, L"InstanceScaleBaseWidth", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bSkipHeavyPresets, L"SkipHeavyPresets", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nHeavyPresetMaxInstances, L"HeavyPresetMaxInstances", pIni, L"Milkwave");
 }
 
 void CPlugin::SaveWindowSizeAndPosition(HWND hwnd) {
@@ -2012,7 +2061,7 @@ void CPlugin::CleanUpMyNonDx9Stuff() {
   m_menuPost.Finish();
   for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
     m_menuWavecode[i].Finish();
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++)
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++)
     m_menuShapecode[i].Finish();
 
   //dumpmsg("Finish: cleanup complete.");
@@ -2374,9 +2423,11 @@ int CPlugin::AllocateMyDX9Stuff() {
     }
 
     // DX12: Create blur PSOs from compiled blur shader bytecodes
-    if (m_lpDX && m_lpDX->m_device.Get() && m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
+    // Use blur root signature (s0 = CLAMP) because SM5.0 assigns the blur
+    // shader's single sampler to s0, and blur passes require CLAMP addressing.
+    if (m_lpDX && m_lpDX->m_device.Get() && m_lpDX->m_blurRootSignature.Get() && g_pBlurVSBlob) {
       ID3D12Device* dev = m_lpDX->m_device.Get();
-      ID3D12RootSignature* rs = m_lpDX->m_rootSignature.Get();
+      ID3D12RootSignature* rs = m_lpDX->m_blurRootSignature.Get();
       DXGI_FORMAT fmt = DXGI_FORMAT_R8G8B8A8_UNORM;
       for (int bi = 0; bi < 2; bi++) {
         m_dx12BlurPSO[bi].Reset();
@@ -2595,6 +2646,9 @@ int CPlugin::AllocateMyDX9Stuff() {
     }
 
     // Inject effect pixel shader PSO
+    // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
+    // mode.y = per-preset effect bitmask (bit0=brighten, bit1=darken, bit2=solarize, bit3=invert)
+    //          Per-preset effects use DX9-compatible math (blend-state equivalent).
     if (m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
       static const char szInjectPS[] =
         "Texture2D<float4> tex : register(t0);\n"
@@ -2602,6 +2656,12 @@ int CPlugin::AllocateMyDX9Stuff() {
         "cbuffer cbInject : register(b0) { uint4 mode; }\n"
         "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
         "    float4 ret = tex.Sample(samp, uv);\n"
+        "    // Per-preset post-process effects (DX9 blend-state equivalent math)\n"
+        "    if (mode.y & 1u) ret.rgb = ret.rgb * (2.0 - ret.rgb);\n"         // brighten = invert→square→invert
+        "    if (mode.y & 2u) ret.rgb = ret.rgb * ret.rgb;\n"                  // darken = square
+        "    if (mode.y & 4u) ret.rgb = ret.rgb * (1.0 - ret.rgb) * 2.0;\n"   // solarize = invdest + dest*dest
+        "    if (mode.y & 8u) ret.rgb = 1.0 - ret.rgb;\n"                     // invert
+        "    // F11 inject effect (global, user-toggled)\n"
         "    if (mode.x == 1u) ret.rgb = sqrt(max(ret.rgb, 0.0));\n"
         "    else if (mode.x == 2u) ret.rgb = ret.rgb * ret.rgb;\n"
         "    else if (mode.x == 3u) ret.rgb = ret.rgb * (1.0 - ret.rgb) * 4.0;\n"
@@ -2614,7 +2674,7 @@ int CPlugin::AllocateMyDX9Stuff() {
                               "main", "ps_5_0",
                               D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY, 0, &psBlob, &pErrors);
       if (FAILED(hr)) {
-        if (pErrors) { OutputDebugStringA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
+        if (pErrors) { DebugLogA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
         DebugLogA("DX12: Inject effect PSO: PS compile FAILED");
       } else {
         if (pErrors) pErrors->Release();
@@ -2641,8 +2701,11 @@ int CPlugin::AllocateMyDX9Stuff() {
   ZeroMemory(m_comp_verts, sizeof(MYVERTEX) * FCGSX * FCGSY);
   //float fOnePlusInvWidth  = 1.0f + 1.0f/(float)GetWidth();
   //float fOnePlusInvHeight = 1.0f + 1.0f/(float)GetHeight();
-  float fHalfTexelW = 0.5f / (float)GetWidth();   // 2.5: 2 pixels bad @ bottom right
-  float fHalfTexelH = 0.5f / (float)GetHeight();
+  // DX9 half-texel offset: needed because DX9 pixel centers are at integers.
+  // DX12 pixel centers are at integer+0.5, so the offset is NOT needed and causes
+  // sub-pixel sampling misalignment (universal blur with bilinear filtering).
+  float fHalfTexelW = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)GetWidth();
+  float fHalfTexelH = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)GetHeight();
   float fDivX = 1.0f / (float)(FCGSX - 2);
   float fDivY = 1.0f / (float)(FCGSY - 2);
   for (int j = 0; j < FCGSY; j++) {
@@ -2929,9 +2992,10 @@ int CPlugin::AllocateMyDX9Stuff() {
   }
 
   int nVert = 0;
-  float texel_offset_x = 0.5f / (float)m_nTexSizeX;
-  float texel_offset_y = 0.5f / (float)m_nTexSizeY;
-  for (y = 0; y <= m_nGridY; y++) {
+  // DX9 half-texel offset for UV alignment; not needed in DX12 (pixel centers at +0.5).
+  float texel_offset_x = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeX;
+  float texel_offset_y = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeY;
+  for (int y = 0; y <= m_nGridY; y++) {
     for (int x = 0; x <= m_nGridX; x++) {
       // precompute x,y,z
       m_verts[nVert].x = x / (float)m_nGridX * 2.0f - 1.0f;
@@ -3229,7 +3293,7 @@ bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
         (((DWORD)(rand() % RANGE) + RANGE / 2));
     }
     // swap some pixels randomly, to improve 'randomness'
-    for (x = 0; x < size; x++) {
+    for (int x = 0; x < size; x++) {
       int x1 = (rand() ^ q.LowPart) % size;
       int x2 = (rand() ^ q.HighPart) % size;
       DWORD temp = dst[x2];
@@ -3453,7 +3517,7 @@ bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
           (((DWORD)(rand() % RANGE) + RANGE / 2));
       }
       // swap some pixels randomly, to improve 'randomness'
-      for (x = 0; x < size; x++) {
+      for (int x = 0; x < size; x++) {
         int x1 = (rand() ^ q.LowPart) % size;
         int x2 = (rand() ^ q.HighPart) % size;
         DWORD temp = dst[x2];
@@ -3487,7 +3551,7 @@ bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
           }
 
     // next go down, doing cubic interp along Y, on the main slices.
-    for (z = 0; z < size; z += zoom_factor)
+    for (int z = 0; z < size; z += zoom_factor)
       for (int x = 0; x < size; x++)
         for (int y = 0; y < size; y++)
           if (y % zoom_factor) {
@@ -3615,7 +3679,7 @@ bool CPlugin::EvictSomeTexture() {
       }
     char buf[1024];
     sprintf(buf, "evicting at %d textures, %.1f MB\n", nEvictableFiles, nEvictableBytes * 0.000001f);
-    OutputDebugString(buf);
+    DebugLogA(buf);
   }
 #endif
 
@@ -3639,7 +3703,7 @@ bool CPlugin::EvictSomeTexture() {
   // are HALF as big as the oldest textures, and thus, less likely to get booted.
   int biggest_bytes = 0;
   int biggest_index = -1;
-  for (i = 0; i < N; i++)
+  for (int i = 0; i < N; i++)
     if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 && m_textures[i].nAge < m_nPresetsLoadedTotal - 1) // note: -1 here keeps images around for the blend-from preset, too...
     {
       float size_mult = 1.0f + (m_textures[i].nAge - newest) / (float)(oldest - newest);
@@ -3658,7 +3722,7 @@ bool CPlugin::EvictSomeTexture() {
 
   // notify all CShaderParams classes that we're releasing a bindable texture!!
   N = global_CShaderParams_master_list.size();
-  for (i = 0; i < N; i++)
+  for (int i = 0; i < N; i++)
     global_CShaderParams_master_list[i]->OnTextureEvict(m_textures[biggest_index].texptr);
 
   // 2. erase the texture itself
@@ -3749,7 +3813,7 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
     if (N == 0)
       return false;
     // pick randomly from the subset
-    i = rng % temp_list.size();
+    int i = rng % temp_list.size();
     lstrcpyW(szRetTextureFilename, temp_list[i].c_str());
   }
   return true;
@@ -3980,18 +4044,39 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             // DX12 path: load via WIC
             wchar_t szFilename[MAX_PATH];
             bool found = false;
+            {
+              char dbg[512];
+              sprintf(dbg, "CacheParams: searching for texture '%ls'", szRootName);
+              DebugLogA(dbg);
+            }
             for (int z = 0; z < sizeof(texture_exts) / sizeof(texture_exts[0]); z++) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                  // Search fallback paths (paths already have trailing backslash)
-                  bool fbFound = false;
-                  for (auto& fbPath : g_plugin.m_fallbackPaths) {
-                    swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
-                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                  // Check for textures\ sibling of preset directory
+                  bool siblingFound = false;
+                  {
+                    wchar_t siblingTexDir[MAX_PATH];
+                    wcscpy_s(siblingTexDir, MAX_PATH, g_plugin.m_szPresetDir);
+                    int len = (int)wcslen(siblingTexDir);
+                    if (len > 0 && siblingTexDir[len - 1] == L'\\') siblingTexDir[--len] = 0;
+                    wchar_t* lastSlash = wcsrchr(siblingTexDir, L'\\');
+                    if (lastSlash) {
+                      wcscpy(lastSlash + 1, L"textures\\");
+                      swprintf(szFilename, L"%s%s.%s", siblingTexDir, szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) siblingFound = true;
+                    }
                   }
-                  if (!fbFound) continue;
+                  if (!siblingFound) {
+                    // Search fallback paths (paths already have trailing backslash)
+                    bool fbFound = false;
+                    for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                      swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                    }
+                    if (!fbFound) continue;
+                  }
                 }
               }
               x.dx12Tex = g_plugin.m_lpDX->LoadTextureFromFile(szFilename);
@@ -4003,6 +4088,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 x.nAge = g_plugin.m_nPresetsLoadedTotal;
                 x.nSizeInBytes = x.w * x.h * 4 + 16384;
                 found = true;
+                char dbg[512];
+                sprintf(dbg, "CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
+                DebugLogA(dbg);
                 break;
               }
               // WIC couldn't decode this format (e.g. .dds) — try next extension
@@ -4012,6 +4100,13 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
               g_plugin.dumpmsg(buf);
+              {
+                char dbg[512];
+                sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
+                        szRootName, g_plugin.m_szMilkdrop2Path, g_plugin.m_szPresetDir,
+                        (int)g_plugin.m_fallbackPaths.size());
+                DebugLogA(dbg);
+              }
               if (bHardErrors)
                 MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
@@ -4107,7 +4202,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
   DebugLogA("DX12: CacheParams: pass 1 done, entering pass 2");
 
   // pass 2: bind all the float4's.  "texsize_XYZ" params will be filled out via knowledge of loaded texture sizes.
-  for (i = 0; i < d.Constants; i++) {
+  for (UINT i = 0; i < d.Constants; i++) {
     D3DXHANDLE h = pCT->GetConstant(NULL, i);
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
@@ -4379,6 +4474,14 @@ void CPlugin::CreateDX12PresetPSOs() {
       false, &m_compMainTexSlot);
     if (m_compMainTexSlot == UINT_MAX) m_compMainTexSlot = 0;
   }
+
+  {
+    char dbg[256];
+    sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
+    DebugLogA(dbg);
+    sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
+    DebugLogA(dbg);
+  }
 }
 
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
@@ -4521,6 +4624,21 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
   *ppShader = NULL;
   *ppConstTable = NULL;
 
+  // DIAG: log original shader text (before include.fx prepend)
+  {
+    char dbg[512];
+    int origLen = szOrigShaderText ? (int)strlen(szOrigShaderText) : 0;
+    char preview[301] = {0};
+    if (origLen > 0) {
+      strncpy(preview, szOrigShaderText, 300);
+      for (int i = 0; i < 300 && preview[i]; i++)
+        if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+    }
+    sprintf(dbg, "DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
+            shaderType, szWhichShader, origLen, preview);
+    DebugLogA(dbg);
+  }
+
   char szShaderText[128000];
   char temp[128000];
   int writePos = 0;
@@ -4538,7 +4656,6 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     lstrcpy(&szShaderText[writePos], szCompDefines);
     writePos += lstrlen(szCompDefines);
   }
-
   // paste in the shader itself - converting LCC's to 13+10's.
   // avoid lstrcpy b/c it might not handle the linefeed stuff...?
   int shaderStartPos = writePos;
@@ -4557,6 +4674,12 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     }
     *d = 0; writePos++;
   }
+
+  // MilkDrop3 mode markers ("//MilkDrop3 Color Mode:", "//MilkDrop3 Burn Mode:", etc.)
+  // are just comments in the preset shader code. The actual operations (division by
+  // negatives, lerp, etc.) follow on subsequent lines and execute correctly as-is.
+  // Do NOT replace these markers with saturate() calls — doing so destroys color
+  // information by clamping intermediate values before sign-flipping operations.
 
   // strip out all comments - but cheat a little - start at the shader test.
   // (the include file was already stripped of comments)
@@ -4594,9 +4717,21 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     // seek to 'shader_body' and replace it with spaces
     while (*p && strncmp(p, "shader_body", 11))
       p++;
-    if (p) {
+
+    // DIAG: log whether shader_body was found
+    {
+      char dbg[256];
+      sprintf(dbg, "DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
+              shaderType, (*p != 0) ? 1 : 0, (int)(p - &szShaderText[shaderStartPos]));
+      DebugLogA(dbg);
+    }
+
+    if (*p) {
       for (int i = 0; i < 11; i++)
         *p++ = ' ';
+    }
+    else {
+      p = NULL; // shader_body not found — signal error
     }
 
     if (p) {
@@ -4622,10 +4757,11 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
         p = strrchr(p, '}');
         // add the last line - "    _return_value = float4(ret.xyz, _vDiffuse.w);"
         if (p) {
-          // For comp shaders, apply gamma_adj before output (dynamic constant, no recompile needed)
-          const char* szGammaLine = (shaderType == SHADER_COMP) ? "    ret *= gamma_adj;\n" : "";
+          // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
+          // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
+          // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
           char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-          sprintf(p, " %s%s\n}\n", szGammaLine, szLastLine);
+          sprintf(p, " %s\n}\n", szLastLine);
         }
       }
     }
@@ -4641,6 +4777,15 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
 
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
+
+  // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
+  if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+    char dumpPath[MAX_PATH];
+    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir,
+            shaderType == SHADER_COMP ? "comp" : "warp");
+    FILE* f = fopen(dumpPath, "w");
+    if (f) { fputs(szShaderText, f); fclose(f); }
+  }
 
   // now really try to compile it.
 
@@ -4855,7 +5000,7 @@ void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
 
   // DON'T RELEASE blur textures - they were already released because they're in m_textures[].
 #if (NUM_BLUR_TEX>0)
-  for (i = 0; i < NUM_BLUR_TEX; i++)
+  for (int i = 0; i < NUM_BLUR_TEX; i++)
     m_lpBlur[i] = NULL;//SafeRelease(m_lpBlur[i]);
 #endif
 
@@ -5321,9 +5466,25 @@ void CPlugin::MyRenderFn(int redraw) {
 
 void CPlugin::RenderInjectEffect()
 {
-  // F11 inject effect: applies a full-screen post-process pass on the composite back buffer.
+  // Post-process pass: applies the F11 inject effect and (for non-shader presets)
+  // per-preset brighten/darken/solarize/invert on the composite back buffer.
   // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
-  if (m_nInjectEffectMode == 0) return;
+
+  // Build per-preset effect bitmask from per-frame equation outputs.
+  // In DX9, brighten/darken/solarize/invert are only applied by ShowToUser_NoShaders()
+  // (milkdropfs.cpp line 6664-6744), which runs only for non-shader presets (PSVERSION_COMP=0).
+  // When a comp shader is present, ShowToUser_Shaders() is called instead, which does NOT
+  // apply these effects. Match that behavior: skip per-preset effects when comp PSO is active.
+  UINT presetFxMask = 0;
+  if (m_pState && !m_dx12CompPSO) {
+    if (m_pState->var_pf_brighten && *m_pState->var_pf_brighten > 0.5) presetFxMask |= 1u;
+    if (m_pState->var_pf_darken   && *m_pState->var_pf_darken   > 0.5) presetFxMask |= 2u;
+    if (m_pState->var_pf_solarize && *m_pState->var_pf_solarize > 0.5) presetFxMask |= 4u;
+    if (m_pState->var_pf_invert   && *m_pState->var_pf_invert   > 0.5) presetFxMask |= 8u;
+  }
+
+  // Skip if nothing to do
+  if (m_nInjectEffectMode == 0 && presetFxMask == 0) return;
   if (!m_pInjectEffectPSO || !m_injectEffectTex.IsValid()) return;
   if (!m_lpDX || !m_lpDX->m_ready) return;
 
@@ -5384,7 +5545,8 @@ void CPlugin::RenderInjectEffect()
   cl->SetDescriptorHeaps(_countof(heaps), heaps);
 
   // 10. Upload mode CBV (b0 = uint4 mode)
-  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, 0, 0, 0 } };
+  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask
+  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, 0, 0 } };
   D3D12_GPU_VIRTUAL_ADDRESS cbva = m_lpDX->UploadConstantBuffer(&cbData, sizeof(cbData));
   if (cbva)
     cl->SetGraphicsRootConstantBufferView(0, cbva);
@@ -5564,7 +5726,6 @@ void CPlugin::AddNotificationAudioDevice() {
 
 void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold) {
   DebugLogW(szMsg);
-  OutputDebugStringW(szMsg);
   if (category == ERR_NOTIFY)
     ClearErrors(category);
 
@@ -5582,7 +5743,6 @@ void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold
 
 void CPlugin::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
   DebugLogW(szMsg);
-  OutputDebugStringW(szMsg);
   ClearErrors(ERR_NOTIFY);
 
   ErrorMsg x;
@@ -6505,7 +6665,6 @@ void CPlugin::MyRenderUI(
           m_bUserPagedUp = false;
         }
 
-        int i;
         int first_line = m_nMashPreset[m_nMashSlot] - (m_nMashPreset[m_nMashSlot] % lines_available);
         int last_line = first_line + lines_available;
         wchar_t str[512], str2[512];
@@ -6542,7 +6701,7 @@ void CPlugin::MyRenderUI(
           int h = 0;
 
           int start_y = orig_rect.top;
-          for (mash = 0; mash < MASH_SLOTS; mash++) {
+          for (int mash = 0; mash < MASH_SLOTS; mash++) {
             int idx = m_nMashPreset[mash];
 
             wchar_t buf[1024];
@@ -6570,12 +6729,12 @@ void CPlugin::MyRenderUI(
         box.bottom = box.top;
 
         // draw a directory listing box right after...
-        for (pass = 0; pass < 2; pass++) {
+        for (int pass = 0; pass < 2; pass++) {
           //if (pass==1)
           //    GetFont(SIMPLE_FONT)->Begin();
 
           rect = orig_rect;
-          for (i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
+          for (int i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
             // remove the extension before displaying the filename.  also pad w/spaces.
             //lstrcpy(str, m_pPresetAddr[i]);
             bool bIsDir = (m_presets[i].szFilename.c_str()[0] == '*');
@@ -6694,7 +6853,6 @@ void CPlugin::MyRenderUI(
           m_bUserPagedUp = false;
         }
 
-        int i;
         int first_line = m_nPresetListCurPos - (m_nPresetListCurPos % lines_available);
         int last_line = first_line + lines_available;
         wchar_t str[512], str2[512];
@@ -6722,7 +6880,7 @@ void CPlugin::MyRenderUI(
           //    GetFont(SIMPLE_FONT)->Begin();
 
           rect = orig_rect;
-          for (i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
+          for (int i = first_line; i < last_line && m_presets[i].szFilename.c_str(); i++) {
             // remove the extension before displaying the filename.  also pad w/spaces.
             //lstrcpy(str, m_pPresetAddr[i]);
             bool bIsDir = (m_presets[i].szFilename.c_str()[0] == '*');
@@ -7134,7 +7292,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   bool bCtrlHeldDown = (GetKeyState(VK_CONTROL) & mask) != 0;
 
   int nRepeat = 1;  //updated as appropriate
-  int rep;
 
   switch (uMsg) {
   // Settings window thread-safe side effects
@@ -7230,7 +7387,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
             if (m_waitstring.bOvertypeMode) {
               // overtype mode
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 if (m_waitstring.nCursorPos == len) {
                   lstrcatA((char*)m_waitstring.szText, buf);
                   len++;
@@ -7245,7 +7402,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
             else {
               // insert mode:
               char* ptr = (char*)m_waitstring.szText;
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 for (int i = len; i >= m_waitstring.nCursorPos; i--)
                   *(ptr + i + 1) = *(ptr + i);
                 *(ptr + m_waitstring.nCursorPos) = buf[0];
@@ -7263,7 +7420,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
             if (m_waitstring.bOvertypeMode) {
               // overtype mode
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 if (m_waitstring.nCursorPos == len) {
                   lstrcatW(m_waitstring.szText, buf);
                   len++;
@@ -7275,7 +7432,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
             }
             else {
               // insert mode:
-              for (rep = 0; rep < nRepeat; rep++) {
+              for (int rep = 0; rep < nRepeat; rep++) {
                 for (int i = len; i >= m_waitstring.nCursorPos; i--)
                   m_waitstring.szText[i + 1] = m_waitstring.szText[i];
                 m_waitstring.szText[m_waitstring.nCursorPos] = buf[0];
@@ -7778,13 +7935,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           return 0; // we processed (or absorbed) the key
 
         case VK_LEFT:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             if (m_waitstring.nCursorPos > 0)
               m_waitstring.nCursorPos--;
           return 0; // we processed (or absorbed) the key
 
         case VK_RIGHT:
-          for (rep = 0; rep < nRepeat; rep++) {
+          for (int rep = 0; rep < nRepeat; rep++) {
             if (m_waitstring.bDisplayAsCode) {
               if (m_waitstring.nCursorPos < (int)lstrlenA((char*)m_waitstring.szText))
                 m_waitstring.nCursorPos++;
@@ -7805,12 +7962,12 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           return 0; // we processed (or absorbed) the key
 
         case VK_UP:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             WaitString_SeekUpOneLine();
           return 0; // we processed (or absorbed) the key
 
         case VK_DOWN:
-          for (rep = 0; rep < nRepeat; rep++)
+          for (int rep = 0; rep < nRepeat; rep++)
             WaitString_SeekDownOneLine();
           return 0; // we processed (or absorbed) the key
 
@@ -8134,13 +8291,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case VK_UP:
       if (m_UI_mode == UI_MASHUP) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           m_nMashPreset[m_nMashSlot] = max(m_nMashPreset[m_nMashSlot] - 1, m_nDirs);
         m_nLastMashChangeFrame[m_nMashSlot] = GetFrame();  // causes delayed apply
         return 0; // we processed (or absorbed) the key
       }
       else if (m_UI_mode == UI_LOAD) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           if (m_nPresetListCurPos > 0)
             m_nPresetListCurPos--;
         return 0; // we processed (or absorbed) the key
@@ -8155,13 +8312,13 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case VK_DOWN:
       if (m_UI_mode == UI_MASHUP) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           m_nMashPreset[m_nMashSlot] = min(m_nMashPreset[m_nMashSlot] + 1, m_nPresets - 1);
         m_nLastMashChangeFrame[m_nMashSlot] = GetFrame();  // causes delayed apply
         return 0; // we processed (or absorbed) the key
       }
       else if (m_UI_mode == UI_LOAD) {
-        for (rep = 0; rep < nRepeat; rep++)
+        for (int rep = 0; rep < nRepeat; rep++)
           if (m_nPresetListCurPos < m_nPresets - 1)
             m_nPresetListCurPos++;
         return 0; // we processed (or absorbed) the key
@@ -9162,7 +9319,7 @@ void CPlugin::BuildMenus() {
     swprintf(buf, wasabiApiLangString(IDS_CUSTOM_WAVE_X), i + 1);
     m_menuWavecode[i].Init(buf);
   }
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     swprintf(buf, wasabiApiLangString(IDS_CUSTOM_SHAPE_X), i + 1);
     m_menuShapecode[i].Init(buf);
   }
@@ -9178,9 +9335,9 @@ void CPlugin::BuildMenus() {
   m_menuPreset.AddChildMenu(&m_menuAugment);
   m_menuPreset.AddChildMenu(&m_menuPost);
 
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++)
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++)
     m_menuCustomShape.AddChildMenu(&m_menuShapecode[i]);
-  for (i = 0; i < MAX_CUSTOM_WAVES; i++)
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
     m_menuCustomWave.AddChildMenu(&m_menuWavecode[i]);
 
   // NOTE: all of the eval menuitems use a CALLBACK function to register the user's changes (see last param)
@@ -9297,7 +9454,7 @@ void CPlugin::BuildMenus() {
   m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MIN_COLOR_VALUE), &m_pState->m_fBlur3Min, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MIN_COLOR_VALUE_TT), 0.0f, 1.0f);
   m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MAX_COLOR_VALUE), &m_pState->m_fBlur3Max, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MAX_COLOR_VALUE_TT), 0.0f, 1.0f);
 
-  for (i = 0; i < MAX_CUSTOM_WAVES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
     // blending: do both; fade opacities in/out (w/exagerrated weighting)
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_wave[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_TT)); // bool
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_SAMPLES), &m_pState->m_wave[i].samples, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_SAMPLES_TT), 2, 512);        // 0-512
@@ -9319,7 +9476,7 @@ void CPlugin::BuildMenus() {
     m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EDIT_PER_POINT_CODE), &m_pState->m_wave[i].m_szPerPoint, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_PER_POINT_CODE_TT), 256, 0, &OnUserEditedWavecode, sizeof(m_pState->m_wave[i].m_szPerPoint), 0);
   }
 
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     // blending: do both; fade opacities in/out (w/exagerrated weighting)
     m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_shape[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_SHAPE_TT)); // bool
     m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_INSTANCES), &m_pState->m_shape[i].instances, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_INSTANCES_TT), 1, 1024);
@@ -9364,7 +9521,7 @@ void CPlugin::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
   switch (id) {
   case SET_PRESET_DIR:       lstrcpynW(buf, m_szPresetDir, bufLen); break;
   case SET_AUDIO_DEVICE:     lstrcpynW(buf, m_szAudioDevice, bufLen); break;
-  case SET_AUDIO_SENSITIVITY: swprintf(buf, L"%.0f", m_fAudioSensitivity); break;
+  case SET_AUDIO_SENSITIVITY: swprintf(buf, m_fAudioSensitivity == -1.0f ? L"Auto" : L"%.1f", m_fAudioSensitivity); break;
   case SET_BLEND_TIME:       swprintf(buf, L"%.1f s", m_fBlendTimeAuto); break;
   case SET_TIME_BETWEEN:     swprintf(buf, L"%.0f s", m_fTimeBetweenPresets); break;
   case SET_HARD_CUTS:        lstrcpyW(buf, m_bHardCutsDisabled ? L"yes" : L"no"); break;
@@ -9424,8 +9581,17 @@ void CPlugin::AdjustSetting(int id, int direction) {
   *pFloat += s.fStep * direction;
   if (*pFloat < s.fMin) *pFloat = s.fMin;
   if (*pFloat > s.fMax) *pFloat = s.fMax;
-  if (id == SET_AUDIO_SENSITIVITY)
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  if (id == SET_AUDIO_SENSITIVITY) {
+    // Snap past the unusable range between -1 and 0.5
+    if (m_fAudioSensitivity > -1.0f && m_fAudioSensitivity < 0.5f)
+      m_fAudioSensitivity = (direction > 0) ? 0.5f : -1.0f;
+    if (m_fAudioSensitivity == -1.0f) {
+      mdropdx12_audio_adaptive = true;
+    } else {
+      mdropdx12_audio_adaptive = false;
+      mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+    }
+  }
   SaveSettingToINI(id);
 }
 
@@ -9436,7 +9602,7 @@ void CPlugin::SaveSettingToINI(int id) {
   GetSettingValueString(id, val, MAX_PATH);
   // For float values, write the raw number (not the display string with "s")
   switch (id) {
-  case SET_AUDIO_SENSITIVITY: swprintf(val, L"%.0f", m_fAudioSensitivity); break;
+  case SET_AUDIO_SENSITIVITY: swprintf(val, L"%g", (double)m_fAudioSensitivity); break;
   case SET_BLEND_TIME:        swprintf(val, L"%f", m_fBlendTimeAuto); break;
   case SET_TIME_BETWEEN:      swprintf(val, L"%f", m_fTimeBetweenPresets); break;
   case SET_HARD_CUTS:
@@ -9831,6 +9997,13 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     MINMAXINFO* mmi = (MINMAXINFO*)lParam;
     mmi->ptMinTrackSize.x = 500;
     mmi->ptMinTrackSize.y = 450;
+    // Cap max to current monitor's work area to prevent oversized window
+    HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (GetMonitorInfo(hMon, &mi)) {
+      mmi->ptMaxTrackSize.x = mi.rcWork.right - mi.rcWork.left;
+      mmi->ptMaxTrackSize.y = mi.rcWork.bottom - mi.rcWork.top;
+    }
     return 0;
   }
 
@@ -10025,6 +10198,12 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       return 0;
     }
 
+    if (id == IDC_MW_GPU_RELOAD_PRESET && code == BN_CLICKED) {
+      // Re-render the current preset with updated GPU protection settings
+      p->NextPreset(0.0f);
+      return 0;
+    }
+
     if (id == IDC_MW_RESET_VISUAL && code == BN_CLICKED) {
       p->fOpacity = 1.0f;
       p->m_fRenderQuality = 1.0f;
@@ -10049,6 +10228,17 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), L"1.00");
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), L"0.00");
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), L"1");
+      // Reset GPU protection
+      p->m_nMaxShapeInstances = 0;
+      p->m_bScaleInstancesByResolution = false;
+      p->m_nInstanceScaleBaseWidth = 1920;
+      p->m_bSkipHeavyPresets = false;
+      p->m_nHeavyPresetMaxInstances = 4096;
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), L"0");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, BST_UNCHECKED, 0);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), L"1920");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, BST_UNCHECKED, 0);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), L"4096");
       // Apply side-effects
       HWND hw = p->GetPluginWindow();
       if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
@@ -10090,6 +10280,27 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
     if (id == IDC_MW_USER_RESET && code == BN_CLICKED) {
       p->ResetToUserDefaults(hWnd);
+      return 0;
+    }
+
+    if (id == IDC_MW_RESET_WINDOW && code == BN_CLICKED) {
+      p->ResetSettingsWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_FONT_PLUS && code == BN_CLICKED) {
+      if (p->m_nSettingsFontSize > -24) {  // max font pixel height
+        p->m_nSettingsFontSize -= 2;       // more negative = larger
+        p->RebuildSettingsFonts();
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_FONT_MINUS && code == BN_CLICKED) {
+      if (p->m_nSettingsFontSize < -12) {  // min font pixel height
+        p->m_nSettingsFontSize += 2;       // less negative = smaller
+        p->RebuildSettingsFonts();
+      }
       return 0;
     }
 
@@ -10281,6 +10492,12 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+        return 0;
+      case IDC_MW_GPU_SCALE_BY_RES:
+        p->m_bScaleInstancesByResolution = bChecked;
+        return 0;
+      case IDC_MW_GPU_SKIP_HEAVY:
+        p->m_bSkipHeavyPresets = bChecked;
         return 0;
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
@@ -10492,9 +10709,15 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       switch (id) {
       case IDC_MW_AUDIO_SENS:
         p->m_fAudioSensitivity = (float)_wtof(buf);
-        if (p->m_fAudioSensitivity < 1) p->m_fAudioSensitivity = 1;
+        if (p->m_fAudioSensitivity < -1) p->m_fAudioSensitivity = -1;
         if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
-        mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
+        if (p->m_fAudioSensitivity == -1.0f) {
+          mdropdx12_audio_adaptive = true;
+        } else {
+          mdropdx12_audio_adaptive = false;
+          if (p->m_fAudioSensitivity < 0.5f) p->m_fAudioSensitivity = 0.5f;
+          mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
+        }
         p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
         return 0;
       case IDC_MW_BLEND_TIME:
@@ -10526,6 +10749,19 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         return 0;
       case IDC_MW_VIS_VERSION:
         p->m_VisVersion = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_GPU_MAX_INST:
+        p->m_nMaxShapeInstances = _wtoi(buf);
+        if (p->m_nMaxShapeInstances < 0) p->m_nMaxShapeInstances = 0;
+        return 0;
+      case IDC_MW_GPU_SCALE_BASE:
+        p->m_nInstanceScaleBaseWidth = _wtoi(buf);
+        if (p->m_nInstanceScaleBaseWidth < 320) p->m_nInstanceScaleBaseWidth = 320;
+        if (p->m_nInstanceScaleBaseWidth > 7680) p->m_nInstanceScaleBaseWidth = 7680;
+        return 0;
+      case IDC_MW_GPU_HEAVY_THRESHOLD:
+        p->m_nHeavyPresetMaxInstances = _wtoi(buf);
+        if (p->m_nHeavyPresetMaxInstances < 16) p->m_nHeavyPresetMaxInstances = 16;
         return 0;
       case IDC_MW_AUTO_HUE_SEC:
         p->m_AutoHueSeconds = (float)_wtof(buf);
@@ -10919,12 +11155,12 @@ void CPlugin::BuildSettingsControls() {
 
   // Create fonts (cached for LayoutSettingsControls)
   if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
-  m_hSettingsFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
   if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
-  m_hSettingsFontBold = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
@@ -10953,7 +11189,7 @@ void CPlugin::BuildSettingsControls() {
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int tabTop = rcDisplay.top;
 
-  int x = 16, lw = 140, lineH = 24, gap = 6;
+  int x = 16, lw = 160, lineH = 26, gap = 6;
   int rw = clientW - 36;
   int sliderW = rw - lw - 60;
   wchar_t buf[64];
@@ -11008,8 +11244,8 @@ void CPlugin::BuildSettingsControls() {
   }
 
   // Settings
-  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity:", x, y, lw, lineH, hFont));
-  swprintf(buf, 64, L"%.0f", m_fAudioSensitivity);
+  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity (-1=Auto):", x, y, lw, lineH, hFont));
+  swprintf(buf, 64, L"%g", (double)m_fAudioSensitivity);
   PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont));
   y += lineH + gap;
 
@@ -11037,6 +11273,10 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
   PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, x + 168, y, 80, lineH, hFont));
   PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, x + 252, y, 80, lineH, hFont));
+  y += lineH + gap;
+  PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, x, y, 100, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, x + 104, y, 55, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, x + 163, y, 55, lineH, hFont));
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
@@ -11096,6 +11336,35 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
   PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, 80, lineH, hFont));
+  y += lineH + gap + 8;
+
+  // -- GPU Protection section --
+  PAGE_CTRL(1, CreateLabel(hw, L"GPU Protection", x, y, rw, lineH, hFont, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Max Instances:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nMaxShapeInstances);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_MAX_INST, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(1, CreateLabel(hw, L"(0=unlimited)", x + lw + 70, y, 100, lineH, hFont, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateCheck(hw, L"Scale Instances by Resolution", IDC_MW_GPU_SCALE_BY_RES, x, y, rw, lineH, hFont, m_bScaleInstancesByResolution, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Scale Base Width:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nInstanceScaleBaseWidth);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_SCALE_BASE, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateCheck(hw, L"Skip Heavy Presets", IDC_MW_GPU_SKIP_HEAVY, x, y, rw, lineH, hFont, m_bSkipHeavyPresets, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Heavy Threshold:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", m_nHeavyPresetMaxInstances);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap + 4;
+
+  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, 110, lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
@@ -11361,7 +11630,7 @@ void CPlugin::LayoutSettingsControls() {
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int rw = rc.right - 36;  // 16px left + 20px right margin
-  int lw = 140;
+  int lw = 160;
   int newSliderW = rw - lw - 60;
   if (newSliderW < 80) newSliderW = 80;
 
@@ -11521,6 +11790,15 @@ void CPlugin::UpdateVisualUI(HWND hWnd) {
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), buf);
   swprintf(buf, 32, L"%.0f", m_VisVersion);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), buf);
+  // GPU Protection controls
+  swprintf(buf, 32, L"%d", m_nMaxShapeInstances);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, m_bScaleInstancesByResolution ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", m_nInstanceScaleBaseWidth);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", m_nHeavyPresetMaxInstances);
+  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), buf);
   HWND hw = GetPluginWindow();
   if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
   if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
@@ -11708,6 +11986,56 @@ static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
     return FALSE; // stop enumerating
   }
   return TRUE;
+}
+
+void CPlugin::ResetSettingsWindow() {
+  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
+
+  m_nSettingsWndW = 620;
+  m_nSettingsWndH = 700;
+
+  // Center on the monitor the settings window is currently on
+  HMONITOR hMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  if (GetMonitorInfo(hMon, &mi)) {
+    int monW = mi.rcWork.right - mi.rcWork.left;
+    int monH = mi.rcWork.bottom - mi.rcWork.top;
+    int posX = mi.rcWork.left + (monW - m_nSettingsWndW) / 2;
+    int posY = mi.rcWork.top + (monH - m_nSettingsWndH) / 2;
+    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, posX, posY, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
+  } else {
+    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, 0, 0, m_nSettingsWndW, m_nSettingsWndH, SWP_NOMOVE | SWP_SHOWWINDOW);
+  }
+  LayoutSettingsControls();
+}
+
+static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
+  SendMessage(hChild, WM_SETFONT, (WPARAM)lParam, TRUE);
+  return TRUE;
+}
+
+void CPlugin::RebuildSettingsFonts() {
+  if (!m_hSettingsWnd) return;
+
+  // Recreate fonts at new size
+  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
+  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
+  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Apply to all child controls
+  EnumChildWindows(m_hSettingsWnd, SetFontProc, (LPARAM)m_hSettingsFont);
+
+  // Tab control needs the font too for header sizing
+  if (m_hSettingsTab)
+    SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+
+  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
 }
 
 void CPlugin::EnsureSettingsVisible() {
@@ -12282,14 +12610,6 @@ void CPlugin::PopulateResourceViewer() {
 
 void CPlugin::dumpmsg(wchar_t* s) {
   DebugLogW(s);
-#if _DEBUG
-  OutputDebugStringW(s);
-  if (s[0]) {
-    int len = lstrlenW(s);
-    if (s[len - 1] != L'\n')
-      OutputDebugStringW(L"\n");
-  }
-#endif
 }
 
 void CPlugin::PrevPreset(float fBlendTime) {
@@ -13729,7 +14049,6 @@ void CPlugin::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime)
     name = name ? name + 1 : m_szCurrentPresetFile;
     char dbg[512];
     sprintf(dbg, "Render: Active preset: %ls", name);
-    OutputDebugStringA(dbg);
     DebugLogA(dbg);
   }
 
@@ -13802,9 +14121,7 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
     wchar_t fullPath[MAX_PATH];
     GetFullPathNameW(szPresetFilename, MAX_PATH, fullPath, NULL);
-    // Log the full path (to debugger or console)
-    OutputDebugStringW(fullPath);
-    OutputDebugStringW(L"\n");
+    DebugLogW(fullPath);
 
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_ERROR_PRESET_NOT_FOUND_X), fullPath);
@@ -13855,7 +14172,6 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       name = name ? name + 1 : m_szCurrentPresetFile;
       char dbg[512];
       sprintf(dbg, "Render: Active preset: %ls", name);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
     }
 
@@ -13943,6 +14259,24 @@ void CPlugin::OnFinishedLoadingPreset() {
 
   SetMenusForPresetVersion(m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
   m_nPresetsLoadedTotal++; //only increment this on COMPLETION of the load.
+
+  // GPU Protection: warn about heavy presets
+  {
+    int totalInstances = 0;
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+      if (m_pState->m_shape[i].enabled)
+        totalInstances += m_pState->m_shape[i].instances;
+    }
+    if (totalInstances > 512) {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
+              totalInstances, name, m_nTexSizeX, m_nTexSizeY);
+      DebugLogA(dbg);
+    }
+  }
 
   for (int mash = 0; mash < MASH_SLOTS; mash++)
     m_nMashPreset[mash] = m_nCurrentPreset;
@@ -14039,7 +14373,6 @@ void CPlugin::LoadPresetTick() {
       name = name ? name + 1 : m_szCurrentPresetFile;
       char dbg[512];
       sprintf(dbg, "Render: Active preset: %ls", name);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
     }
 
@@ -15856,7 +16189,7 @@ void CPlugin::LaunchSongTitleAnim(int supertextIndex) {
 
   wchar_t debugMsg[128];
   swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"LaunchSongTitleAnim: supertextIndex=%d\n", supertextIndex);
-  OutputDebugStringW(debugMsg);
+  DebugLogW(debugMsg);
 
   if (supertextIndex == -1) {
     supertextIndex = GetNextFreeSupertextIndex();
@@ -16361,10 +16694,10 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     }
   }
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
-    OutputDebugStringW(L"[CAPTURE] Message received\n");
+    DebugLogW(L"[CAPTURE] Message received");
     mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
     CaptureScreenshot();
-    OutputDebugStringW(L"[CAPTURE] CaptureScreenshot() returned\n");
+    DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
   }
 }
 
@@ -16834,7 +17167,7 @@ void CPlugin::DoCustomSoundAnalysis() {
   int recentBufferSize = (int)GetFps();
 
   // do temporal blending to create attenuated and super-attenuated versions
-  for (i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++) {
     float rate;
 
     if (mysound.imm[i] > mysound.avg[i])
@@ -16936,9 +17269,11 @@ void CPlugin::GenCompPShaderText(char* szShaderText, float brightness, float ve_
     p += sprintf(p, "                tex2D(sampler_main, uv_echo).xyz, %c", LF);
     p += sprintf(p, "                %.2f %c", ve_alpha, LF);
     p += sprintf(p, "              ); //video echo%c", LF);
+    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   else {
     p += sprintf(p, "    ret = tex2D(sampler_main, uv).xyz;%c", LF);
+    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   if (hue_shader >= 1.0f)
     p += sprintf(p, "    ret *= hue_shader; //old hue shader effect%c", LF);

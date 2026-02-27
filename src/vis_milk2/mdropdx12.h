@@ -26,6 +26,7 @@ using namespace std::chrono_literals;
 extern float mdropdx12_amp_left;
 extern float mdropdx12_amp_right;
 extern float mdropdx12_audio_sensitivity;
+extern bool  mdropdx12_audio_adaptive;
 
 class MDropDX12 {
 

@@ -91,6 +91,8 @@ public:
   int m_backBufHeight;
 
   DXContext* m_lpDX;            // pointer to DXContext object
+  bool m_bDeviceRecoveryPending = false; // TDR recovery: set when device-lost detected
+  HWND         GetPluginWindow();          // returns handle to the plugin window
 
 protected:
 
@@ -100,7 +102,6 @@ protected:
   //  If you call these from OverrideDefaults, MyPreInitialize, or MyReadConfig,
   //    they will return NULL (zero).
   // ------------------------------------------------------------
-  HWND         GetPluginWindow();          // returns handle to the plugin window
   int          GetWidth();                 // returns back-buffer width in pixels
   int          GetHeight();                // returns back-buffer height in pixels
   int          GetBitDepth();              // always 32 (RGBA8 back buffer)

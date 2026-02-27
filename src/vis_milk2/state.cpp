@@ -133,7 +133,8 @@ bool _GetLineByName(FILE* f, const char* szVarName, char* szRet, int nMaxRetChar
   // if current line isn't the one, check all the others...
   if (MyLineNum < 0 || (size_t)MyLineNum >= line_varName.size() || strcmp(line_varName[MyLineNum].c_str(), szVarName) != 0) {
     int N = line_varName.size();
-    for (int i = 0; i < N; i++)
+    int i;
+    for (i = 0; i < N; i++)
       if (strcmp(line_varName[i].c_str(), szVarName) == 0) {
         MyLineNum = i;
         break;
@@ -215,7 +216,7 @@ CState::CState() {
     m_wave[i].m_pf_eel = NSEEL_VM_alloc();
     m_wave[i].m_pp_eel = NSEEL_VM_alloc();
   }
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     m_shape[i].m_pf_codehandle = NULL;
     m_shape[i].m_pf_eel = NSEEL_VM_alloc();
     //m_shape[i].m_pp_codehandle = NULL;
@@ -231,7 +232,7 @@ CState::~CState() {
     NSEEL_VM_free(m_wave[i].m_pf_eel);
     NSEEL_VM_free(m_wave[i].m_pp_eel);
   }
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     NSEEL_VM_free(m_shape[i].m_pf_eel);
   }
 }
@@ -376,7 +377,7 @@ void CState::RegisterBuiltInVariables(int flags) {
     var_pv_y = NSEEL_VM_regvar(m_pv_eel, "y");			// i
     var_pv_rad = NSEEL_VM_regvar(m_pv_eel, "rad");		// i
     var_pv_ang = NSEEL_VM_regvar(m_pv_eel, "ang");		// i
-    for (vi = 0; vi < NUM_Q_VAR; vi++) {
+    for (int vi = 0; vi < NUM_Q_VAR; vi++) {
       char buf[16];
       sprintf(buf, "q%d", vi + 1);
       var_pv_q[vi] = NSEEL_VM_regvar(m_pv_eel, buf);
@@ -402,7 +403,7 @@ void CState::RegisterBuiltInVariables(int flags) {
         sprintf(buf, "q%d", vi + 1);
         m_wave[i].var_pf_q[vi] = NSEEL_VM_regvar(m_wave[i].m_pf_eel, buf);
       }
-      for (vi = 0; vi < NUM_T_VAR; vi++) {
+      for (int vi = 0; vi < NUM_T_VAR; vi++) {
         char buf[16];
         sprintf(buf, "t%d", vi + 1);
         m_wave[i].var_pf_t[vi] = NSEEL_VM_regvar(m_wave[i].m_pf_eel, buf);
@@ -424,12 +425,12 @@ void CState::RegisterBuiltInVariables(int flags) {
       m_wave[i].var_pp_fps = NSEEL_VM_regvar(m_wave[i].m_pp_eel, "fps");		// i
       m_wave[i].var_pp_frame = NSEEL_VM_regvar(m_wave[i].m_pp_eel, "frame");     // i
       m_wave[i].var_pp_progress = NSEEL_VM_regvar(m_wave[i].m_pp_eel, "progress");  // i
-      for (vi = 0; vi < NUM_Q_VAR; vi++) {
+      for (int vi = 0; vi < NUM_Q_VAR; vi++) {
         char buf[16];
         sprintf(buf, "q%d", vi + 1);
         m_wave[i].var_pp_q[vi] = NSEEL_VM_regvar(m_wave[i].m_pp_eel, buf);
       }
-      for (vi = 0; vi < NUM_T_VAR; vi++) {
+      for (int vi = 0; vi < NUM_T_VAR; vi++) {
         char buf[16];
         sprintf(buf, "t%d", vi + 1);
         m_wave[i].var_pp_t[vi] = NSEEL_VM_regvar(m_wave[i].m_pp_eel, buf);
@@ -464,7 +465,7 @@ void CState::RegisterBuiltInVariables(int flags) {
         sprintf(buf, "q%d", vi + 1);
         m_shape[i].var_pf_q[vi] = NSEEL_VM_regvar(m_shape[i].m_pf_eel, buf);
       }
-      for (vi = 0; vi < NUM_T_VAR; vi++) {
+      for (int vi = 0; vi < NUM_T_VAR; vi++) {
         char buf[16];
         sprintf(buf, "t%d", vi + 1);
         m_shape[i].var_pf_t[vi] = NSEEL_VM_regvar(m_shape[i].m_pf_eel, buf);
@@ -598,7 +599,7 @@ void CState::Default(DWORD ApplyFlags) {
       m_wave[i].bDrawThick = 0;
       m_wave[i].bAdditive = 0;
     }
-    for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
       m_shape[i].enabled = 0;
       m_shape[i].sides = 4;
       m_shape[i].additive = 0;
@@ -624,12 +625,12 @@ void CState::Default(DWORD ApplyFlags) {
       m_shape[i].border_b = 1.0f;
       m_shape[i].border_a = 0.1f;
     }
-    for (i = 0; i < MAX_CUSTOM_WAVES; i++) {
+    for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
       m_wave[i].m_szInit[0] = 0;
       m_wave[i].m_szPerFrame[0] = 0;
       m_wave[i].m_szPerPoint[0] = 0;
     }
-    for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
       m_shape[i].m_szInit[0] = 0;
       m_shape[i].m_szPerFrame[0] = 0;
       //m_shape[i].m_szPerPoint[0] = 0;
@@ -946,7 +947,8 @@ bool CState::Export(const wchar_t* szIniFile) {
   fprintf(fOut, "%s=%.3f\n", "b3x", m_fBlur3Max.eval(-1));
   fprintf(fOut, "%s=%.3f\n", "b1ed", m_fBlur1EdgeDarken.eval(-1));
 
-  for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
+  int i;
+  for (i = 0; i < MAX_CUSTOM_WAVES; i++)
     if (m_wave[i].enabled) //Only saves the enabled custom waves
       m_wave[i].Export(fOut, L"dummy_filename", i);
 
@@ -1358,7 +1360,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
       m_wave[i].Import(f, L"dummy_filename", i);
     }
-    for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
       m_shape[i].Import(f, L"dummy_filename", i);
     }
   }
@@ -1401,8 +1403,24 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   if (ApplyFlags & STATE_WARP) {
     //m_szWarpShadersText[0] = 0;
     ReadCode(f, m_szWarpShadersText, "warp_");
-    if (!m_szWarpShadersText[0])
+    {
+      char dbg[512];
+      int textLen = strlen(m_szWarpShadersText);
+      char preview[201] = {0};
+      if (textLen > 0) {
+        strncpy(preview, m_szWarpShadersText, 200);
+        // Replace control chars for readability
+        for (int i = 0; i < 200 && preview[i]; i++)
+          if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+      }
+      sprintf(dbg, "DIAG Import warp: ReadCode len=%d nWarpPSVersionInFile=%d text='%.200s'",
+              textLen, nWarpPSVersionInFile, preview);
+      DebugLogA(dbg);
+    }
+    if (!m_szWarpShadersText[0]) {
+      DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText");
       g_plugin.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+    }
     m_nWarpPSVersion = nWarpPSVersionInFile;
   }
 
@@ -1410,8 +1428,23 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   if (ApplyFlags & STATE_COMP) {
     //m_szCompShadersText[0] = 0;
     ReadCode(f, m_szCompShadersText, "comp_");
-    if (!m_szCompShadersText[0])
+    {
+      char dbg[512];
+      int textLen = strlen(m_szCompShadersText);
+      char preview[201] = {0};
+      if (textLen > 0) {
+        strncpy(preview, m_szCompShadersText, 200);
+        for (int i = 0; i < 200 && preview[i]; i++)
+          if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+      }
+      sprintf(dbg, "DIAG Import comp: ReadCode len=%d nCompPSVersionInFile=%d text='%.200s'",
+              textLen, nCompPSVersionInFile, preview);
+      DebugLogA(dbg);
+    }
+    if (!m_szCompShadersText[0]) {
+      DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText");
       g_plugin.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+    }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
 
@@ -1487,7 +1520,7 @@ void CState::FreeVarsAndCode(bool bFree) {
     }
   }
 
-  for (i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
     if (m_shape[i].m_pf_codehandle) {
       if (bFree)
         NSEEL_code_free(m_shape[i].m_pf_codehandle);
@@ -1534,8 +1567,8 @@ void CState::StripLinefeedCharsAndComments(char* src, char* dest) {
 void CState::RecompileExpressions(int flags, int bReInit) {
   if ((flags & RECOMPILE_PRESET_CODE) && m_szDesc[0]) {
     char dbg[512];
-    sprintf(dbg, "EEL: Compiling preset: %ls\n", m_szDesc);
-    OutputDebugStringA(dbg);
+    sprintf(dbg, "EEL: Compiling preset: %ls", m_szDesc);
+    DebugLogA(dbg);
   }
   // before we get started, if we redo the init code for the preset, we have to redo
   // other things too, because q1-q8 could change.
@@ -1598,10 +1631,10 @@ void CState::RecompileExpressions(int flags, int bReInit) {
     // --- Reset custom shapes/waves q and t variables on recompile ---
     // --- SHAPE ---
     for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
-      for (vi = 0; vi < NUM_Q_VAR; vi++)
+      for (int vi = 0; vi < NUM_Q_VAR; vi++)
         if (m_shape[i].var_pf_q[vi]) *m_shape[i].var_pf_q[vi] = 0;
 
-      for (vi = 0; vi < NUM_T_VAR; vi++) {
+      for (int vi = 0; vi < NUM_T_VAR; vi++) {
         m_shape[i].t_values_after_init_code[vi] = 0;
         if (m_shape[i].var_pf_t[vi]) *m_shape[i].var_pf_t[vi] = 0;
       }
@@ -1610,10 +1643,10 @@ void CState::RecompileExpressions(int flags, int bReInit) {
     // --- WAVE ---
     for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
 
-      for (vi = 0; vi < NUM_Q_VAR; vi++)
+      for (int vi = 0; vi < NUM_Q_VAR; vi++)
         if (m_wave[i].var_pf_q[vi]) *m_wave[i].var_pf_q[vi] = 0;
 
-      for (vi = 0; vi < NUM_T_VAR; vi++) {
+      for (int vi = 0; vi < NUM_T_VAR; vi++) {
         m_wave[i].t_values_after_init_code[vi] = 0;
         if (m_wave[i].var_pf_t[vi]) *m_wave[i].var_pf_t[vi] = 0;
       }
@@ -1670,8 +1703,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(pf_codehandle_init = NSEEL_code_compile(m_pf_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: preset init compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: preset init compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PRESET_INIT_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1702,8 +1735,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(m_pf_codehandle = NSEEL_code_compile(m_pf_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: per-frame compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: per-frame compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_FRAME_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1716,8 +1749,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(m_pp_codehandle = NSEEL_code_compile(m_pv_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pv_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: per-pixel compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: per-pixel compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_VERTEX_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1742,7 +1775,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 
               for (int vi = 0; vi < NUM_Q_VAR; vi++)
                 *m_wave[i].var_pf_q[vi] = q_values_after_init_code[vi];
-              for (vi = 0; vi < NUM_T_VAR; vi++)
+              for (int vi = 0; vi < NUM_T_VAR; vi++)
                 m_wave[i].t_values_after_init_code[vi] = 0;
             }
             else {
@@ -1804,7 +1837,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 
               for (int vi = 0; vi < NUM_Q_VAR; vi++)
                 *m_shape[i].var_pf_q[vi] = q_values_after_init_code[vi];
-              for (vi = 0; vi < NUM_T_VAR; vi++)
+              for (int vi = 0; vi < NUM_T_VAR; vi++)
                 m_shape[i].t_values_after_init_code[vi] = 0;
             }
             else {

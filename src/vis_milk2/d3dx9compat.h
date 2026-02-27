@@ -19,6 +19,10 @@
 #ifndef D3DX9COMPAT_H
 #define D3DX9COMPAT_H
 
+// Forward-declare logging helper (defined in utility.cpp) so reflection
+// diagnostics can write to debug.log, not just OutputDebugString.
+void DebugLogA(const char* msg);
+
 #include <d3d9.h>    // IDirect3DDevice9, D3DFORMAT, D3DFVF_*, D3DCOLOR, D3DMATRIX, etc.
 #include <d3dcompiler.h> // D3DCompile, D3DReflect
 #include <math.h>    // sinf, cosf, sqrtf
@@ -424,20 +428,41 @@ public:
         D3D11_SHADER_DESC shaderDesc;
         pReflect->GetDesc(&shaderDesc);
 
-        // Enumerate bound resources for samplers
+        // Log all bound resources for diagnostics (writes to debug.log)
         for (UINT i = 0; i < shaderDesc.BoundResources; i++) {
             D3D11_SHADER_INPUT_BIND_DESC bindDesc;
             pReflect->GetResourceBindingDesc(i, &bindDesc);
-            if (bindDesc.Type == D3D_SIT_SAMPLER) {
+            const char* typeLabel = "???";
+            if (bindDesc.Type == D3D_SIT_CBUFFER)   typeLabel = "CBUFFER";
+            else if (bindDesc.Type == D3D_SIT_TEXTURE)  typeLabel = "TEXTURE(t)";
+            else if (bindDesc.Type == D3D_SIT_SAMPLER)  typeLabel = "SAMPLER(s)";
+            char dbg[256];
+            sprintf(dbg, "  Reflect [%u] %s  Name=%-25s reg=%u cnt=%u",
+                    i, typeLabel, bindDesc.Name ? bindDesc.Name : "(null)",
+                    bindDesc.BindPoint, bindDesc.BindCount);
+            DebugLogA(dbg);
+        }
+
+        // Enumerate bound TEXTURE resources (not samplers) for SRV binding.
+        // SM5.0 backwards compat (/Ges) splits sampler2D into SamplerState (s-register)
+        // and Texture2D (t-register). The compiler may merge SamplerState entries that
+        // share identical state, causing D3D_SIT_SAMPLER reflection to miss some textures.
+        // D3D_SIT_TEXTURE entries are always preserved per-texture, and their BindPoint
+        // gives the t-register which directly indexes the SRV descriptor table.
+        for (UINT i = 0; i < shaderDesc.BoundResources; i++) {
+            D3D11_SHADER_INPUT_BIND_DESC bindDesc;
+            pReflect->GetResourceBindingDesc(i, &bindDesc);
+            if (bindDesc.Type == D3D_SIT_TEXTURE) {
                 ConstEntry e;
                 e.name = bindDesc.Name;
                 memset(&e.desc, 0, sizeof(e.desc));
                 e.desc.Name = nullptr; // set after push_back (pointer to e.name.c_str())
                 e.desc.RegisterSet = D3DXRS_SAMPLER;
-                e.desc.RegisterIndex = bindDesc.BindPoint;
+                e.desc.RegisterIndex = bindDesc.BindPoint; // t-register = SRV descriptor index
                 e.desc.RegisterCount = bindDesc.BindCount;
                 e.desc.Class = D3DXPC_OBJECT;
-                e.desc.Type = D3DXPT_SAMPLER2D;
+                e.desc.Type = (bindDesc.Dimension == D3D_SRV_DIMENSION_TEXTURE3D)
+                              ? D3DXPT_SAMPLER3D : D3DXPT_SAMPLER2D;
                 e.desc.Rows = 0;
                 e.desc.Columns = 0;
                 e.desc.Elements = 0;

@@ -1482,6 +1482,72 @@ void RenderFrame() {
     (unsigned char*)pcmLeftOut,
     (unsigned char*)pcmRightOut);
 
+  // --- TDR Recovery: detect device-lost and attempt full device recreation ---
+  if (g_plugin.m_bDeviceRecoveryPending) {
+    g_plugin.m_bDeviceRecoveryPending = false;
+
+    HWND hwnd = g_plugin.GetPluginWindow();
+    if (!hwnd) return;
+
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) { w = 960; h = 540; }
+
+    mdropdx12.LogInfo(L"TDR Recovery: Device lost — attempting full device recreation");
+    DebugLogA("TDR Recovery: Beginning teardown and recreation");
+
+    // 1. Full plugin teardown (releases all GPU resources + DXContext)
+    g_plugin.PluginQuit();
+
+    // 2. Release D3D12 device and command queue
+    DeinitD3d();
+
+    // 3. Brief pause to let the GPU/driver finish resetting
+    Sleep(500);
+
+    // 4. Recreate D3D12 device and command queue
+    InitD3d(hwnd, w, h);
+    if (!pD3DDevice || !pCommandQueue) {
+      mdropdx12.LogInfo(L"TDR Recovery: InitD3d FAILED — cannot recover");
+      DebugLogA("TDR Recovery: InitD3d FAILED");
+      return;
+    }
+
+    // 5. Reinitialize the plugin with the fresh device
+    int ok = g_plugin.PluginInitialize(
+      pD3DDevice.Get(), pCommandQueue.Get(), pDXGIFactory.Get(),
+      hwnd, w, h);
+
+    if (!ok) {
+      mdropdx12.LogInfo(L"TDR Recovery: PluginInitialize FAILED — cannot recover");
+      DebugLogA("TDR Recovery: PluginInitialize FAILED");
+      return;
+    }
+
+    // 6. Force dimension sync (same as initial startup)
+    if (g_plugin.m_lpDX && g_plugin.m_lpDX->m_ready) {
+      GetClientRect(hwnd, &rc);
+      int actualW = rc.right - rc.left;
+      int actualH = rc.bottom - rc.top;
+      if (actualW > 0 && actualH > 0 &&
+          (actualW != g_plugin.m_lpDX->m_client_width ||
+           actualH != g_plugin.m_lpDX->m_client_height)) {
+        g_plugin.OnUserResizeWindow();
+      }
+    }
+
+    // 7. Skip to next preset (the current one likely caused the TDR)
+    g_plugin.NextPreset(0.0f);
+
+    mdropdx12.LogInfo(L"TDR Recovery: Device recreated successfully — skipped to next preset");
+    DebugLogA("TDR Recovery: SUCCESS — device recreated, advanced to next preset");
+
+    wchar_t msg[256];
+    swprintf(msg, 256, L"GPU recovered from TDR — skipped crashing preset");
+    g_plugin.AddError(msg, 8.0f, ERR_NOTIFY, true);
+  }
 }
 
 unsigned __stdcall CreateWindowAndRun(void* data) {
@@ -1710,7 +1776,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
       swprintf(dbg, 256, L"DX12 init correction: swap chain %dx%d -> client %dx%d\n",
                g_plugin.m_lpDX->m_client_width, g_plugin.m_lpDX->m_client_height,
                actualW, actualH);
-      OutputDebugStringW(dbg);
+      DebugLogW(dbg);
       g_plugin.OnUserResizeWindow();
     }
   }
@@ -2264,9 +2330,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     // Initialize debug log (rotates debug.log → debug.prev.log)
     DebugLogInit(g_plugin.m_szBaseDir);
 
-    OutputDebugStringW(L"BaseDir: ");
-    OutputDebugStringW(g_plugin.m_szBaseDir);
-    OutputDebugStringW(found ? L" (resources found)\n" : L" (resources NOT found)\n");
     DebugLogW(found ? L"BaseDir resolved (resources found)" : L"BaseDir resolved (resources NOT found)");
     DebugLogW(g_plugin.m_szBaseDir);
   }

@@ -1024,7 +1024,7 @@ void CPlugin::RenderFrame(int bRedraw) {
 
         wchar_t debugMsg[128];
         swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"RenderFrame: fTimeAfterFullDuration=%.2f\n", fTimeAfterFullDuration);
-        OutputDebugStringW(debugMsg);
+        DebugLogW(debugMsg);
 
         if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
           m_supertexts[i].fStartTime = -1.0f;	// 'off' state
@@ -1511,21 +1511,21 @@ void CPlugin::GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max
   if (blur_max[0] - blur_min[0] < fMinDist) {
     float avg = (blur_min[0] + blur_max[0]) * 0.5f;
     blur_min[0] = avg - fMinDist * 0.5f;
-    blur_max[0] = avg - fMinDist * 0.5f;
+    blur_max[0] = avg + fMinDist * 0.5f;
   }
   blur_max[1] = min(blur_max[0], blur_max[1]);
   blur_min[1] = max(blur_min[0], blur_min[1]);
   if (blur_max[1] - blur_min[1] < fMinDist) {
     float avg = (blur_min[1] + blur_max[1]) * 0.5f;
     blur_min[1] = avg - fMinDist * 0.5f;
-    blur_max[1] = avg - fMinDist * 0.5f;
+    blur_max[1] = avg + fMinDist * 0.5f;
   }
   blur_max[2] = min(blur_max[1], blur_max[2]);
   blur_min[2] = max(blur_min[1], blur_min[2]);
   if (blur_max[2] - blur_min[2] < fMinDist) {
     float avg = (blur_min[2] + blur_max[2]) * 0.5f;
     blur_min[2] = avg - fMinDist * 0.5f;
-    blur_max[2] = avg - fMinDist * 0.5f;
+    blur_max[2] = avg + fMinDist * 0.5f;
   }
 }
 
@@ -1614,7 +1614,7 @@ void CPlugin::BlurPasses() {
   fbias[2] = -temp_min * fscale[2];
 
   // note: warped blit just rendered from VS0 to VS1.
-  for (i = 0; i < passes; i++) {
+  for (int i = 0; i < passes; i++) {
     // hook up correct render target
     if (m_lpBlur[i]->GetSurfaceLevel(0, &pNewTarget) != D3D_OK)
       return;
@@ -1717,6 +1717,17 @@ void CPlugin::DX12_BlurPasses()
     return;
 
   int passes = min(NUM_BLUR_TEX, m_nHighestBlurTexUsedThisFrame * 2);
+
+  // Diagnostic: log blur pass info once per preset load
+  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    char dbg[256];
+    sprintf(dbg, "DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
+            m_nHighestBlurTexUsedThisFrame, passes,
+            m_dx12BlurPSO[0] ? "OK" : "NULL", m_dx12BlurPSO[1] ? "OK" : "NULL",
+            m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex);
+    DebugLogA(dbg);
+  }
+
   if (passes == 0)
     return;
 
@@ -1754,9 +1765,14 @@ void CPlugin::DX12_BlurPasses()
   fbias[2] = -temp_min * fscale[2];
 
   // Ensure descriptor heaps are set
+  // Use blur root signature (s0 = CLAMP) — SM5.0 assigns the blur shader's
+  // single sampler to s0, and DX9 blur passes use CLAMP addressing.
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
   cmdList->SetDescriptorHeaps(1, heaps);
-  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_blurRootSignature.Get());
+
+  // DIAG: log blur details once per preset load
+  bool blurDiag = (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f);
 
   for (int i = 0; i < passes; i++) {
     // Source: pass 0 reads VS[0], subsequent passes read blur[i-1]
@@ -1779,7 +1795,7 @@ void CPlugin::DX12_BlurPasses()
     // Set blur PSO: even passes = horizontal (blur1), odd = vertical (blur2)
     cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
 
-    // Update blur binding block with source texture at t0
+    // Update blur binding block with source texture at slot 12
     m_lpDX->UpdateBlurPassBinding(i, srcTex.srvIndex);
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBlurPassBindingGpuHandle(i));
 
@@ -1793,6 +1809,20 @@ void CPlugin::DX12_BlurPasses()
 
     float fscale_now = fscale[i / 2];
     float fbias_now = fbias[i / 2];
+
+    if (blurDiag) {
+      char dbg[512];
+      sprintf(dbg, "DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
+              "CT=%p h[0]=%p h[1]=%p h[2]=%p h[3]=%p h[5]=%p h[6]=%p "
+              "srcTexSize=(%.1f,%.1f,%.6f,%.6f) fscale=%.3f fbias=%.3f shadowSz=%u",
+              i, srcTex.width, srcTex.height, srcTex.srvIndex,
+              dstTex.width, dstTex.height, dstTex.srvIndex, dstTex.rtvIndex,
+              (void*)pCT, (void*)h[0], (void*)h[1], (void*)h[2], (void*)h[3], (void*)h[5], (void*)h[6],
+              srctexsize.x, srctexsize.y, srctexsize.z, srctexsize.w,
+              fscale_now, fbias_now,
+              pCT ? static_cast<DX12ConstantTable*>(pCT)->GetShadowSize() : 0);
+      DebugLogA(dbg);
+    }
 
     if (i % 2 == 0) {
       // Horizontal pass (blur1_ps): _c0=srctexsize, _c1=weights, _c2=distances, _c3=scale/bias/w_div
@@ -1860,15 +1890,6 @@ void CPlugin::DX12_RenderWarpAndComposite()
   if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
     return;
 
-  {
-    static int s_frameNum = 0;
-    char dbg[256];
-    sprintf(dbg, "DX12: RenderWarpAndComposite frame=%d warpPSO=%p compPSO=%p warpCT=%p compCT=%p",
-            s_frameNum++, (void*)m_dx12WarpPSO.Get(), (void*)m_dx12CompPSO.Get(),
-            (void*)m_shaders.warp.CT, (void*)m_shaders.comp.CT);
-    DebugLogA(dbg);
-  }
-
   auto* cmdList = m_lpDX->m_commandList.Get();
 
   // Deferred PSO creation: safe here because previous frame's command list
@@ -1914,10 +1935,59 @@ void CPlugin::DX12_RenderWarpAndComposite()
     cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
     // Build full 16-slot binding arrays (VS + blur + noise + disk textures)
+    // Warp reads VS[0] (previous frame's warp+shapes, after end-of-frame swap).
+    // Comp reads VS[1] (current frame's warp+shapes output), matching
+    // ShowToUser_NoShaders which also reads m_lpVS[1] (DX9 line 6529).
+    // DX9 ApplyShaderParams binds m_lpVS[0] for comp, but that's equivalent
+    // because DX9 does NOT swap until after comp — so m_lpVS[0] IS the warp
+    // input (previous frame), while m_lpVS[1] is the warp+shapes output.
+    // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
+    // warp+shapes output = VS[1].
     UINT warpSlots[16], compSlots[16];
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
     BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots);
     m_lpDX->UpdatePerFrameBindings(warpSlots, compSlots);
+
+    // Diagnostic: log binding slots once per preset load (first 100ms)
+    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+      // Log comp shader's m_texcode and resulting binding slots
+      {
+        char dbg[512];
+        CShaderParams* cp = &m_shaders.comp.params;
+        sprintf(dbg, "DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+                cp->m_texcode[0], cp->m_texcode[1], cp->m_texcode[2], cp->m_texcode[3],
+                cp->m_texcode[4], cp->m_texcode[5], cp->m_texcode[6], cp->m_texcode[7],
+                cp->m_texcode[8], cp->m_texcode[9], cp->m_texcode[10], cp->m_texcode[11],
+                cp->m_texcode[12], cp->m_texcode[13], cp->m_texcode[14], cp->m_texcode[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+                compSlots[0], compSlots[1], compSlots[2], compSlots[3],
+                compSlots[4], compSlots[5], compSlots[6], compSlots[7],
+                compSlots[8], compSlots[9], compSlots[10], compSlots[11],
+                compSlots[12], compSlots[13], compSlots[14], compSlots[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
+                m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex, m_dx12Blur[5].srvIndex, m_dx12VS[1].srvIndex);
+        DebugLogA(dbg);
+      }
+      // Log warp shader's m_texcode
+      {
+        char dbg[512];
+        CShaderParams* wp = &m_shaders.warp.params;
+        sprintf(dbg, "DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+                wp->m_texcode[0], wp->m_texcode[1], wp->m_texcode[2], wp->m_texcode[3],
+                wp->m_texcode[4], wp->m_texcode[5], wp->m_texcode[6], wp->m_texcode[7],
+                wp->m_texcode[8], wp->m_texcode[9], wp->m_texcode[10], wp->m_texcode[11],
+                wp->m_texcode[12], wp->m_texcode[13], wp->m_texcode[14], wp->m_texcode[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+                warpSlots[0], warpSlots[1], warpSlots[2], warpSlots[3],
+                warpSlots[4], warpSlots[5], warpSlots[6], warpSlots[7],
+                warpSlots[8], warpSlots[9], warpSlots[10], warpSlots[11],
+                warpSlots[12], warpSlots[13], warpSlots[14], warpSlots[15]);
+        DebugLogA(dbg);
+      }
+    }
 
     // Use preset warp PSO if available, else Phase 4 passthrough.
     // MD1 presets (nWarpPSVersion=0) have no custom shader — the simple
@@ -1926,6 +1996,16 @@ void CPlugin::DX12_RenderWarpAndComposite()
       cmdList->SetPipelineState(m_dx12WarpPSO.Get());
     } else {
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+    }
+
+    // Diagnostic: log warp pass state once per preset load (first 100ms)
+    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+      char dbg[256];
+      sprintf(dbg, "DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
+              m_dx12WarpPSO ? "PRESET" : "FALLBACK",
+              (m_shaders.warp.CT != nullptr) ? "yes" : "no",
+              (float)(*m_pState->var_pf_decay));
+      DebugLogA(dbg);
     }
 
     // Bind warp shader constant buffer
@@ -1968,7 +2048,9 @@ void CPlugin::DX12_RenderWarpAndComposite()
       while (prims_queued < max_per_batch && src_idx < totalVerts) {
         for (int j = 0; j < 3; j++) {
           tempv[i++] = m_verts[m_indices_list[src_idx++]];
-          tempv[i - 1].y *= -1;  // flip Y
+          // Note: DX9 flips Y here to compensate for the OrthoLH(2,-2) projection.
+          // DX12 vertex shaders output directly to clip space (no projection), so
+          // Y flip is NOT needed.
           tempv[i - 1].Diffuse = (cDecay & 0x00FFFFFF) | (tempv[i - 1].Diffuse & 0xFF000000);
         }
         prims_queued++;
@@ -2055,6 +2137,7 @@ void CPlugin::DX12_RenderWarpAndComposite()
     PShaderInfo* compSI = &m_shaders.comp;
     if (compSI->CT) {
       ApplyShaderParams(&compSI->params, compSI->CT, m_pState);
+
       DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(compSI->CT);
       if (ct->GetShadowSize() > 0) {
         D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
@@ -2108,7 +2191,6 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
-  int i;
   WFVERTEX v1[576 + 1], v2[576 + 1];
 
   float cr = (float)(*m_pState->var_pf_wave_r);
@@ -2183,7 +2265,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha > 1) alpha = 1;
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.5f + 0.4f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           if (i < nVerts / 10) {
@@ -2215,7 +2297,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha < 0) alpha = 0;
       if (alpha > 1) alpha = 1;
       nVerts /= 2;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         float rad = 0.53f + 0.43f * fR[i] + fWaveParam2;
         float ang = fL[i + 32] * 1.57f + GetTime() * 2.3f;
         if (m_bScreenDependentRenderMode) {
@@ -2240,7 +2322,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         alpha *= ((mysound.imm_rel[0] + mysound.imm_rel[1] + mysound.imm_rel[2]) * 0.333f - m_pState->m_fModWaveAlphaStart.eval(GetTime())) / (m_pState->m_fModWaveAlphaEnd.eval(GetTime()) - m_pState->m_fModWaveAlphaStart.eval(GetTime()));
       if (alpha < 0) alpha = 0;
       if (alpha > 1) alpha = 1;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         if (m_bScreenDependentRenderMode) {
           v[i].x = fR[i] + fWavePosX;
           v[i].y = fL[i + 32] + fWavePosY;
@@ -2265,7 +2347,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         alpha *= ((mysound.imm_rel[0] + mysound.imm_rel[1] + mysound.imm_rel[2]) * 0.333f - m_pState->m_fModWaveAlphaStart.eval(GetTime())) / (m_pState->m_fModWaveAlphaEnd.eval(GetTime()) - m_pState->m_fModWaveAlphaStart.eval(GetTime()));
       if (alpha < 0) alpha = 0;
       if (alpha > 1) alpha = 1;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         if (m_bScreenDependentRenderMode) {
           v[i].x = fR[i] + fWavePosX;
           v[i].y = fL[i + 32] + fWavePosY;
@@ -2289,7 +2371,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float w1 = 0.45f + 0.5f * (fWaveParam2 * 0.5f + 0.5f);
         float w2 = 1.0f - w1;
         float inv_nverts = 1.0f / (float)(nVerts);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = -1.0f + 2.0f * (i * inv_nverts) + fWavePosX;
           v[i].y = fL[i + sample_offset] * 0.47f + fWavePosY;
           v[i].x += fR[i + 25 + sample_offset] * 0.44f;
@@ -2316,7 +2398,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       {
         float cos_rot = cosf(GetTime() * 0.3f);
         float sin_rot = sinf(GetTime() * 0.3f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float x0 = (fR[i] * fL[i + 32] + fL[i] * fR[i + 32]);
           float y0 = (fR[i] * fR[i] - fL[i + 32] * fL[i + 32]);
           if (m_bScreenDependentRenderMode) {
@@ -2353,7 +2435,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y[0] = fWavePosX * sinf(ang + 1.57f) - dy * 3.0f;
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2377,23 +2459,23 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float perp_dx = cosf(ang2 + 1.57f);
         float perp_dy = sinf(ang2 + 1.57f);
         if (wave == 6)
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i].x = edge_x[0] + dx * i + perp_dx * 0.25f * fL[i + sample_offset];
             v[i].y = edge_y[0] + dy * i + perp_dy * 0.25f * fL[i + sample_offset];
           }
         else if (wave == 8)
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             float f = 0.1f * logf(mysound.fSpecLeft[i * 2] + mysound.fSpecLeft[i * 2 + 1]);
             v[i].x = edge_x[0] + dx * i + perp_dx * f;
             v[i].y = edge_y[0] + dy * i + perp_dy * f;
           }
         else {
           float sep = powf(fWavePosY * 0.5f + 0.5f, 2.0f);
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i].x = edge_x[0] + dx * i + perp_dx * (0.25f * fL[i + sample_offset] + sep);
             v[i].y = edge_y[0] + dy * i + perp_dy * (0.25f * fL[i + sample_offset] + sep);
           }
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i + nVerts].x = edge_x[0] + dx * i + perp_dx * (0.25f * fR[i + sample_offset] - sep);
             v[i + nVerts].y = edge_y[0] + dy * i + perp_dy * (0.25f * fR[i + sample_offset] - sep);
           }
@@ -2425,7 +2507,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y[0] = fWavePosX * sinf(ang + 1.57f) - dy * 3.0f;
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2448,7 +2530,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float ang2 = atan2f(dy, dx);
         float perp_dx = cosf(ang2 + 1.57f);
         float perp_dy = sinf(ang2 + 1.57f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] + dx * i + perp_dx * 1.00f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 1.00f * fL[i + sample_offset];
         }
@@ -2476,7 +2558,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y[0] = fWavePosX * sinf(ang + 1.57f) - dy * 3.0f;
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2499,7 +2581,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float ang2 = atan2f(dy, dx);
         float perp_dx = cosf(ang2 + 1.57f);
         float perp_dy = sinf(ang2 + 1.57f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] + dx * i + perp_dx * 0.35f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 0.35f * fL[i + sample_offset];
         }
@@ -2512,7 +2594,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y3[0] = fWavePosX * sinf(ang3 + 1.57f) - dy3 * 3.0f;
         edge_x3[1] = fWavePosX * cosf(ang3 + 1.57f) + dx3 * 3.0f;
         edge_y3[1] = fWavePosX * sinf(ang3 + 1.57f) + dy3 * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2535,7 +2617,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float ang4 = atan2f(dy3, dx3);
         float perp_dx3 = cosf(ang4 + 1.57f);
         float perp_dy3 = sinf(ang4 + 1.57f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i + nVerts].x = edge_x3[0] + dx3 * i + perp_dx3 * (0.35f * fR[i + sample_offset]);
           v[i + nVerts].y = edge_y3[0] + dy3 * i + perp_dy3 * (0.35f * fR[i + sample_offset]);
         }
@@ -2563,7 +2645,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y[0] = fWavePosX * sinf(ang + 1.57f) - dy * 3.0f;
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2586,7 +2668,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float ang2 = atan2f(dy, dx);
         float perp_dx = cosf(ang2 + 1.57f);
         float perp_dy = sinf(ang2 + 1.57f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] - 0.45f + dx * i + perp_dx * 0.35f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 0.35f * fL[i + sample_offset];
         }
@@ -2599,7 +2681,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         edge_y3[0] = fWavePosX * sinf(ang3 + 1.57f) - dy3 * 3.0f;
         edge_x3[1] = fWavePosX * cosf(ang3 + 1.57f) + dx3 * 3.0f;
         edge_y3[1] = fWavePosX * sinf(ang3 + 1.57f) + dy3 * 3.0f;
-        for (i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
           for (int j = 0; j < 4; j++) {
             float t;
             bool bClip = false;
@@ -2622,7 +2704,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float ang4 = atan2f(dy3, dx3);
         float perp_dx3 = cosf(ang4 + 1.57f);
         float perp_dy3 = sinf(ang4 + 1.57f);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i + nVerts].x = edge_x3[0] + 0.45f + dx3 * i + perp_dx3 * (0.35f * fR[i + sample_offset]);
           v[i + nVerts].y = edge_y3[0] + dy3 * i + perp_dy3 * (0.35f * fR[i + sample_offset]);
         }
@@ -2639,7 +2721,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha < 0) alpha = 0;
       if (alpha > 1) alpha = 1;
       nVerts /= 2;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         float rad = 0.63f + 0.23f * fR[i] + fWaveParam2;
         float ang = fL[i + 32] * 0.9f + GetTime() * 3.3f;
         if (m_bScreenDependentRenderMode) {
@@ -2662,7 +2744,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha > 1) alpha = 1;
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.4f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           if (i < nVerts / rad) {
@@ -2696,7 +2778,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha > 1) alpha = 1;
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.7f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           ang = ang / 2;
@@ -2730,7 +2812,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
       if (alpha < 0) alpha = 0;
       if (alpha > 1) alpha = 1;
       nVerts /= 2;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         float rad = 0.53f + 0.43f * fR[i] + fWaveParam2;
         float ang = fL[i + 32] * 1.57f + GetTime() * 2.0f;
         float t = GetTime() / ang;
@@ -2752,7 +2834,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float cos_rot = cosf(rotation);
         float sin_rot = sinf(rotation);
         float inv_nverts = 1.0f / (float)(nVerts - 1);
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float phase = i * inv_nverts;
           float x, y;
           if (phase < 0.3333f) {
@@ -2810,7 +2892,7 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         float burst_size = min(1.0f, burst_phase * 4.0f);
         float burst_fade = 1.0f - powf(burst_phase, 3.0f);
         float audio_boost = 1.0f + 2.0f * (mysound.imm_rel[0] + mysound.imm_rel[1]) * 0.5f;
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float ang = (i / (float)nVerts) * 6.283185f;
           float dist_var = 0.7f + 0.3f * (fmodf(rand_seed + i * 0.1f, 1.0f));
           float dist = burst_size * dist_var * (0.5f + 0.5f * fR[(i * 3) % NUM_WAVEFORM_SAMPLES]) * audio_boost;
@@ -2873,11 +2955,12 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
     alpha1 = alpha1 * (mix)+alpha2 * (1.0f - mix);
   }
 
-  // Apply color & alpha, reverse Y
+  // Apply color & alpha
+  // Note: DX9 flips Y here to compensate for the OrthoLH(2,-2) projection.
+  // DX12 vertex shaders bypass projection, so Y flip is NOT needed.
   v1[0].Diffuse = D3DCOLOR_RGBA_01(cr, cg, cb, alpha1);
-  for (i = 0; i < nVerts1; i++) {
+  for (int i = 0; i < nVerts1; i++) {
     v1[i].Diffuse = v1[0].Diffuse;
-    v1[i].y = -v1[i].y;
   }
 
   if (alpha1 < 0.004f)
@@ -2917,12 +3000,11 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
   int drawing_its = ((*m_pState->var_pf_wave_thick || useDots) && (m_nTexSizeX >= 512)) ? 4 : 1;
 
   for (int it = 0; it < drawing_its; it++) {
-    int j;
     switch (it) {
     case 0: break;
-    case 1: for (j = 0; j < nVerts1; j++) pVerts[j].x += x_inc; break;
-    case 2: for (j = 0; j < nVerts1; j++) pVerts[j].y += y_inc; break;
-    case 3: for (j = 0; j < nVerts1; j++) pVerts[j].x -= x_inc; break;
+    case 1: for (int j = 0; j < nVerts1; j++) pVerts[j].x += x_inc; break;
+    case 2: for (int j = 0; j < nVerts1; j++) pVerts[j].y += y_inc; break;
+    case 3: for (int j = 0; j < nVerts1; j++) pVerts[j].x -= x_inc; break;
     }
 
     if (nBreak1 == -1) {
@@ -3050,6 +3132,46 @@ void CPlugin::DX12_DrawCustomShapes() {
 
   auto* cmdList = m_lpDX->m_commandList.Get();
 
+  // --- Heavy preset detection: compute total instances across all shapes ---
+  if (m_bSkipHeavyPresets) {
+    int totalInstances = 0;
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+      if (m_pState->m_shape[i].enabled)
+        totalInstances += m_pState->m_shape[i].instances;
+      if (m_pState->m_bBlending && m_pOldState->m_shape[i].enabled)
+        totalInstances += m_pOldState->m_shape[i].instances;
+    }
+    if (totalInstances > m_nHeavyPresetMaxInstances) {
+      char dbg[512];
+      sprintf(dbg, "GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
+              totalInstances, m_nHeavyPresetMaxInstances,
+              wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
+      DebugLogA(dbg);
+      return;
+    }
+  }
+
+  // --- Compute effective instance cap (resolution scaling + hard cap) ---
+  int effectiveMaxInstances = 0; // 0 = unlimited
+  if (m_bScaleInstancesByResolution && m_nTexSizeX > m_nInstanceScaleBaseWidth) {
+    // Scale instances inversely with pixel count relative to base resolution
+    // e.g. at 4K (3840) with base 1920: scale = (1920/3840)^2 = 0.25 → cap ~256
+    // e.g. at 5K (5120) with base 1920: scale = (1920/5120)^2 = 0.14 → cap ~143
+    float scale = (float)m_nInstanceScaleBaseWidth / (float)m_nTexSizeX;
+    scale = scale * scale; // squared — proportional to pixel count ratio
+    if (scale < 0.1f) scale = 0.1f;
+    effectiveMaxInstances = (int)(1024.0f * scale);
+    if (effectiveMaxInstances < 16) effectiveMaxInstances = 16;
+  }
+  if (m_nMaxShapeInstances > 0) {
+    if (effectiveMaxInstances == 0 || m_nMaxShapeInstances < effectiveMaxInstances)
+      effectiveMaxInstances = m_nMaxShapeInstances;
+  }
+
+  int diag_shapesDrawn = 0, diag_shapesVisible = 0;
+  float diag_firstVisibleAlpha = 0;
+  DWORD diag_firstVisibleColor = 0;
+
   int num_reps = (m_pState->m_bBlending) ? 2 : 1;
   for (int rep = 0; rep < num_reps; rep++) {
     CState* pState = (rep == 0) ? m_pState : m_pOldState;
@@ -3059,7 +3181,22 @@ void CPlugin::DX12_DrawCustomShapes() {
 
     for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
       if (pState->m_shape[i].enabled) {
-        for (int instance = 0; instance < pState->m_shape[i].instances; instance++) {
+        int instances = pState->m_shape[i].instances;
+
+        // Apply instance cap
+        if (effectiveMaxInstances > 0 && instances > effectiveMaxInstances) {
+          // Log once per preset (within first half-second)
+          if (GetTime() - m_fPresetStartTime < 0.5f) {
+            char dbg[512];
+            sprintf(dbg, "GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
+                    i, instances, effectiveMaxInstances, m_nTexSizeX, m_nTexSizeY,
+                    wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
+            DebugLogA(dbg);
+          }
+          instances = effectiveMaxInstances;
+        }
+
+        for (int instance = 0; instance < instances; instance++) {
           LoadCustomShapePerFrameEvallibVars(pState, i, instance);
 
 #ifndef _NO_EXPR_
@@ -3078,15 +3215,38 @@ void CPlugin::DX12_DrawCustomShapes() {
           // Compute vertices (SPRITEVERTEX for texcoords, even if untextured)
           SPRITEVERTEX v[512];
           v[0].x = (float)(*pState->m_shape[i].var_pf_x * 2 - 1);
-          v[0].y = (float)(*pState->m_shape[i].var_pf_y * -2 + 1);
+          // Note: DX9 uses pf_y * -2 + 1 to compensate for OrthoLH(2,-2) projection Y-flip.
+          // DX12 vertex shaders bypass projection, so use pf_y * 2 - 1 directly.
+          v[0].y = (float)(*pState->m_shape[i].var_pf_y * 2 - 1);
           v[0].z = 0;
           v[0].tu = 0.5f;
           v[0].tv = 0.5f;
+          // Early-exit: skip shapes where both center and outer alpha are zero.
+          // With SrcAlpha/InvSrcAlpha blending, alpha=0 shapes contribute nothing
+          // but still cost draw calls. Matches MilkDrop2 behavior where invisible
+          // shapes don't affect the render target.
+          float shapeA  = (float)*pState->m_shape[i].var_pf_a  * alpha_mult;
+          float shapeA2 = (float)*pState->m_shape[i].var_pf_a2 * alpha_mult;
+          if (shapeA <= 0.0f && shapeA2 <= 0.0f)
+            continue;
+
           v[0].Diffuse =
             ((((int)(*pState->m_shape[i].var_pf_a * 255 * alpha_mult)) & 0xFF) << 24) |
             ((((int)(*pState->m_shape[i].var_pf_r * 255)) & 0xFF) << 16) |
             ((((int)(*pState->m_shape[i].var_pf_g * 255)) & 0xFF) << 8) |
             ((((int)(*pState->m_shape[i].var_pf_b * 255)) & 0xFF));
+
+          // Shape diagnostics: track draw count and visibility
+          diag_shapesDrawn++;
+          float shapeAlpha = (float)*pState->m_shape[i].var_pf_a * alpha_mult;
+          if (shapeAlpha > 0.001f) {
+            if (diag_shapesVisible == 0) {
+              diag_firstVisibleAlpha = shapeAlpha;
+              diag_firstVisibleColor = v[0].Diffuse;
+            }
+            diag_shapesVisible++;
+          }
+
           v[1].Diffuse =
             ((((int)(*pState->m_shape[i].var_pf_a2 * 255 * alpha_mult)) & 0xFF) << 24) |
             ((((int)(*pState->m_shape[i].var_pf_r2 * 255)) & 0xFF) << 16) |
@@ -3157,12 +3317,11 @@ void CPlugin::DX12_DrawCustomShapes() {
             float x_inc = 2.0f / (float)m_nTexSizeX;
             float y_inc = 2.0f / (float)m_nTexSizeY;
             for (int it = 0; it < its; it++) {
-              int j;
               switch (it) {
               case 0: break;
-              case 1: for (j = 0; j < sides + 2; j++) v2[j].x += x_inc; break;
-              case 2: for (j = 0; j < sides + 2; j++) v2[j].y += y_inc; break;
-              case 3: for (j = 0; j < sides + 2; j++) v2[j].x -= x_inc; break;
+              case 1: for (int j = 0; j < sides + 2; j++) v2[j].x += x_inc; break;
+              case 2: for (int j = 0; j < sides + 2; j++) v2[j].y += y_inc; break;
+              case 3: for (int j = 0; j < sides + 2; j++) v2[j].x -= x_inc; break;
               }
               // Border starts at v2[1] (skip center), sides+1 verts for closed loop
               m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_LINESTRIP, &v2[1], sides + 1, sizeof(WFVERTEX));
@@ -3171,6 +3330,14 @@ void CPlugin::DX12_DrawCustomShapes() {
         }
       }
     }
+  }
+
+  // Diagnostic: log shape draw stats once per preset load (first 100ms)
+  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    char dbg[512];
+    sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
+            diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
+    DebugLogA(dbg);
   }
 }
 
@@ -3214,7 +3381,7 @@ void CPlugin::DX12_DrawCustomWaves() {
 
         for (int vi = 0; vi < NUM_Q_VAR; vi++)
           *pState->m_wave[i].var_pp_q[vi] = *pState->m_wave[i].var_pf_q[vi];
-        for (vi = 0; vi < NUM_T_VAR; vi++)
+        for (int vi = 0; vi < NUM_T_VAR; vi++)
           *pState->m_wave[i].var_pp_t[vi] = *pState->m_wave[i].var_pf_t[vi];
 
         nSamples = (int)*pState->m_wave[i].var_pf_samples;
@@ -3235,7 +3402,7 @@ void CPlugin::DX12_DrawCustomWaves() {
 
           tempdata[0][0] = pdata1[j0];
           tempdata[1][0] = pdata2[j1];
-          for (j = 1; j < nSamples; j++) {
+          for (int j = 1; j < nSamples; j++) {
             tempdata[0][j] = pdata1[(int)(j * t) + j0] * mix2 + tempdata[0][j - 1] * mix1;
             tempdata[1][j] = pdata2[(int)(j * t) + j1] * mix2 + tempdata[1][j - 1] * mix1;
           }
@@ -3243,7 +3410,7 @@ void CPlugin::DX12_DrawCustomWaves() {
             tempdata[0][j] = tempdata[0][j] * mix2 + tempdata[0][j + 1] * mix1;
             tempdata[1][j] = tempdata[1][j] * mix2 + tempdata[1][j + 1] * mix1;
           }
-          for (j = 0; j < nSamples; j++) {
+          for (int j = 0; j < nSamples; j++) {
             tempdata[0][j] *= mult;
             tempdata[1][j] *= mult;
           }
@@ -3251,7 +3418,7 @@ void CPlugin::DX12_DrawCustomWaves() {
           // 2. per-point code execution
           WFVERTEX v[1024];
           float j_mult = 1.0f / (float)(nSamples - 1);
-          for (j = 0; j < nSamples; j++) {
+          for (int j = 0; j < nSamples; j++) {
             float t = j * j_mult;
             float value1 = tempdata[0][j];
             float value2 = tempdata[1][j];
@@ -3270,12 +3437,14 @@ void CPlugin::DX12_DrawCustomWaves() {
               NSEEL_code_execute(pState->m_wave[i].m_pp_codehandle);
 #endif
 
+            // Note: DX9 uses pp_y * -2 + 1 to compensate for OrthoLH(2,-2) projection Y-flip.
+            // DX12 vertex shaders bypass projection, so use pp_y * 2 - 1 directly.
             if (m_bScreenDependentRenderMode) {
               v[j].x = (float)(*pState->m_wave[i].var_pp_x * 2 - 1);
-              v[j].y = (float)(*pState->m_wave[i].var_pp_y * -2 + 1);
+              v[j].y = (float)(*pState->m_wave[i].var_pp_y * 2 - 1);
             } else {
               v[j].x = (float)(*pState->m_wave[i].var_pp_x * 2 - 1) * m_fInvAspectX;
-              v[j].y = (float)(*pState->m_wave[i].var_pp_y * -2 + 1) * m_fInvAspectY;
+              v[j].y = (float)(*pState->m_wave[i].var_pp_y * 2 - 1) * m_fInvAspectY;
             }
 
             v[j].z = 0;
@@ -3314,9 +3483,9 @@ void CPlugin::DX12_DrawCustomWaves() {
           for (int it = 0; it < its; it++) {
             switch (it) {
             case 0: break;
-            case 1: for (j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;
-            case 2: for (j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;
-            case 3: for (j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;
+            case 1: for (int j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;
+            case 2: for (int j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;
+            case 3: for (int j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;
             }
             m_lpDX->DrawVertices(topology, pVerts, nSamples, sizeof(WFVERTEX));
           }
@@ -3351,9 +3520,9 @@ void CPlugin::ComputeGridAlphaValues() {
   f[2] = 10.54f + 3.0f * cosf(fWarpTime * 1.233f + 3);
   f[3] = 11.49f + 4.0f * cosf(fWarpTime * 0.933f + 5);
 
-  // texel alignment
-  float texel_offset_x = 0.5f / (float)m_nTexSizeX;
-  float texel_offset_y = 0.5f / (float)m_nTexSizeY;
+  // DX9 half-texel offset for UV alignment; not needed in DX12 (pixel centers at +0.5).
+  float texel_offset_x = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeX;
+  float texel_offset_y = (m_lpDX && m_lpDX->m_device) ? 0.0f : 0.5f / (float)m_nTexSizeY;
 
   int num_reps = (m_pState->m_bBlending) ? 2 : 1;
   int start_rep = 0;
@@ -3973,7 +4142,7 @@ void CPlugin::DrawCustomShapes() {
           }
           else {
             // no texture
-            for (j = 0; j < sides + 2; j++) {
+            for (int j = 0; j < sides + 2; j++) {
               v2[j].x = v[j].x;
               v2[j].y = v[j].y;
               v2[j].z = v[j].z;
@@ -3996,7 +4165,7 @@ void CPlugin::DrawCustomShapes() {
               ((((int)(*pState->m_shape[i].var_pf_border_r * 255)) & 0xFF) << 16) |
               ((((int)(*pState->m_shape[i].var_pf_border_g * 255)) & 0xFF) << 8) |
               ((((int)(*pState->m_shape[i].var_pf_border_b * 255)) & 0xFF));
-            for (j = 0; j < sides + 2; j++) {
+            for (int j = 0; j < sides + 2; j++) {
               v2[j].x = v[j].x;
               v2[j].y = v[j].y;
               v2[j].z = v[j].z;
@@ -4009,9 +4178,9 @@ void CPlugin::DrawCustomShapes() {
             for (int it = 0; it < its; it++) {
               switch (it) {
               case 0: break;
-              case 1: for (j = 0; j < sides + 2; j++) v2[j].x += x_inc; break;		// draw fat dots
-              case 2: for (j = 0; j < sides + 2; j++) v2[j].y += y_inc; break;		// draw fat dots
-              case 3: for (j = 0; j < sides + 2; j++) v2[j].x -= x_inc; break;		// draw fat dots
+              case 1: for (int j = 0; j < sides + 2; j++) v2[j].x += x_inc; break;		// draw fat dots
+              case 2: for (int j = 0; j < sides + 2; j++) v2[j].y += y_inc; break;		// draw fat dots
+              case 3: for (int j = 0; j < sides + 2; j++) v2[j].x -= x_inc; break;		// draw fat dots
               }
               lpDevice->DrawPrimitiveUP(D3DPT_LINESTRIP, sides, (void*)&v2[1], sizeof(WFVERTEX));
             }
@@ -4046,7 +4215,7 @@ void CPlugin::LoadCustomShapePerFrameEvallibVars(CState* pState, int i, int inst
 
   for (int vi = 0; vi < NUM_Q_VAR; vi++)
     *pState->m_shape[i].var_pf_q[vi] = *pState->var_pf_q[vi];
-  for (vi = 0; vi < NUM_T_VAR; vi++)
+  for (int vi = 0; vi < NUM_T_VAR; vi++)
     *pState->m_shape[i].var_pf_t[vi] = pState->m_shape[i].t_values_after_init_code[vi];
   *pState->m_shape[i].var_pf_x = pState->m_shape[i].x;
   *pState->m_shape[i].var_pf_y = pState->m_shape[i].y;
@@ -4090,7 +4259,7 @@ void CPlugin::LoadCustomWavePerFrameEvallibVars(CState* pState, int i) {
 
   for (int vi = 0; vi < NUM_Q_VAR; vi++)
     *pState->m_wave[i].var_pf_q[vi] = *pState->var_pf_q[vi];
-  for (vi = 0; vi < NUM_T_VAR; vi++)
+  for (int vi = 0; vi < NUM_T_VAR; vi++)
     *pState->m_wave[i].var_pf_t[vi] = pState->m_wave[i].t_values_after_init_code[vi];
   *pState->m_wave[i].var_pf_r = pState->m_wave[i].r;
   *pState->m_wave[i].var_pf_g = pState->m_wave[i].g;
@@ -4175,7 +4344,7 @@ void CPlugin::DrawCustomWaves() {
 
         for (int vi = 0; vi < NUM_Q_VAR; vi++)
           *pState->m_wave[i].var_pp_q[vi] = *pState->m_wave[i].var_pf_q[vi];
-        for (vi = 0; vi < NUM_T_VAR; vi++)
+        for (int vi = 0; vi < NUM_T_VAR; vi++)
           *pState->m_wave[i].var_pp_t[vi] = *pState->m_wave[i].var_pf_t[vi];
 
         nSamples = (int)*pState->m_wave[i].var_pf_samples;
@@ -4197,7 +4366,7 @@ void CPlugin::DrawCustomWaves() {
           // SMOOTHING:
           tempdata[0][0] = pdata1[j0];
           tempdata[1][0] = pdata2[j1];
-          for (j = 1; j < nSamples; j++) {
+          for (int j = 1; j < nSamples; j++) {
             tempdata[0][j] = pdata1[(int)(j * t) + j0] * mix2 + tempdata[0][j - 1] * mix1;
             tempdata[1][j] = pdata2[(int)(j * t) + j1] * mix2 + tempdata[1][j - 1] * mix1;
           }
@@ -4207,7 +4376,7 @@ void CPlugin::DrawCustomWaves() {
             tempdata[1][j] = tempdata[1][j] * mix2 + tempdata[1][j + 1] * mix1;
           }
           // finally, scale to final size:
-          for (j = 0; j < nSamples; j++) {
+          for (int j = 0; j < nSamples; j++) {
             tempdata[0][j] *= mult;
             tempdata[1][j] *= mult;
           }
@@ -4219,7 +4388,7 @@ void CPlugin::DrawCustomWaves() {
           //  -add any of the m_wave[i].xxx menu-accessible vars to the code?
           WFVERTEX v[1024];
           float j_mult = 1.0f / (float)(nSamples - 1);
-          for (j = 0; j < nSamples; j++) {
+          for (int j = 0; j < nSamples; j++) {
             float t = j * j_mult;
             float value1 = tempdata[0][j];
             float value2 = tempdata[1][j];
@@ -4291,9 +4460,9 @@ void CPlugin::DrawCustomWaves() {
           for (int it = 0; it < its; it++) {
             switch (it) {
             case 0: break;
-            case 1: for (j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;		// draw fat dots
-            case 2: for (j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;		// draw fat dots
-            case 3: for (j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;		// draw fat dots
+            case 1: for (int j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;		// draw fat dots
+            case 2: for (int j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;		// draw fat dots
+            case 3: for (int j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;		// draw fat dots
             }
             lpDevice->DrawPrimitiveUP(pState->m_wave[i].bUseDots ? D3DPT_POINTLIST : D3DPT_LINESTRIP, nSamples - (pState->m_wave[i].bUseDots ? 0 : 1), (void*)pVerts, sizeof(WFVERTEX));
           }
@@ -4320,7 +4489,6 @@ void CPlugin::DrawWave(float* fL, float* fR) {
   lpDevice->SetVertexShader(NULL);
   lpDevice->SetFVF(WFVERTEX_FORMAT);
 
-  int i;
   WFVERTEX v1[576 + 1], v2[576 + 1];
 
   /*
@@ -4441,7 +4609,7 @@ if (hr != D3D_OK)
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.5f + 0.4f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           if (i < nVerts / 10) {
@@ -4483,7 +4651,7 @@ if (hr != D3D_OK)
 
       nVerts /= 2;
 
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         float rad = 0.53f + 0.43f * fR[i] + fWaveParam2;
         float ang = fL[i + 32] * 1.57f + GetTime() * 2.3f;
 
@@ -4518,7 +4686,7 @@ if (hr != D3D_OK)
       if (alpha > 1) alpha = 1;
       //color = D3DCOLOR_RGBA_01(cr, cg, cb, alpha);
 
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         if (m_bScreenDependentRenderMode) {
           v[i].x = fR[i] + fWavePosX;//((pR[i] ^ 128) - 128)/90.0f * ASPECT; // 0.75 = adj. for aspect ratio
           v[i].y = fL[i + 32] + fWavePosY;//((pL[i+32] ^ 128) - 128)/90.0f;
@@ -4551,7 +4719,7 @@ if (hr != D3D_OK)
       if (alpha > 1) alpha = 1;
       //color = D3DCOLOR_RGBA_01(cr, cg, cb, alpha);
 
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         if (m_bScreenDependentRenderMode) {
           v[i].x = fR[i] + fWavePosX;//((pR[i] ^ 128) - 128)/90.0f * ASPECT; // 0.75 = adj. for aspect ratio
           v[i].y = fL[i + 32] + fWavePosY;//((pL[i+32] ^ 128) - 128)/90.0f;
@@ -4596,7 +4764,7 @@ if (hr != D3D_OK)
 
         float inv_nverts = 1.0f / (float)(nVerts);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = -1.0f + 2.0f * (i * inv_nverts) + fWavePosX;
           v[i].y = fL[i + sample_offset] * 0.47f + fWavePosY;//((pL[i] ^ 128) - 128)/270.0f;
           v[i].x += fR[i + 25 + sample_offset] * 0.44f;//((pR[i+25] ^ 128) - 128)/290.0f;
@@ -4643,7 +4811,7 @@ if (hr != D3D_OK)
         float cos_rot = cosf(GetTime() * 0.3f);
         float sin_rot = sinf(GetTime() * 0.3f);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float x0 = (fR[i] * fL[i + 32] + fL[i] * fR[i + 32]);
           float y0 = (fR[i] * fR[i] - fL[i + 32] * fL[i + 32]);
 
@@ -4706,7 +4874,7 @@ if (hr != D3D_OK)
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           // clip the point against 4 edges of screen
           // be a bit lenient (use +/-1.1 instead of +/-1.0)
@@ -4758,14 +4926,14 @@ if (hr != D3D_OK)
         float perp_dy = sinf(ang2 + 1.57f);
 
         if (wave == 6)
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i].x = edge_x[0] + dx * i + perp_dx * 0.25f * fL[i + sample_offset];
             v[i].y = edge_y[0] + dy * i + perp_dy * 0.25f * fL[i + sample_offset];
             //v[i].Diffuse = color;
           }
         else if (wave == 8)
           //256 verts
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             float f = 0.1f * logf(mysound.fSpecLeft[i * 2] + mysound.fSpecLeft[i * 2 + 1]);
             v[i].x = edge_x[0] + dx * i + perp_dx * f;
             v[i].y = edge_y[0] + dy * i + perp_dy * f;
@@ -4773,7 +4941,7 @@ if (hr != D3D_OK)
           }
         else {
           float sep = powf(fWavePosY * 0.5f + 0.5f, 2.0f);
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i].x = edge_x[0] + dx * i + perp_dx * (0.25f * fL[i + sample_offset] + sep);
             v[i].y = edge_y[0] + dy * i + perp_dy * (0.25f * fL[i + sample_offset] + sep);
             //v[i].Diffuse = color;
@@ -4782,7 +4950,7 @@ if (hr != D3D_OK)
           //D3DPRIMITIVETYPE primtype = (*m_pState->var_pf_wave_usedots) ? D3DPT_POINTLIST : D3DPT_LINESTRIP;
           //m_lpD3DDev->DrawPrimitive(primtype, D3DFVF_LVERTEX, (LPVOID)v, nVerts, NULL);
 
-          for (i = 0; i < nVerts; i++) {
+          for (int i = 0; i < nVerts; i++) {
             v[i + nVerts].x = edge_x[0] + dx * i + perp_dx * (0.25f * fR[i + sample_offset] - sep);
             v[i + nVerts].y = edge_y[0] + dy * i + perp_dy * (0.25f * fR[i + sample_offset] - sep);
             //v[i+nVerts].Diffuse = color;
@@ -4828,7 +4996,7 @@ if (hr != D3D_OK)
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           // clip the point against 4 edges of screen
           // be a bit lenient (use +/-1.1 instead of +/-1.0)
@@ -4880,7 +5048,7 @@ if (hr != D3D_OK)
         float perp_dy = sinf(ang2 + 1.57f);
 
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] + dx * i + perp_dx * 1.00f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 1.00f * fL[i + sample_offset];
           //v[i].Diffuse = color;
@@ -4928,7 +5096,7 @@ if (hr != D3D_OK)
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           // clip the point against 4 edges of screen
           // be a bit lenient (use +/-1.1 instead of +/-1.0)
@@ -4980,7 +5148,7 @@ if (hr != D3D_OK)
         float perp_dy = sinf(ang2 + 1.57f);
 
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] + dx * i + perp_dx * 0.35f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 0.35f * fL[i + sample_offset];
           //v[i].Diffuse = color;
@@ -5000,7 +5168,7 @@ if (hr != D3D_OK)
         edge_x3[1] = fWavePosX * cosf(ang3 + 1.57f) + dx3 * 3.0f;
         edge_y3[1] = fWavePosX * sinf(ang3 + 1.57f) + dy3 * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           for (int j = 0; j < 4; j++) {
             float t;
@@ -5048,7 +5216,7 @@ if (hr != D3D_OK)
         float perp_dx3 = cosf(ang4 + 1.57f);
         float perp_dy3 = sinf(ang4 + 1.57f);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i + nVerts].x = edge_x3[0] + dx3 * i + perp_dx3 * (0.35f * fR[i + sample_offset]);
           v[i + nVerts].y = edge_y3[0] + dy3 * i + perp_dy3 * (0.35f * fR[i + sample_offset]);
           //v[i+nVerts].Diffuse = color;
@@ -5095,7 +5263,7 @@ if (hr != D3D_OK)
         edge_x[1] = fWavePosX * cosf(ang + 1.57f) + dx * 3.0f;
         edge_y[1] = fWavePosX * sinf(ang + 1.57f) + dy * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           // clip the point against 4 edges of screen
           // be a bit lenient (use +/-1.1 instead of +/-1.0)
@@ -5147,7 +5315,7 @@ if (hr != D3D_OK)
         float perp_dy = sinf(ang2 + 1.57f);
 
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i].x = edge_x[0] - 0.45f + dx * i + perp_dx * 0.35f * fL[i + sample_offset];
           v[i].y = edge_y[0] + dy * i + perp_dy * 0.35f * fL[i + sample_offset];
           //v[i].Diffuse = color;
@@ -5168,7 +5336,7 @@ if (hr != D3D_OK)
         edge_x3[1] = fWavePosX * cosf(ang3 + 1.57f) + dx3 * 3.0f;
         edge_y3[1] = fWavePosX * sinf(ang3 + 1.57f) + dy3 * 3.0f;
 
-        for (i = 0; i < 2; i++)	// for each point defining the line
+        for (int i = 0; i < 2; i++)	// for each point defining the line
         {
           for (int j = 0; j < 4; j++) {
             float t;
@@ -5216,7 +5384,7 @@ if (hr != D3D_OK)
         float perp_dx3 = cosf(ang4 + 1.57f);
         float perp_dy3 = sinf(ang4 + 1.57f);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           v[i + nVerts].x = edge_x3[0] + 0.45f + dx3 * i + perp_dx3 * (0.35f * fR[i + sample_offset]);
           v[i + nVerts].y = edge_y3[0] + dy3 * i + perp_dy3 * (0.35f * fR[i + sample_offset]);
           //v[i+nVerts].Diffuse = color;
@@ -5244,7 +5412,7 @@ if (hr != D3D_OK)
       //color = D3DCOLOR_RGBA_01(cr, cg, cb, alpha);
 
       nVerts /= 2;
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         //float rad = 0.13f + 0.43f * fR[i] + fWaveParam2 + perp_dy3/2 ;
         //float ang = fL[i + 32] * 3.57f + GetTime() * perp_dx3/2;
         //v[i].x = rad * cosf(ang+ alpha) * m_fAspectY + fWavePosX ;		// 0.75 = adj. for aspect ratio
@@ -5281,7 +5449,7 @@ if (hr != D3D_OK)
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.4f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           if (i < nVerts / rad) {
@@ -5326,7 +5494,7 @@ if (hr != D3D_OK)
       {
         float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.7f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
           ang = ang / 2;
@@ -5381,7 +5549,7 @@ if (hr != D3D_OK)
       {
       float inv_nverts_minus_one = 1.0f / (float)(nVerts - 1);
 
-      for (i = 0; i < nVerts; i++)
+      for (int i = 0; i < nVerts; i++)
       {
       float rad = 0.7f + 0.4f * fR[i + sample_offset] + fWaveParam2;
       float ang = (i)* inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
@@ -5421,7 +5589,7 @@ if (hr != D3D_OK)
 
       nVerts /= 2;
 
-      for (i = 0; i < nVerts; i++) {
+      for (int i = 0; i < nVerts; i++) {
         float rad = 0.53f + 0.43f * fR[i] + fWaveParam2;
         float ang = fL[i + 32] * 1.57f + GetTime() * 2.0f;
         float t = GetTime() / ang;
@@ -5453,7 +5621,7 @@ if (hr != D3D_OK)
 
         float inv_nverts = 1.0f / (float)(nVerts - 1);
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           // Create perfect triangle shape
           float phase = i * inv_nverts;
           float x, y;
@@ -5540,7 +5708,7 @@ if (hr != D3D_OK)
         // Audio reactivity
         float audio_boost = 1.0f + 2.0f * (mysound.imm_rel[0] + mysound.imm_rel[1]) * 0.5f;
 
-        for (i = 0; i < nVerts; i++) {
+        for (int i = 0; i < nVerts; i++) {
           // Particle angle
           float ang = (i / (float)nVerts) * 6.283185f;
 
@@ -5635,7 +5803,7 @@ if (hr != D3D_OK)
     // ALSO reverse all y values, to stay consistent with the pre-VMS milkdrop,
     //  which DIDN'T:
   v1[0].Diffuse = D3DCOLOR_RGBA_01(cr, cg, cb, alpha1);
-  for (i = 0; i < nVerts1; i++) {
+  for (int i = 0; i < nVerts1; i++) {
     v1[i].Diffuse = v1[0].Diffuse;
     v1[i].y = -v1[i].y;
   }
@@ -5667,13 +5835,11 @@ if (hr != D3D_OK)
     int drawing_its = ((*m_pState->var_pf_wave_thick || *m_pState->var_pf_wave_usedots) && (m_nTexSizeX >= 512)) ? 4 : 1;
 
     for (int it = 0; it < drawing_its; it++) {
-      int j;
-
       switch (it) {
       case 0: break;
-      case 1: for (j = 0; j < nVerts1; j++) pVerts[j].x += x_inc; break;		// draw fat dots
-      case 2: for (j = 0; j < nVerts1; j++) pVerts[j].y += y_inc; break;		// draw fat dots
-      case 3: for (j = 0; j < nVerts1; j++) pVerts[j].x -= x_inc; break;		// draw fat dots
+      case 1: for (int j = 0; j < nVerts1; j++) pVerts[j].x += x_inc; break;		// draw fat dots
+      case 2: for (int j = 0; j < nVerts1; j++) pVerts[j].y += y_inc; break;		// draw fat dots
+      case 3: for (int j = 0; j < nVerts1; j++) pVerts[j].x -= x_inc; break;		// draw fat dots
       }
 
       if (nBreak1 == -1) {
@@ -5848,8 +6014,6 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
 
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
     if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {
-      int k;
-
       // set values of input variables:
       *(m_texmgr.m_tex[iSlot].var_time) = (double)(GetTime() - m_texmgr.m_tex[iSlot].fStartTime);
       *(m_texmgr.m_tex[iSlot].var_frame) = (double)(GetFrame() - m_texmgr.m_tex[iSlot].nStartFrame);
@@ -5923,16 +6087,16 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
         float aspect = m_texmgr.m_tex[iSlot].img_h / (float)m_texmgr.m_tex[iSlot].img_w;
 
         if (aspect < 1)
-          for (k = 0; k < 4; k++) v3[k].y *= aspect;		// wide image
+          for (int k = 0; k < 4; k++) v3[k].y *= aspect;		// wide image
         else
-          for (k = 0; k < 4; k++) v3[k].x /= aspect;		// tall image
+          for (int k = 0; k < 4; k++) v3[k].x /= aspect;		// tall image
       }
 
       // 2D rotation
       {
         float cos_rot = cosf(rot);
         float sin_rot = sinf(rot);
-        for (k = 0; k < 4; k++) {
+        for (int k = 0; k < 4; k++) {
           float x2 = v3[k].x * cos_rot - v3[k].y * sin_rot;
           float y2 = v3[k].x * sin_rot + v3[k].y * cos_rot;
           v3[k].x = x2;
@@ -5941,7 +6105,7 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
       }
 
       // translation
-      for (k = 0; k < 4; k++) {
+      for (int k = 0; k < 4; k++) {
         v3[k].x += x;
         v3[k].y += y;
       }
@@ -5951,9 +6115,9 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
         float aspect = GetWidth() / (float)(GetHeight());
 
         if (aspect > 1)
-          for (k = 0; k < 4; k++) v3[k].y *= aspect;
+          for (int k = 0; k < 4; k++) v3[k].y *= aspect;
         else
-          for (k = 0; k < 4; k++) v3[k].x /= aspect;
+          for (int k = 0; k < 4; k++) v3[k].x /= aspect;
       }
 
       // third aspect ratio: adjust for burn-in
@@ -5962,9 +6126,9 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
         float aspect = GetWidth() / (float)(GetHeight() * 4.0f / 3.0f);
         if (!m_bScreenDependentRenderMode)
           if (aspect < 1.0f)
-            for (k = 0; k < 4; k++) v3[k].x *= aspect;
+            for (int k = 0; k < 4; k++) v3[k].x *= aspect;
           else
-            for (k = 0; k < 4; k++) v3[k].y /= aspect;
+            for (int k = 0; k < 4; k++) v3[k].y /= aspect;
       }
 
       // finally, flip 'y' for annoying DirectX
@@ -5984,7 +6148,7 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
         v3[3].tv = dtv;///*m_texmgr.m_tex[iSlot].img_h / (float)m_texmgr.m_tex[iSlot].tex_h*/ - dtv;
 
         // repeat on x,y
-        for (k = 0; k < 4; k++) {
+        for (int k = 0; k < 4; k++) {
           v3[k].tu = (v3[k].tu - 0.0f) * repeatx + 0.5f;
           v3[k].tv = (v3[k].tv - 0.0f) * repeaty + 0.5f;
         }
@@ -5996,24 +6160,24 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
       case 1:
         // decal (no blend)
         spritePso = PSO_TEXTURED_SPRITEVERTEX;
-        for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
+        for (int k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
         break;
       case 2:
         // additive (One/One with pre-multiplied colors)
         spritePso = PSO_ONEONE_SPRITEVERTEX;
-        for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
+        for (int k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
         break;
       case 3:
         // srccolor — approximate with alpha blend
         spritePso = PSO_ALPHABLEND_SPRITEVERTEX;
-        for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(1, 1, 1, 1);
+        for (int k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(1, 1, 1, 1);
         break;
       case 0:
       case 4:
       default:
         // alpha blend (SrcAlpha/InvSrcAlpha)
         spritePso = PSO_ALPHABLEND_SPRITEVERTEX;
-        for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r, g, b, a);
+        for (int k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r, g, b, a);
         break;
       }
 
@@ -6098,7 +6262,7 @@ void CPlugin::RestoreShaderParams() {
     lpDevice->SetSamplerState(i, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
   }
 
-  for (i = 0; i < 4; i++)
+  for (int i = 0; i < 4; i++)
     lpDevice->SetTexture(i, NULL);
 
   lpDevice->SetVertexShader(NULL);
@@ -6134,6 +6298,8 @@ void CPlugin::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex,
         outSlots[i] = params->m_texture_bindings[i].dx12SrvIndex;
       else if (i == 0)
         outSlots[i] = vsTex.srvIndex;  // MD1 fallback: slot 0 = VS texture
+      else if (m_lpDX->m_whiteTexture.srvIndex != UINT_MAX)
+        outSlots[i] = m_lpDX->m_whiteTexture.srvIndex;  // missing tex: white = multiplicative identity
       break;
     default:
       break;
@@ -6173,7 +6339,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
 
   // bind "texsize_XYZ" params
   int N = p->texsize_params.size();
-  for (i = 0; i < N; i++) {
+  for (int i = 0; i < N; i++) {
     TexSizeParamInfo* q = &(p->texsize_params[i]);
     pCT->SetVector(lpDevice, q->texsize_param, &D3DXVECTOR4((float)q->w, (float)q->h, 1.0f / q->w, 1.0f / q->h));
   }
@@ -6244,7 +6410,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
 
   // write q vars
   int num_q_float4s = sizeof(p->q_const_handles) / sizeof(p->q_const_handles[0]);
-  for (i = 0; i < num_q_float4s; i++) {
+  for (int i = 0; i < num_q_float4s; i++) {
     if (p->q_const_handles[i])
       pCT->SetVector(lpDevice, p->q_const_handles[i], &D3DXVECTOR4(
         (float)*pState->var_pf_q[i * 4 + 0],
@@ -6254,7 +6420,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
   }
 
   // write matrices
-  for (i = 0; i < 20; i++) {
+  for (int i = 0; i < 20; i++) {
     if (p->rot_mat[i]) {
       D3DXMATRIX mx, my, mz, mxlate, temp;
 
@@ -6271,7 +6437,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
     }
   }
   // the last 4 are totally random, each frame
-  for (i = 20; i < 24; i++) {
+  for (int i = 20; i < 24; i++) {
     if (p->rot_mat[i]) {
       D3DXMATRIX mx, my, mz, mxlate, temp;
 
@@ -6375,7 +6541,7 @@ void CPlugin::ShowToUser_NoShaders()//int bRedraw, int nPassOverride)
           shade[i][k] /= max;
           shade[i][k] = 0.5f + 0.5f * shade[i][k];
         }
-        for (k = 0; k < 3; k++) {
+        for (int k = 0; k < 3; k++) {
           shade[i][k] = shade[i][k] * (fShaderAmount)+1.0f * (1.0f - fShaderAmount);
         }
         v3[i].Diffuse = D3DCOLOR_RGBA_01(shade[i][0], shade[i][1], shade[i][2], 1);
@@ -6835,7 +7001,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
 
     // scale down over time
     float scale = 1.01f / (powf(fProgress, 0.21f) + 0.01f);
-    for (i = 0; i < 128; i++) {
+    for (int i = 0; i < 128; i++) {
       v3[i].x *= scale;
       v3[i].y *= scale;
     }
@@ -6892,7 +7058,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
       }
       dy = (currentY * 2 - 1);
 
-      for (i = 0; i < 128; i++) {
+      for (int i = 0; i < 128; i++) {
         // note: (x,y) are in (-1,1) range, but m_supertext[supertextIndex].f{X|Y} are in (0..1) range
         v3[i].x = (v3[i].x) * t + dx;
         v3[i].y = (v3[i].y) * t + dy;
@@ -6928,7 +7094,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
   float actualCenter = (minVal + maxVal) / 2;
   float offset = actualCenter - wantedCenter;
 
-  for (i = 0; i < 128; i++) {
+  for (int i = 0; i < 128; i++) {
     if (aspect < 1) {
 
       //swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"ShowSongTitleAnim: v3[%i].x=%.2f\n", i, v3[i].x);
@@ -6956,7 +7122,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
   // DX12: flip Y axis — DX12 clip space has +Y = top, but the vertex grid
   // maps increasing tv (texture top→bottom) to increasing y, which puts
   // the top of the text at the bottom of the screen without this flip.
-  for (i = 0; i < 128; i++)
+  for (int i = 0; i < 128; i++)
     v3[i].y = -v3[i].y;
 
   float t = 1.0f;
@@ -7072,7 +7238,7 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
       break;
     }
 
-    for (i = 0; i < 128; i++) {
+    for (int i = 0; i < 128; i++) {
       v3[i].x += offset_x;
       v3[i].y += offset_y;
     }

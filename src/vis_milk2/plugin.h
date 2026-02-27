@@ -380,7 +380,7 @@ public:
   int			m_nCustMsgsSpawned;
   bool    m_bEnablePresetStartup;
   bool    m_bEnableAudioCapture = true;
-  float   m_fAudioSensitivity = 32.0f;  // Pre-quantization gain for WASAPI float → 8-bit conversion
+  float   m_fAudioSensitivity = 1.0f;   // 1.0 = unity gain (matches MilkDrop3); -1 = adaptive auto-normalize
   bool    m_bEnablePresetStartupSavingOnClose = true;
   bool    m_bAutoLockPresetWhenNoMusic;
   bool    m_bScreenDependentRenderMode;
@@ -429,6 +429,13 @@ public:
   int m_MaxPSVersionConfig = 4;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
   bool m_IsAMD = false;
+
+  // GPU Protection Settings
+  int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
+  bool m_bScaleInstancesByResolution = false; // Scale down num_inst at resolutions above base
+  int  m_nInstanceScaleBaseWidth = 1920; // Reference width for instance scaling (instances scale down above this)
+  bool m_bSkipHeavyPresets = false;      // Auto-skip presets exceeding GPU safety thresholds
+  int  m_nHeavyPresetMaxInstances = 4096; // Total shape instances across all shapes that triggers skip
 
   //bool		m_bAlways3D;
   //float       m_fStereoSep;
@@ -811,8 +818,9 @@ public:
   std::vector<HWND> m_settingsPageCtrls[7]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
-  int         m_nSettingsWndW = 600;
-  int         m_nSettingsWndH = 800;
+  int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
+  int         m_nSettingsWndW = 620;
+  int         m_nSettingsWndH = 700;
   std::thread m_settingsThread;
   std::atomic<bool> m_bSettingsThreadRunning{false};
   void        OpenSettingsWindow();
@@ -822,6 +830,8 @@ public:
   void        ShowSettingsPage(int page);
   void        LayoutSettingsControls();
   void        EnsureSettingsVisible();
+  void        ResetSettingsWindow();
+  void        RebuildSettingsFonts();
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   // Messages tab
   void        PopulateMsgListBox(HWND hList);

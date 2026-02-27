@@ -59,6 +59,33 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Shader precompiling and caching
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 
+## DX12 Rendering Pipeline
+
+The DX12 rendering pipeline uses two render targets (VS[0] and VS[1]) that ping-pong:
+
+1. **Warp pass**: Reads VS[0] → applies warp mesh distortion → writes to VS[1]
+2. **Shape/wave injection**: Custom shapes and waves drawn directly into VS[1]
+3. **Comp pass**: Reads VS[1] → applies comp mesh + comp shader → writes to backbuffer
+
+Key architecture differences from DX9:
+- **No projection matrix**: DX12 vertex shaders output directly to clip space (`output.pos = float4(input.pos, 1.0)`) — no `D3DXMatrixOrthoLH` projection
+- **No DX9 half-texel offset**: DX12 pixel centers are at integer+0.5 (DX9 at integers). All `0.5f / texSize` offsets must be zero in DX12.
+- **No Y-flip compensation**: DX9 used `OrthoLH(2,-2)` which negated Y. Original code compensated with explicit Y-flips. DX12 passthrough VS doesn't flip Y, so these compensations must be removed.
+- **Post-processing via shader**: `RenderInjectEffect()` in plugin.cpp handles brighten/darken/solarize/invert via pixel shader (not blend states)
+- **Texture fallback**: Missing disk textures fall back to a 1x1 white texture (multiplicative identity) to prevent black-screen artifacts
+
+See `docs/dx12-migration-status.md` for detailed migration state.
+
+## Workflow Preferences
+
+- After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
+- If a build is blocked by permissions (exe locked), ask the user to close the running visualizer
+- Skip song title rendering (Phase 6E) — never worked, low priority
+- Skip sprite system (Phase 6F) — low priority
+- INI section is `[Milkwave]` for backward compatibility (not renamed)
+- Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
+- User has custom texture files that presets reference (clipboard textures, etc.)
+
 ## System Requirements
 
 - Windows 11 64-bit or higher
