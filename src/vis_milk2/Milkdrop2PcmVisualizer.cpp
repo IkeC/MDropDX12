@@ -228,6 +228,9 @@ static unsigned threadIPCId = 0;
 std::atomic<HWND> g_hRenderWindow{nullptr};  // set after render window CreateWindowW
 std::atomic<bool> g_bIPCRunning{false};
 WCHAR g_szIPCWindowTitle[256] = {};  // title for IPC window (set before thread start)
+WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
+WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
+std::atomic<int> g_lastIPCMessageSeq{0};  // bumped on each new message
 
 
 // SPOUT

@@ -293,6 +293,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     return 0;
 
   case WM_DESTROY:
+    KillTimer(hWnd, IDT_IPC_MONITOR);
     if (p) {
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
@@ -1193,6 +1194,22 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
       return 0;
     }
+    if (wParam == IDT_IPC_MONITOR && p) {
+      int seq = g_lastIPCMessageSeq.load();
+      if (seq != p->m_lastSeenIPCSeq) {
+        p->m_lastSeenIPCSeq = seq;
+        // Only update display if an IPC window is selected in list
+        HWND hList = GetDlgItem(hWnd, IDC_MW_IPC_LIST);
+        int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+        if (sel != LB_ERR) {
+          wchar_t header[64];
+          swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
+          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
+          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
+        }
+      }
+      return 0;
+    }
     break;
 
   // Dark theme color handling for settings window controls
@@ -2066,11 +2083,31 @@ void Engine::BuildSettingsControls() {
     y += listH + gap;
   }
 
-  // Future placeholder
-  PAGE_CTRL(7, CreateLabel(hw, L"Future: multiple IPC windows for multi-screen rendering", x, y, rw, lineH, hFont, false));
+  // Last Message group box
+  {
+    int groupH = lineH * 5;
+    HWND hGroup = CreateWindowExW(0, L"BUTTON", L"Last message:",
+      WS_CHILD | BS_GROUPBOX,
+      x, y, rw, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
+      GetModuleHandle(NULL), NULL);
+    if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(7, hGroup);
+
+    int pad = 8;
+    HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
+      WS_CHILD | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+      x + pad, y + lineH + 2, rw - pad * 2, groupH - lineH - pad - 2,
+      hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
+      GetModuleHandle(NULL), NULL);
+    if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(7, hMsgText);
+  }
 
   // Populate IPC list with current state
   RefreshIPCList(hw);
+
+  // Start IPC message monitor timer (500ms polling)
+  SetTimer(hw, IDT_IPC_MONITOR, 500, NULL);
 
   #undef PAGE_CTRL
 
@@ -2288,6 +2325,16 @@ void Engine::LayoutSettingsControls() {
     moveCtrl(IDC_MW_IPC_TITLE, editX, -1, editW, -1);
     moveCtrl(IDC_MW_IPC_REMOTE_TITLE, editX, -1, editW, -1);
     moveCtrl(IDC_MW_IPC_LIST, rcDisplay.left + 16, -1, rw, -1);
+    moveCtrl(IDC_MW_IPC_MSG_GROUP, rcDisplay.left + 16, -1, rw, -1);
+    // Stretch message text inside group box
+    HWND hGroup = GetDlgItem(m_hSettingsWnd, IDC_MW_IPC_MSG_GROUP);
+    if (hGroup) {
+      RECT rg; GetWindowRect(hGroup, &rg);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rg, 2);
+      int pad = 8;
+      moveCtrl(IDC_MW_IPC_MSG_TEXT, rg.left + pad, rg.top + lineH + 2,
+               rg.right - rg.left - pad * 2, rg.bottom - rg.top - lineH - pad - 2);
+    }
   }
 
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);

@@ -210,6 +210,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IPC_LIST             2123  // ListBox: active IPC windows
 #define IDC_MW_IPC_TITLE_HINT       2125  // Label: hint for window title
 #define IDC_MW_IPC_REMOTE_HINT      2126  // Label: hint for remote title
+#define IDC_MW_IPC_MSG_GROUP        2127  // GroupBox: "Last message: HH:MM:SS"
+#define IDC_MW_IPC_MSG_TEXT         2128  // Read-only Edit: message content
+
+#define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 

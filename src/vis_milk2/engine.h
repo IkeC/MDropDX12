@@ -826,6 +826,7 @@ public:
   std::vector<HWND> m_settingsPageCtrls[8]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About, Remote)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
+  int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
   int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
   int         m_nSettingsWndW = 620;
   int         m_nSettingsWndH = 700;

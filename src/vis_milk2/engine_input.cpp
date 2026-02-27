@@ -444,6 +444,13 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           receivedMessage[messageLength] = L'\0';
         }
       }
+      // Capture for IPC monitor
+      {
+        SYSTEMTIME st; GetLocalTime(&st);
+        swprintf_s(g_szLastIPCTime, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+        wcsncpy_s(g_szLastIPCMessage, receivedMessage, _TRUNCATE);
+        g_lastIPCMessageSeq.fetch_add(1);
+      }
       LaunchMessage(receivedMessage);
       return 0;
     }
@@ -455,6 +462,12 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     // Forwarded from hidden IPC window thread — lParam is heap-allocated wchar_t*
     wchar_t* message = (wchar_t*)lParam;
     if (message) {
+      // Capture for IPC monitor
+      SYSTEMTIME st; GetLocalTime(&st);
+      swprintf_s(g_szLastIPCTime, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+      wcsncpy_s(g_szLastIPCMessage, message, _TRUNCATE);
+      g_lastIPCMessageSeq.fetch_add(1);
+
       LaunchMessage(message);
       free(message);
     }
