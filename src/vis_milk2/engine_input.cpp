@@ -401,6 +401,9 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
   case WM_MW_RESET_BUFFERS:
     ResetBufferAndFonts();
     return 0;
+  case WM_MW_RESTART_DEVICE:
+    m_bDeviceRecoveryPending = true;
+    return 0;
   case WM_MW_SPOUT_FIXEDSIZE:
     SetSpoutFixedSize(false, true);
     return 0;

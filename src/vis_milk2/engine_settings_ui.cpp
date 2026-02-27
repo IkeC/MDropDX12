@@ -531,7 +531,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
     if (id == IDC_MW_RESTART_RENDER && code == BN_CLICKED) {
       HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+      if (hw) PostMessage(hw, WM_MW_RESTART_DEVICE, 0, 0);
       return 0;
     }
 

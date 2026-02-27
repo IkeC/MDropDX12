@@ -1393,7 +1393,81 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 }
 
 
+// Full device teardown and recreation — used for TDR recovery and user-triggered restart.
+static void PerformDeviceRecovery() {
+  g_engine.m_bDeviceRecoveryPending = false;
+
+  HWND hwnd = g_engine.GetPluginWindow();
+  if (!hwnd) return;
+
+  RECT rc;
+  GetClientRect(hwnd, &rc);
+  int w = rc.right - rc.left;
+  int h = rc.bottom - rc.top;
+  if (w <= 0 || h <= 0) { w = 960; h = 540; }
+
+  mdropdx12.LogInfo(L"Device Recovery: Attempting full device recreation");
+  DebugLogA("Device Recovery: Beginning teardown and recreation");
+
+  // 1. Full plugin teardown (releases all GPU resources + DXContext)
+  g_engine.PluginQuit();
+
+  // 2. Release D3D12 device and command queue
+  DeinitD3d();
+
+  // 3. Brief pause to let the GPU/driver finish resetting
+  Sleep(500);
+
+  // 4. Recreate D3D12 device and command queue
+  InitD3d(hwnd, w, h);
+  if (!pD3DDevice || !pCommandQueue) {
+    mdropdx12.LogInfo(L"Device Recovery: InitD3d FAILED — cannot recover");
+    DebugLogA("Device Recovery: InitD3d FAILED");
+    return;
+  }
+
+  // 5. Reinitialize the plugin with the fresh device
+  int ok = g_engine.PluginInitialize(
+    pD3DDevice.Get(), pCommandQueue.Get(), pDXGIFactory.Get(),
+    hwnd, w, h);
+
+  if (!ok) {
+    mdropdx12.LogInfo(L"Device Recovery: PluginInitialize FAILED — cannot recover");
+    DebugLogA("Device Recovery: PluginInitialize FAILED");
+    return;
+  }
+
+  // 6. Force dimension sync (same as initial startup)
+  if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
+    GetClientRect(hwnd, &rc);
+    int actualW = rc.right - rc.left;
+    int actualH = rc.bottom - rc.top;
+    if (actualW > 0 && actualH > 0 &&
+        (actualW != g_engine.m_lpDX->m_client_width ||
+         actualH != g_engine.m_lpDX->m_client_height)) {
+      g_engine.OnUserResizeWindow();
+    }
+  }
+
+  // 7. Skip to next preset (the current one likely caused the crash)
+  g_engine.NextPreset(0.0f);
+
+  mdropdx12.LogInfo(L"Device Recovery: Device recreated successfully — skipped to next preset");
+  DebugLogA("Device Recovery: SUCCESS — device recreated, advanced to next preset");
+
+  wchar_t msg[256];
+  swprintf(msg, 256, L"Device recovered — skipped to next preset");
+  g_engine.AddError(msg, 8.0f, ERR_NOTIFY, true);
+}
+
 void RenderFrame() {
+
+  // Check for user-triggered device restart BEFORE rendering
+  // (avoids submitting commands to a doomed/crashed device)
+  if (g_engine.m_bDeviceRecoveryPending) {
+    PerformDeviceRecovery();
+    return;
+  }
 
   {
     std::unique_lock<std::mutex> lock(pcmMutex);
@@ -1485,69 +1559,7 @@ void RenderFrame() {
 
   // --- TDR Recovery: detect device-lost and attempt full device recreation ---
   if (g_engine.m_bDeviceRecoveryPending) {
-    g_engine.m_bDeviceRecoveryPending = false;
-
-    HWND hwnd = g_engine.GetPluginWindow();
-    if (!hwnd) return;
-
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int w = rc.right - rc.left;
-    int h = rc.bottom - rc.top;
-    if (w <= 0 || h <= 0) { w = 960; h = 540; }
-
-    mdropdx12.LogInfo(L"TDR Recovery: Device lost — attempting full device recreation");
-    DebugLogA("TDR Recovery: Beginning teardown and recreation");
-
-    // 1. Full plugin teardown (releases all GPU resources + DXContext)
-    g_engine.PluginQuit();
-
-    // 2. Release D3D12 device and command queue
-    DeinitD3d();
-
-    // 3. Brief pause to let the GPU/driver finish resetting
-    Sleep(500);
-
-    // 4. Recreate D3D12 device and command queue
-    InitD3d(hwnd, w, h);
-    if (!pD3DDevice || !pCommandQueue) {
-      mdropdx12.LogInfo(L"TDR Recovery: InitD3d FAILED — cannot recover");
-      DebugLogA("TDR Recovery: InitD3d FAILED");
-      return;
-    }
-
-    // 5. Reinitialize the plugin with the fresh device
-    int ok = g_engine.PluginInitialize(
-      pD3DDevice.Get(), pCommandQueue.Get(), pDXGIFactory.Get(),
-      hwnd, w, h);
-
-    if (!ok) {
-      mdropdx12.LogInfo(L"TDR Recovery: PluginInitialize FAILED — cannot recover");
-      DebugLogA("TDR Recovery: PluginInitialize FAILED");
-      return;
-    }
-
-    // 6. Force dimension sync (same as initial startup)
-    if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
-      GetClientRect(hwnd, &rc);
-      int actualW = rc.right - rc.left;
-      int actualH = rc.bottom - rc.top;
-      if (actualW > 0 && actualH > 0 &&
-          (actualW != g_engine.m_lpDX->m_client_width ||
-           actualH != g_engine.m_lpDX->m_client_height)) {
-        g_engine.OnUserResizeWindow();
-      }
-    }
-
-    // 7. Skip to next preset (the current one likely caused the TDR)
-    g_engine.NextPreset(0.0f);
-
-    mdropdx12.LogInfo(L"TDR Recovery: Device recreated successfully — skipped to next preset");
-    DebugLogA("TDR Recovery: SUCCESS — device recreated, advanced to next preset");
-
-    wchar_t msg[256];
-    swprintf(msg, 256, L"GPU recovered from TDR — skipped crashing preset");
-    g_engine.AddError(msg, 8.0f, ERR_NOTIFY, true);
+    PerformDeviceRecovery();
   }
 }
 

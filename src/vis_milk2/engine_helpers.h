@@ -247,3 +247,4 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_SPOUT_FIXEDSIZE   (WM_APP + 5)
 #define WM_MW_PUSH_MESSAGE      (WM_APP + 6)
 #define WM_MW_PRESET_CHANGED    (WM_APP + 7)
+#define WM_MW_RESTART_DEVICE    (WM_APP + 8)
