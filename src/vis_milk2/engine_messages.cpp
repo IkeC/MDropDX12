@@ -2752,33 +2752,81 @@ void Engine::GetSongTitle(wchar_t* szSongTitle, int nSize) {
 }
 
 // =========================================================
+// Per-frame Spout send (called from EngineShell::DoTime between ExecuteCommandList and Present)
+void Engine::SpoutSendFrame() {
+  if (!bSpoutOut) return;
+
+  // Lazy initialization: if Spout is enabled but not yet set up, open the sender
+  if (!m_bSpoutDX12Ready) {
+    if (!bInitialized && m_lpDX && m_lpDX->m_backbuffer_width > 0) {
+      OpenSender(m_lpDX->m_backbuffer_width, m_lpDX->m_backbuffer_height);
+    }
+    if (!m_bSpoutDX12Ready) return;
+  }
+
+  spoutsender.SendDX11Resource(m_pWrappedBackBuffers[m_lpDX->m_frameIndex]);
+}
+
 // SPOUT initialization function
-// Initializes OpenGL and a Spout sender
+// Initializes SpoutDX12 sender via D3D11On12 interop
 //
 bool Engine::OpenSender(unsigned int width, unsigned int height) {
   SpoutLogNotice("Engine::OpenSender(%d, %d)", width, height);
 
   // Close existing sender
-  if (bInitialized) spoutsender.ReleaseDX9sender();
-  bInitialized = false;
+  SpoutReleaseWraps();
+  if (bInitialized) {
+    spoutsender.CloseDirectX12();
+    bInitialized = false;
+  }
 
-  // SPOUT - DX9EX
-  // Set up for using the application DX9ex device.
-  // The sender shared texture is then created using this device.
-  // Only possible for DX9 mode.
-  spoutsender.SetDX9device((IDirect3DDevice9Ex*)GetDevice());  // Phase 1: GetDevice() returns nullptr; Spout disabled until Phase 5
+  if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandQueue) {
+    DebugLogA("Spout: OpenSender failed - no DX12 device/queue", LOG_ERROR);
+    return false;
+  }
 
   // Give the sender a name
   spoutsender.SetSenderName(WinampSenderName);
+
+  // Initialize SpoutDX12 with our DX12 device + command queue
+  if (!spoutsender.OpenDirectX12(m_lpDX->m_device.Get(),
+          reinterpret_cast<IUnknown**>(m_lpDX->m_commandQueue.GetAddressOf()))) {
+    DebugLogA("Spout: OpenDirectX12 failed", LOG_ERROR);
+    return false;
+  }
+
+  // Wrap each swap chain backbuffer for DX11 access
+  for (int n = 0; n < DXC_FRAME_COUNT; n++) {
+    if (!spoutsender.WrapDX12Resource(
+            m_lpDX->m_renderTargets[n].Get(),
+            &m_pWrappedBackBuffers[n],
+            D3D12_RESOURCE_STATE_RENDER_TARGET)) {
+      DebugLogA("Spout: WrapDX12Resource failed for backbuffer", LOG_ERROR);
+      SpoutReleaseWraps();
+      spoutsender.CloseDirectX12();
+      return false;
+    }
+  }
 
   g_Width = width;
   g_Height = height;
   bSpoutOut = true;
   bInitialized = true;
+  m_bSpoutDX12Ready = true;
+
+  DebugLogA("Spout: DX12 sender initialized successfully");
 
   return true;
 
 } // end OpenSender
+
+// Release wrapped DX12 backbuffers
+void Engine::SpoutReleaseWraps() {
+  for (auto& w : m_pWrappedBackBuffers) {
+    if (w) { w->Release(); w = nullptr; }
+  }
+  m_bSpoutDX12Ready = false;
+}
 
 void Engine::OpenMDropDX12Remote() {
   HWND hwnd = FindWindowW(NULL, L"MDropDX12 Remote");
@@ -2937,11 +2985,11 @@ int Engine::ToggleSpout() {
   }
   SetSpoutFixedSize(false, false);
 
-  if (bInitialized) {
-    spoutsender.ReleaseDX9sender();
+  if (bInitialized || m_bSpoutDX12Ready) {
+    SpoutReleaseWraps();
+    spoutsender.CloseDirectX12();
     bInitialized = false;
-    // Initialized next render frame
-    // milkdropfs.cpp - RenderFrame / OpenSender
+    // Re-initialized on next frame if bSpoutOut is true
   }
 
   ResetBufferAndFonts();
@@ -2967,19 +3015,12 @@ int Engine::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
         + std::to_wstring(nSpoutFixedHeight);
       AddNotification(msg.data());
     }
+    // DX12 TODO: Fixed-size Spout requires a separate render target + copy/scale.
+    // For now, Spout sends at window resolution regardless of fixed-size setting.
     ResetBufferAndFonts();
-
-    d3dPp.BackBufferWidth = nSpoutFixedWidth;
-    d3dPp.BackBufferHeight = nSpoutFixedHeight;
-    UpdateBackBufferTracking(d3dPp.BackBufferWidth, d3dPp.BackBufferHeight);
-    if (GetDevice()) GetDevice()->Reset(&d3dPp);
   }
   else {
     // bSpoutFixedSize OR bSpoutOut is false
-    // Update window properties
-    SetVariableBackBuffer(m_WindowWidth, m_WindowFixedHeight);
-    UpdateBackBufferTracking(d3dPp.BackBufferWidth, d3dPp.BackBufferHeight);
-    if (GetDevice()) GetDevice()->Reset(&d3dPp);
     if (toggleSwitch && showNotifications && bSpoutOut) {
       AddNotification(L"Fixed Spout output size disabled");
     }

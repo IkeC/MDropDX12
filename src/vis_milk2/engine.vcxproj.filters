@@ -20,7 +20,7 @@
     <Filter Include="library\ns-eel">
       <UniqueIdentifier>{ad60581f-f132-4b9d-86c6-2c543b5c59da}</UniqueIdentifier>
     </Filter>
-    <Filter Include="spoutDX9">
+    <Filter Include="Spout2">
       <UniqueIdentifier>{f96a24de-a941-4632-b3b9-924e81a488d3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -76,23 +76,29 @@
     <ClCompile Include="..\audio\audiobuf.cpp">
       <Filter>musikcube</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutCopy.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutDX9.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutFrameCount.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutSenderNames.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutSharedMemory.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="..\spoutDX9\SpoutUtils.cpp">
-      <Filter>spoutDX9</Filter>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp">
+      <Filter>Spout2</Filter>
     </ClCompile>
     <ClCompile Include="Milkdrop2PcmVisualizer.cpp">
       <Filter>library\sources</Filter>
@@ -180,26 +186,32 @@
     <ClInclude Include="AutoWide.h">
       <Filter>library\headers</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutCommon.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCommon.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutCopy.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutDX9.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutFrameCount.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutSenderNames.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutSharedMemory.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
-    <ClInclude Include="..\spoutDX9\SpoutUtils.h">
-      <Filter>spoutDX9</Filter>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.h">
+      <Filter>Spout2</Filter>
     </ClInclude>
     <ClInclude Include="..\ns-eel2\ns-eel.h">
       <Filter>library\ns-eel</Filter>

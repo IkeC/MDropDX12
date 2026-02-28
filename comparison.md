@@ -183,8 +183,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Spout texture output | ✅ | ✅ | ❌ |
-| Window-independent Spout resolution | ✅ | ✅ | ❌ |
+| Spout texture output | ✅ (DX12 via D3D11On12) | ✅ (DX9) | ❌ |
+| Window-independent Spout resolution | ❌ (planned) | ✅ | ❌ |
 
 ## GPU Protection
 

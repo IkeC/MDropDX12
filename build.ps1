@@ -42,7 +42,18 @@ Write-Host "Platform : $Platform"
 Write-Host "Target   : $Target"
 Write-Host ""
 
-# ── 3. Run the build ───────────────────────────────────────────────────────────
+# ── 3. Fetch Spout2 SDK if needed ─────────────────────────────────────────────
+$spoutDir = Join-Path $PSScriptRoot "external\Spout2"
+if (-not (Test-Path (Join-Path $spoutDir "SPOUTSDK"))) {
+    Write-Host "Fetching Spout2 SDK..."
+    & git clone --depth 1 https://github.com/leadedge/Spout2.git $spoutDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to clone Spout2 SDK."
+        exit 1
+    }
+}
+
+# ── 4. Run the build ───────────────────────────────────────────────────────────
 $project = Join-Path $PSScriptRoot "src\vis_milk2\engine.vcxproj"
 
 & $msbuild $project `

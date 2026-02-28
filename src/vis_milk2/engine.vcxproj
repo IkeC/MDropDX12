@@ -115,7 +115,7 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -139,7 +139,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
@@ -177,7 +177,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -200,7 +200,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -234,7 +234,7 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -258,7 +258,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
@@ -296,7 +296,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WIN64;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -319,7 +319,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -343,13 +343,15 @@
     <ClCompile Include="..\audio\log.cpp" />
     <ClCompile Include="..\audio\loopback-capture.cpp" />
     <ClCompile Include="..\audio\prefs.cpp" />
-    <!-- SpoutDX9: kept for Phase 1 link compatibility; Phase 5 TODO: replace with Spout2 DX12 sender -->
-    <ClCompile Include="..\spoutDX9\SpoutCopy.cpp" />
-    <ClCompile Include="..\spoutDX9\SpoutDX9.cpp" />
-    <ClCompile Include="..\spoutDX9\SpoutFrameCount.cpp" />
-    <ClCompile Include="..\spoutDX9\SpoutSenderNames.cpp" />
-    <ClCompile Include="..\spoutDX9\SpoutSharedMemory.cpp" />
-    <ClCompile Include="..\spoutDX9\SpoutUtils.cpp" />
+    <!-- Spout2 DX12 SDK (fetched by build.ps1 to external/Spout2/) -->
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp" />
     <ClCompile Include="AMDDetection.cpp" />
     <ClCompile Include="dx12pipeline.cpp" />
     <ClCompile Include="dxcontext.cpp" />
@@ -411,14 +413,16 @@
     <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />
     <ClInclude Include="..\ns-eel2\glue_x86_64_sse.h" />
     <ClInclude Include="..\ns-eel2\glue_x86.h" />
-    <!-- SpoutDX9 headers: kept for Phase 1; Phase 5 TODO: replace with Spout2 DX12 headers -->
-    <ClInclude Include="..\spoutDX9\SpoutCommon.h" />
-    <ClInclude Include="..\spoutDX9\SpoutCopy.h" />
-    <ClInclude Include="..\spoutDX9\SpoutDX9.h" />
-    <ClInclude Include="..\spoutDX9\SpoutFrameCount.h" />
-    <ClInclude Include="..\spoutDX9\SpoutSenderNames.h" />
-    <ClInclude Include="..\spoutDX9\SpoutSharedMemory.h" />
-    <ClInclude Include="..\spoutDX9\SpoutUtils.h" />
+    <!-- Spout2 DX12 SDK headers (fetched by build.ps1 to external/Spout2/) -->
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCommon.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.h" />
     <ClInclude Include="api.h" />
     <ClInclude Include="AutoCharFn.h" />
     <ClInclude Include="AutoWide.h" />

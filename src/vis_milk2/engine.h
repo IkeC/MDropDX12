@@ -32,7 +32,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // =========================================================
 // SPOUT
-#include "..\spoutDX9\SpoutDX9.h" // SpoutDX9 support class
+#include "SpoutDX12.h" // Spout2 DX12 support class (D3D11On12 interop)
 #include <io.h> // for file existence check
 // =========================================================
 
@@ -328,16 +328,17 @@ public:
 
 // =========================================================
 // SPOUT variables
-  spoutDX9 spoutsender;	// A spout DX9 sender object
+  spoutDX12 spoutsender;  // Spout DX12 sender (D3D11On12 interop)
 
   char WinampSenderName[256]; // The sender name
   bool bInitialized; // did it work ?
 
-  // Phase 1 DX9 compatibility stub. In Phase 1 the DX9 device is gone; d3dPp is kept
-  // as a struct so that code that reads BackBufferWidth/Height for sizing still compiles.
-  // Phase 2 TODO: replace with DXGI swap chain desc / resize logic.
-  D3DPRESENT_PARAMETERS d3dPp = {};
+  // Wrapped DX12 backbuffers for Spout DX11 send
+  ID3D11Resource* m_pWrappedBackBuffers[DXC_FRAME_COUNT] = {};
+  bool m_bSpoutDX12Ready = false; // SpoutDX12 initialized and wraps valid
+
   bool OpenSender(unsigned int width, unsigned int height);
+  void SpoutReleaseWraps(); // Release wrapped backbuffers and mark not ready
   void OpenMDropDX12Remote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
   void SetAMDFlag();
@@ -854,6 +855,7 @@ public:
   void		RunPerFrameEquations(int code);
   void		DrawUserSprites(int targetLayer = -1);  // -1 = all, 0 = behind text, 1 = on top
   void    DrawOnTopSprites() override { if (SpritesEnabled()) DrawUserSprites(1); }
+  void    SpoutSendFrame() override;
   void		MergeSortPresets(int left, int right);
   void		BuildMenus();
   void        SetMenusForPresetVersion(int WarpPSVersion, int CompPSVersion);

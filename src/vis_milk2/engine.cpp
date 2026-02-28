@@ -922,7 +922,6 @@ void Engine::MyPreInitialize() {
 // =========================================================
 // SPOUT initialisation
 //
-  spoutDX9 spoutsender;
 
   // Error logging to AppData
   // EnableSpoutLogFile("SpoutBeatdrop.log");
@@ -1707,8 +1706,8 @@ void Engine::CleanUpMyNonDx9Stuff() {
 // =========================================================
 // SPOUT cleanup on exit
 //
-  spoutsender.ReleaseDX9sender();
-  spoutsender.CloseDirectX9();
+  SpoutReleaseWraps();
+  spoutsender.CloseDirectX12();
 
   // If Spout output or DirectX mode has been changed, save the config file
   // so it is started in the selected mode the next time
@@ -2804,6 +2803,22 @@ int Engine::AllocateMyDX9Stuff() {
     CreateDX12PresetPSOs();
   }
 
+  // Re-wrap backbuffers for Spout if active (render targets were just recreated)
+  if (bSpoutOut && bInitialized && !m_bSpoutDX12Ready && m_lpDX) {
+    for (int n = 0; n < DXC_FRAME_COUNT; n++) {
+      if (!spoutsender.WrapDX12Resource(
+              m_lpDX->m_renderTargets[n].Get(),
+              &m_pWrappedBackBuffers[n],
+              D3D12_RESOURCE_STATE_RENDER_TARGET)) {
+        DebugLogA("Spout: Re-wrap failed after resize", LOG_ERROR);
+        SpoutReleaseWraps();
+        break;
+      }
+    }
+    if (m_pWrappedBackBuffers[0] && m_pWrappedBackBuffers[DXC_FRAME_COUNT - 1])
+      m_bSpoutDX12Ready = true;
+  }
+
   return true;
 }
 
@@ -2868,6 +2883,9 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   //   device, and then calls AllocateMyDX9Stuff afterwards.
 
 
+
+  // Release Spout wrapped backbuffers before render targets are destroyed
+  SpoutReleaseWraps();
 
   // One funky thing here: if we're switching between fullscreen and windowed,
   //  or doing any other thing that causes all this stuff to get reloaded in a second,
@@ -3266,9 +3284,9 @@ void Engine::MyRenderFn(int redraw) {
     // Prefer renderer/backbuffer size if the renderer uses a different internal resolution
     int targetW = clientW;
     int targetH = clientH;
-    if (g_engine.d3dPp.BackBufferWidth > 0 && g_engine.d3dPp.BackBufferHeight > 0) {
-      targetW = static_cast<int>(g_engine.d3dPp.BackBufferWidth);
-      targetH = static_cast<int>(g_engine.d3dPp.BackBufferHeight);
+    if (g_engine.m_lpDX && g_engine.m_lpDX->m_backbuffer_width > 0 && g_engine.m_lpDX->m_backbuffer_height > 0) {
+      targetW = g_engine.m_lpDX->m_backbuffer_width;
+      targetH = g_engine.m_lpDX->m_backbuffer_height;
     }
     else if (g_engine.m_WindowWidth > 0 && g_engine.m_WindowHeight > 0) {
       targetW = g_engine.m_WindowWidth;

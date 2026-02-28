@@ -22,6 +22,9 @@ vis_milk2/bin
 /packages
 enc_temp_folder/
 
+# External dependencies (fetched by build.ps1)
+/external/
+
 # Runtime-generated files
 *.log
 settings.ini
