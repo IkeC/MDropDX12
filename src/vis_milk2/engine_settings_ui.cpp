@@ -43,6 +43,20 @@ extern int ToggleFPSNumPressed;
 const wchar_t* SETTINGS_WND_CLASS = L"MDropDX12SettingsWnd";
 bool g_bSettingsWndClassRegistered = false;
 
+// Format sprite section name: [img00]-[img99] for backward compat, [img100]+ for extended
+static void FormatSpriteSection(wchar_t* buf, int bufSize, int index) {
+  if (index < 100)
+    swprintf(buf, bufSize, L"img%02d", index);
+  else
+    swprintf(buf, bufSize, L"img%d", index);
+}
+static void FormatSpriteSectionA(char* buf, int bufSize, int index) {
+  if (index < 100)
+    sprintf_s(buf, bufSize, "img%02d", index);
+  else
+    sprintf_s(buf, bufSize, "img%d", index);
+}
+
 void Engine::WriteRealtimeConfig() {
   // WritePrivateProfileIntW(m_bShowSongTitle, L"bShowSongTitle", GetConfigIniFile(), L"Settings");
   // WritePrivateProfileIntW(m_bShowSongTime, L"bShowSongTime", GetConfigIniFile(), L"Settings");
@@ -296,6 +310,338 @@ static LRESULT CALLBACK SettingsTabSubclassProc(
 // Try to convert an absolute path to a relative path (relative to content base or milkdrop2 dir).
 // If the file lives under one of those directories, returns the relative portion.
 // Otherwise returns the absolute path unchanged.
+//----------------------------------------------------------------------
+// Sprite Import Settings Dialog
+//----------------------------------------------------------------------
+struct SpriteImportDlgData {
+  Engine* plugin;
+  bool bResult;
+  bool bDone;
+  bool bReplace;     // true = replace all, false = add to existing
+  int  nMaxSprites;  // max to import
+  int  nBlendMode;
+  double x, y, sx, sy, rot;
+  double r, g, b, a;
+  HWND hDlgWnd;
+};
+
+static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  SpriteImportDlgData* data = (SpriteImportDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+  switch (msg) {
+  case WM_COMMAND: {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    if (code == BN_CLICKED) {
+      HWND hCtrl = (HWND)lParam;
+      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
+      if (bIsRadio) {
+        // Toggle radio group: Add vs Replace
+        HWND hAdd = GetDlgItem(hWnd, IDC_SPRIMP_MODE_ADD);
+        HWND hRep = GetDlgItem(hWnd, IDC_SPRIMP_MODE_REPLACE);
+        SetPropW(hAdd, L"Checked", (HANDLE)(intptr_t)(id == IDC_SPRIMP_MODE_ADD ? 1 : 0));
+        SetPropW(hRep, L"Checked", (HANDLE)(intptr_t)(id == IDC_SPRIMP_MODE_REPLACE ? 1 : 0));
+        InvalidateRect(hAdd, NULL, TRUE);
+        InvalidateRect(hRep, NULL, TRUE);
+        return 0;
+      }
+
+      if (id == IDC_SPRIMP_OK && data) {
+        wchar_t buf[64];
+        // Read max sprites
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_MAX_EDIT, buf, 64);
+        data->nMaxSprites = _wtoi(buf);
+        if (data->nMaxSprites < 1) data->nMaxSprites = 1;
+        // Read blend mode
+        int sel = (int)SendDlgItemMessageW(hWnd, IDC_SPRIMP_BLEND, CB_GETCURSEL, 0, 0);
+        data->nBlendMode = (sel == CB_ERR) ? 0 : sel;
+        // Read property values
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_X, buf, 64);   data->x  = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_Y, buf, 64);   data->y  = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_SX, buf, 64);  data->sx = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_SY, buf, 64);  data->sy = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_ROT, buf, 64); data->rot = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_R, buf, 64);   data->r  = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_G, buf, 64);   data->g  = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_B, buf, 64);   data->b  = _wtof(buf);
+        GetDlgItemTextW(hWnd, IDC_SPRIMP_A, buf, 64);   data->a  = _wtof(buf);
+        // Read radio state
+        data->bReplace = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_SPRIMP_MODE_REPLACE), L"Checked");
+        data->bResult = true;
+        data->bDone = true;
+        return 0;
+      }
+      if (id == IDC_SPRIMP_CANCEL && data) {
+        data->bResult = false;
+        data->bDone = true;
+        return 0;
+      }
+    }
+    break;
+  }
+
+  case WM_DRAWITEM: {
+    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
+      Engine* p = data->plugin;
+      bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
+      if (bIsRadio) {
+        DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+      } else {
+        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+      }
+      return TRUE;
+    }
+    break;
+  }
+
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
+      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
+      return (LRESULT)data->plugin->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_ERASEBKGND:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+      RECT rc; GetClientRect(hWnd, &rc);
+      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
+      FillRect((HDC)wParam, &rc, hBr);
+      DeleteObject(hBr);
+      return 1;
+    }
+    break;
+
+  case WM_CLOSE:
+    if (data) { data->bResult = false; data->bDone = true; }
+    return 0;
+
+  case WM_KEYDOWN:
+    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
+    if (wParam == VK_RETURN && data) {
+      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_SPRIMP_OK, BN_CLICKED), 0);
+      return 0;
+    }
+    break;
+  }
+  return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
+static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlgData& data) {
+  // Register window class (once)
+  static bool registered = false;
+  static const wchar_t* WND_CLASS = L"MDropDX12SprImp";
+  if (!registered) {
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = SpriteImportWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = WND_CLASS;
+    RegisterClassExW(&wc);
+    registered = true;
+  }
+
+  // Initialize defaults
+  data.plugin = plugin;
+  data.bResult = false;
+  data.bDone = false;
+  data.bReplace = false;
+  data.nMaxSprites = 100;
+  data.nBlendMode = 0;
+  data.x = 0.5; data.y = 0.5;
+  data.sx = 0.5; data.sy = 0.5;
+  data.rot = 0;
+  data.r = 1; data.g = 1; data.b = 1; data.a = 1;
+
+  // Create font for controls
+  HFONT hFont = CreateFontW(plugin->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  HFONT hFontBold = CreateFontW(plugin->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute line height
+  HDC hdcTmp = GetDC(hParent);
+  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
+  TEXTMETRIC tmDlg = {};
+  GetTextMetrics(hdcTmp, &tmDlg);
+  SelectObject(hdcTmp, hOldTmp);
+  ReleaseDC(hParent, hdcTmp);
+  int lineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  if (lineH < 20) lineH = 20;
+
+  // Scale dialog dimensions
+  int clientW = MulDiv(420, lineH, 20);
+  int clientH = MulDiv(380, lineH, 20);
+  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
+  RECT rcSize = { 0, 0, clientW, clientH };
+  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
+  int dlgW = rcSize.right - rcSize.left;
+  int dlgH = rcSize.bottom - rcSize.top;
+
+  // Center on parent monitor
+  RECT rcParent;
+  GetWindowRect(hParent, &rcParent);
+  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  GetMonitorInfo(hMon, &mi);
+  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
+  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
+  if (px < mi.rcWork.left) px = mi.rcWork.left;
+  if (py < mi.rcWork.top) py = mi.rcWork.top;
+  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
+  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
+
+  HWND hDlg = CreateWindowExW(dwExStyle, WND_CLASS, L"Import Sprites from Folder", dwStyle,
+    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
+  if (!hDlg) { DeleteObject(hFont); DeleteObject(hFontBold); return false; }
+
+  data.hDlgWnd = hDlg;
+  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
+
+  // Layout
+  int margin = MulDiv(12, lineH, 20);
+  int rw = clientW - margin * 2;
+  int y = MulDiv(10, lineH, 20);
+  int gap = 4;
+  int lblW = MulDiv(80, lineH, 20);
+  int editW = MulDiv(60, lineH, 20);
+  wchar_t buf[64];
+
+  // --- Import Mode ---
+  CreateLabel(hDlg, L"Import Mode:", margin, y, rw, lineH, hFontBold);
+  y += lineH + gap;
+  CreateRadio(hDlg, L"Add to existing sprites", IDC_SPRIMP_MODE_ADD, margin + 10, y, rw - 10, lineH, hFont, true, true);
+  y += lineH + 2;
+  CreateRadio(hDlg, L"Replace all sprites", IDC_SPRIMP_MODE_REPLACE, margin + 10, y, rw - 10, lineH, hFont, false);
+  y += lineH + gap + 4;
+
+  // --- Max sprites ---
+  CreateLabel(hDlg, L"Max sprites to import:", margin, y, MulDiv(150, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%d", data.nMaxSprites);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_MAX_EDIT, margin + MulDiv(155, lineH, 20), y, editW, lineH, hFont, ES_NUMBER);
+  y += lineH + gap + 6;
+
+  // --- Default Properties ---
+  CreateLabel(hDlg, L"Default Properties for Imported Sprites:", margin, y, rw, lineH, hFontBold);
+  y += lineH + gap + 2;
+
+  // Blend mode
+  int col1 = margin;
+  CreateLabel(hDlg, L"Blend:", col1, y, lblW, lineH, hFont);
+  HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
+    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+    col1 + lblW, y, MulDiv(120, lineH, 20), 200, hDlg, (HMENU)(INT_PTR)IDC_SPRIMP_BLEND,
+    GetModuleHandle(NULL), NULL);
+  if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
+  const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
+  for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
+  SendMessageW(hBlend, CB_SETCURSEL, data.nBlendMode, 0);
+  if (plugin->m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
+  y += lineH + gap;
+
+  // Position: X, Y
+  int col2 = col1 + lblW + editW + MulDiv(20, lineH, 20);
+  CreateLabel(hDlg, L"X:", col1, y, MulDiv(24, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.x);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_X, col1 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
+  CreateLabel(hDlg, L"Y:", col2, y, MulDiv(24, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.y);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_Y, col2 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
+  y += lineH + gap;
+
+  // Scale: SX, SY
+  CreateLabel(hDlg, L"SX:", col1, y, MulDiv(24, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.sx);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_SX, col1 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
+  CreateLabel(hDlg, L"SY:", col2, y, MulDiv(24, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.sy);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_SY, col2 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
+  y += lineH + gap;
+
+  // Rotation
+  CreateLabel(hDlg, L"Rot:", col1, y, MulDiv(30, lineH, 20), lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.rot);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_ROT, col1 + MulDiv(30, lineH, 20), y, editW, lineH, hFont);
+  y += lineH + gap;
+
+  // Color: R, G, B, A
+  int col3 = col1 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+  int col4 = col3 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+  int col5 = col4 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+  int smallLblW = MulDiv(18, lineH, 20);
+  CreateLabel(hDlg, L"R:", col1, y, smallLblW, lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.r);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_R, col1 + smallLblW, y, editW, lineH, hFont);
+  CreateLabel(hDlg, L"G:", col3, y, smallLblW, lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.g);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_G, col3 + smallLblW, y, editW, lineH, hFont);
+  CreateLabel(hDlg, L"B:", col4, y, smallLblW, lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.b);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_B, col4 + smallLblW, y, editW, lineH, hFont);
+  CreateLabel(hDlg, L"A:", col5, y, smallLblW, lineH, hFont);
+  swprintf(buf, 64, L"%.3g", data.a);
+  CreateEdit(hDlg, buf, IDC_SPRIMP_A, col5 + smallLblW, y, editW, lineH, hFont);
+  y += lineH + gap + 8;
+
+  // --- OK / Cancel ---
+  int btnW = MulDiv(80, lineH, 20);
+  int btnH = lineH + 4;
+  int btnGap = MulDiv(10, lineH, 20);
+  int btnX = clientW / 2 - btnW - btnGap / 2;
+  CreateBtn(hDlg, L"OK", IDC_SPRIMP_OK, btnX, y, btnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_SPRIMP_CANCEL, btnX + btnW + btnGap, y, btnW, btnH, hFont);
+
+  // Show dialog and make parent modal
+  ShowWindow(hDlg, SW_SHOW);
+  UpdateWindow(hDlg);
+  EnableWindow(hParent, FALSE);
+
+  // Local message loop
+  MSG msg2;
+  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
+      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
+      if (hNext) SetFocus(hNext);
+      continue;
+    }
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
+      data.bResult = false;
+      data.bDone = true;
+      break;
+    }
+    TranslateMessage(&msg2);
+    DispatchMessage(&msg2);
+  }
+
+  // Cleanup
+  EnableWindow(hParent, TRUE);
+  SetForegroundWindow(hParent);
+  DestroyWindow(hDlg);
+  if (hFont) DeleteObject(hFont);
+  if (hFontBold) DeleteObject(hFontBold);
+
+  return data.bResult;
+}
+
+//----------------------------------------------------------------------
+
 static std::wstring MakeRelativeSpritePath(const wchar_t* szAbsPath,
                                             const wchar_t* szContentBasePath,
                                             const wchar_t* szMilkdrop2Path) {
@@ -878,8 +1224,32 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (code == BN_CLICKED) {
       HWND hCtrl = (HWND)lParam;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
+      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
       bool bChecked;
-      if (bIsCheckbox) {
+      if (bIsRadio) {
+        // Radio buttons: uncheck siblings, check this one
+        static const int logRadioIDs[] = { IDC_MW_LOGLEVEL_OFF, IDC_MW_LOGLEVEL_ERROR, IDC_MW_LOGLEVEL_WARN, IDC_MW_LOGLEVEL_INFO, IDC_MW_LOGLEVEL_VERBOSE };
+        for (int rid : logRadioIDs) {
+          HWND hSib = GetDlgItem(hWnd, rid);
+          if (hSib) {
+            SetPropW(hSib, L"Checked", (HANDLE)(intptr_t)(hSib == hCtrl ? 1 : 0));
+            InvalidateRect(hSib, NULL, TRUE);
+          }
+        }
+        // Determine the selected log level and apply
+        int newLevel = 0;
+        switch (id) {
+          case IDC_MW_LOGLEVEL_OFF:     newLevel = 0; break;
+          case IDC_MW_LOGLEVEL_ERROR:   newLevel = 1; break;
+          case IDC_MW_LOGLEVEL_WARN:    newLevel = 2; break;
+          case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
+          case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
+        }
+        p->m_LogLevel = newLevel;
+        DebugLogSetLevel(newLevel);
+        WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      } else if (bIsCheckbox) {
         bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
         bChecked = !wasChecked;
         SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(bChecked ? 1 : 0));
@@ -1357,15 +1727,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         lstrcpyW(p->m_szRemoteWindowTitle, tbuf);
         return 0;
       }
-      case IDC_MW_DEBUG_LOG_LEVEL: {
-        int val = _wtoi(buf);
-        if (val < 0) val = 0;
-        if (val > 3) val = 3;
-        p->m_LogLevel = val;
-        DebugLogSetLevel(val);
-        WritePrivateProfileIntW(val, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
-        return 0;
-      }
       }
     }
 
@@ -1392,8 +1753,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
                 std::set<int> used;
                 for (auto& e : p->m_spriteEntries) used.insert(e.nIndex);
                 int newIdx = 0;
-                while (used.count(newIdx) && newIdx < 100) newIdx++;
-                if (newIdx < 100) {
+                while (used.count(newIdx) && newIdx < 100000) newIdx++;
+                if (newIdx < 100000) {
                   Engine::SpriteEntry entry = {};
                   entry.nIndex = newIdx;
                   // Convert to relative path when possible
@@ -1420,6 +1781,28 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
 
       case IDC_MW_SPR_IMPORT: {
+        // Show import settings dialog first
+        SpriteImportDlgData impData = {};
+        if (!ShowSpriteImportDialog(hWnd, p, impData)) {
+          // User cancelled
+          return 0;
+        }
+
+        // Build init code from dialog property values
+        char initBuf[512];
+        sprintf(initBuf, "blendmode = %d;\r\nx = %.6g; y = %.6g;\r\nsx = %.6g; sy = %.6g; rot = %.6g;\r\n"
+          "r = %.6g; g = %.6g; b = %.6g; a = %.6g;",
+          impData.nBlendMode, impData.x, impData.y, impData.sx, impData.sy, impData.rot,
+          impData.r, impData.g, impData.b, impData.a);
+        std::string defaultInitCode = initBuf;
+
+        // If replacing, clear existing entries
+        if (impData.bReplace) {
+          p->m_spriteEntries.clear();
+          p->m_nSpriteSelected = -1;
+        }
+
+        // Now open folder picker
         SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         IFileOpenDialog* pDlg = NULL;
         HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
@@ -1427,7 +1810,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
           DWORD options = 0;
           pDlg->GetOptions(&options);
           pDlg->SetOptions(options | FOS_PICKFOLDERS);
-          pDlg->SetTitle(L"Import Sprite Images from Folder");
+          pDlg->SetTitle(L"Select Folder to Import");
           if (SUCCEEDED(pDlg->Show(hWnd))) {
             IShellItem* pItem = NULL;
             if (SUCCEEDED(pDlg->GetResult(&pItem))) {
@@ -1438,27 +1821,29 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
                 const wchar_t* exts[] = { L"*.png", L"*.jpg", L"*.jpeg", L"*.bmp", L"*.tga", L"*.dds", L"*.gif" };
                 int added = 0;
+                int maxAdd = impData.nMaxSprites;
                 for (const wchar_t* ext : exts) {
+                  if (added >= maxAdd) break;
                   wchar_t searchPath[MAX_PATH];
                   swprintf(searchPath, MAX_PATH, L"%s\\%s", pFolder, ext);
                   WIN32_FIND_DATAW fd;
                   HANDLE hFind = FindFirstFileW(searchPath, &fd);
                   if (hFind != INVALID_HANDLE_VALUE) {
                     do {
+                      if (added >= maxAdd) break;
                       if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
                       int newIdx = 0;
-                      while (used.count(newIdx) && newIdx < 100) newIdx++;
-                      if (newIdx >= 100) break;
+                      while (used.count(newIdx) && newIdx < 100000) newIdx++;
+                      if (newIdx >= 100000) break;
 
                       Engine::SpriteEntry entry = {};
                       entry.nIndex = newIdx;
-                      // Build absolute path, then convert to relative when possible
                       wchar_t absPath[512];
                       swprintf(absPath, 512, L"%s\\%s", pFolder, fd.cFileName);
                       std::wstring relPath = MakeRelativeSpritePath(absPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
                       wcscpy_s(entry.szImg, relPath.c_str());
                       entry.nColorkey = 0;
-                      entry.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
+                      entry.szInitCode = defaultInitCode;
                       p->m_spriteEntries.push_back(entry);
                       used.insert(newIdx);
                       added++;
@@ -1466,7 +1851,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
                     FindClose(hFind);
                   }
                 }
-                if (added > 0) p->PopulateSpriteListView();
+                if (added > 0 || impData.bReplace) p->PopulateSpriteListView();
                 CoTaskMemFree(pFolder);
               }
               pItem->Release();
@@ -1496,7 +1881,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
           auto& entry = p->m_spriteEntries[p->m_nSpriteSelected];
           int sprNum = entry.nIndex;
-          { wchar_t dbg[1024]; swprintf(dbg, 1024, L"Sprites: Push [img%02d] img=%s", sprNum, entry.szImg); DebugLogW(dbg); }
+          { wchar_t dbg[1024]; wchar_t sec[64]; FormatSpriteSection(sec, 64, sprNum);
+            swprintf(dbg, 1024, L"Sprites: Push [%s] img=%s", sec, entry.szImg); DebugLogW(dbg, LOG_VERBOSE); }
           HWND hRender = p->GetPluginWindow();
           if (hRender) PostMessage(hRender, WM_MW_PUSH_SPRITE, sprNum, -1);
         }
@@ -1729,8 +2115,12 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
       if (pDIS && pDIS->CtlType == ODT_BUTTON) {
         bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+        bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
         if (bIsCheckbox) {
           DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+        } else if (bIsRadio) {
+          DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
             p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
         } else {
           DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
@@ -2669,25 +3059,21 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(8, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
-  // Debug Log Level spin box
+  // Debug Log Level radio buttons
   PAGE_CTRL(8, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
-    wchar_t logBuf[16];
-    swprintf(logBuf, 16, L"%d", m_LogLevel);
-    HWND hEdit = CreateEdit(hw, logBuf, IDC_MW_DEBUG_LOG_LEVEL, x + lw + 4, y, 40, lineH, hFont, ES_NUMBER, false);
-    PAGE_CTRL(8, hEdit);
-    HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
-      WS_CHILD | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
-      0, 0, 0, 0, hw, (HMENU)(INT_PTR)IDC_MW_DEBUG_LOG_LEVEL_SPIN,
-      GetModuleHandle(NULL), NULL);
-    if (hSpin) {
-      SendMessage(hSpin, UDM_SETBUDDY, (WPARAM)hEdit, 0);
-      SendMessage(hSpin, UDM_SETRANGE32, 0, 3); // 0=Off, 1=Error, 2=Info, 3=Verbose
-      SendMessage(hSpin, UDM_SETPOS32, 0, m_LogLevel);
-    }
-    PAGE_CTRL(8, hSpin);
+    int rx = x + lw + 4;
+    int rbw = 80;
+    PAGE_CTRL(8, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    rx += rbw;
+    PAGE_CTRL(8, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    rx += rbw;
+    PAGE_CTRL(8, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    rx += rbw;
+    PAGE_CTRL(8, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    rx += rbw;
+    PAGE_CTRL(8, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
-  PAGE_CTRL(8, CreateLabel(hw, L"0=Off  1=Error  2=Info  3=Verbose", x + lw + 50, y, rw - lw - 50, lineH, hFont, false));
 
   // ===== Remote tab (page 7) =====
   y = tabTop + 10;
@@ -3972,9 +4358,31 @@ void Engine::LoadSpritesFromINI() {
   m_spriteEntries.clear();
   m_nSpriteSelected = -1;
 
-  for (int i = 0; i < 100; i++) {
+  // Enumerate all sections to discover sprite entries (supports any index, not just 0-99)
+  std::vector<wchar_t> secBuf(32768);
+  DWORD len = GetPrivateProfileSectionNamesW(secBuf.data(), (DWORD)secBuf.size(), m_szImgIniFile);
+  if (len == 0) return;
+
+  // Collect all img* section indices
+  std::vector<int> indices;
+  const wchar_t* p = secBuf.data();
+  while (*p) {
+    if (wcsncmp(p, L"img", 3) == 0) {
+      const wchar_t* numPart = p + 3;
+      if (*numPart >= L'0' && *numPart <= L'9') {
+        int idx = _wtoi(numPart);
+        indices.push_back(idx);
+      }
+    }
+    p += wcslen(p) + 1;
+  }
+  std::sort(indices.begin(), indices.end());
+
+  for (int i : indices) {
+    // Try the exact section name that's in the file
+    // For backward compat: try both img%02d and img%d formats
     wchar_t section[64];
-    swprintf(section, 64, L"img%02d", i);
+    FormatSpriteSection(section, 64, i);
 
     wchar_t img[512] = {};
     GetPrivateProfileStringW(section, L"img", L"", img, 511, m_szImgIniFile);
@@ -3990,7 +4398,7 @@ void Engine::LoadSpritesFromINI() {
 
     // Read init_N and code_N lines (same pattern as LaunchSprite)
     char sectionA[64];
-    sprintf(sectionA, "img%02d", i);
+    FormatSpriteSectionA(sectionA, 64, i);
     char szTemp[8192];
 
     for (int pass = 0; pass < 2; pass++) {
@@ -4010,17 +4418,24 @@ void Engine::LoadSpritesFromINI() {
 }
 
 void Engine::SaveSpritesToINI() {
-  // Delete all [imgNN] sections first
-  for (int i = 0; i < 100; i++) {
-    wchar_t section[64];
-    swprintf(section, 64, L"img%02d", i);
-    WritePrivateProfileStringW(section, NULL, NULL, m_szImgIniFile);
+  // Delete all existing img* sections by scanning the INI
+  {
+    std::vector<wchar_t> secBuf(32768);
+    DWORD len = GetPrivateProfileSectionNamesW(secBuf.data(), (DWORD)secBuf.size(), m_szImgIniFile);
+    if (len > 0) {
+      const wchar_t* p = secBuf.data();
+      while (*p) {
+        if (wcsncmp(p, L"img", 3) == 0 && p[3] >= L'0' && p[3] <= L'9')
+          WritePrivateProfileStringW(p, NULL, NULL, m_szImgIniFile);
+        p += wcslen(p) + 1;
+      }
+    }
   }
 
   // Write current entries
   for (auto& e : m_spriteEntries) {
     wchar_t section[64];
-    swprintf(section, 64, L"img%02d", e.nIndex);
+    FormatSpriteSection(section, 64, e.nIndex);
 
     WritePrivateProfileStringW(section, L"img", e.szImg, m_szImgIniFile);
 
@@ -4032,7 +4447,7 @@ void Engine::SaveSpritesToINI() {
 
     // Write init_N / code_N lines
     char sectionA[64];
-    sprintf(sectionA, "img%02d", e.nIndex);
+    FormatSpriteSectionA(sectionA, 64, e.nIndex);
 
     auto writeLines = [&](const std::string& code, const char* prefix) {
       std::istringstream ss(code);
@@ -4132,7 +4547,7 @@ void Engine::PopulateSpriteListView() {
 
     // Insert item
     wchar_t numBuf[16];
-    swprintf(numBuf, 16, L"img%02d", e.nIndex);
+    FormatSpriteSection(numBuf, 16, e.nIndex);
     LVITEMW lvi = {};
     lvi.mask = LVIF_TEXT | LVIF_IMAGE;
     lvi.iItem = i;
@@ -4254,21 +4669,87 @@ void Engine::SaveCurrentSpriteProperties() {
   GetDlgItemTextW(hw, IDC_MW_SPR_COLORKEY, buf, 64);
   e.nColorkey = (unsigned int)wcstoul(buf, NULL, 16);
 
-  // Read init code from editor (preserve original code with custom variables/expressions)
+  // Rebuild init code from property fields so edits are always captured
   {
-    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SPR_INIT_CODE));
-    if (len > 0) {
-      std::vector<wchar_t> wbuf(len + 1);
-      GetDlgItemTextW(hw, IDC_MW_SPR_INIT_CODE, wbuf.data(), len + 1);
-      std::string narrow;
-      for (wchar_t wc : wbuf) {
-        if (wc == 0) break;
-        narrow += (char)wc;
+    char initBuf[4096];
+    wchar_t tmp[64];
+
+    // Read all property values from UI controls
+    GetDlgItemTextW(hw, IDC_MW_SPR_X, tmp, 64);    double x  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_Y, tmp, 64);    double y  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_SX, tmp, 64);   double sx = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_SY, tmp, 64);   double sy = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_ROT, tmp, 64);  double rot = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_R, tmp, 64);    double r  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_G, tmp, 64);    double g  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_B, tmp, 64);    double b  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_A, tmp, 64);    double a  = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_REPEATX, tmp, 64); double repeatx = _wtof(tmp);
+    GetDlgItemTextW(hw, IDC_MW_SPR_REPEATY, tmp, 64); double repeaty = _wtof(tmp);
+    int blend = (int)SendDlgItemMessageW(hw, IDC_MW_SPR_BLENDMODE, CB_GETCURSEL, 0, 0);
+    if (blend == CB_ERR) blend = 0;
+    bool flipx = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPX) == BST_CHECKED);
+    bool flipy = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPY) == BST_CHECKED);
+    bool burn  = (IsDlgButtonChecked(hw, IDC_MW_SPR_BURN)  == BST_CHECKED);
+
+    // Build init code from property values
+    sprintf(initBuf, "blendmode = %d;\r\nx = %.6g; y = %.6g;\r\nsx = %.6g; sy = %.6g; rot = %.6g;\r\n"
+      "r = %.6g; g = %.6g; b = %.6g; a = %.6g;",
+      blend, x, y, sx, sy, rot, r, g, b, a);
+
+    std::string code = initBuf;
+    if (flipx)              code += "\r\nflipx = 1;";
+    if (flipy)              code += "\r\nflipy = 1;";
+    if (burn)               code += "\r\nburn = 1;";
+    if (repeatx != 1.0)     { char rb[64]; sprintf(rb, "\r\nrepeatx = %.6g;", repeatx); code += rb; }
+    if (repeaty != 1.0)     { char rb[64]; sprintf(rb, "\r\nrepeaty = %.6g;", repeaty); code += rb; }
+
+    // Append any non-property lines from the init code editor (custom code the user added)
+    {
+      static const char* propNames[] = {
+        "blendmode", "x", "y", "sx", "sy", "rot",
+        "r", "g", "b", "a", "flipx", "flipy", "burn", "repeatx", "repeaty", NULL
+      };
+      int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SPR_INIT_CODE));
+      if (len > 0) {
+        std::vector<wchar_t> wbuf(len + 1);
+        GetDlgItemTextW(hw, IDC_MW_SPR_INIT_CODE, wbuf.data(), len + 1);
+        std::string editorCode;
+        for (wchar_t wc : wbuf) { if (wc == 0) break; editorCode += (char)wc; }
+
+        // Parse each line; keep lines that aren't simple property assignments
+        std::istringstream ss(editorCode);
+        std::string line;
+        while (std::getline(ss, line)) {
+          if (!line.empty() && line.back() == '\r') line.pop_back();
+          if (line.empty()) continue;
+          // Check if this line is a known property assignment
+          bool isProperty = false;
+          for (int i = 0; propNames[i]; i++) {
+            std::string pat1 = std::string(propNames[i]) + " =";
+            std::string pat2 = std::string(propNames[i]) + "=";
+            // Check if line starts with or contains this property as a standalone assignment
+            // Trim leading whitespace
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos) continue;
+            std::string trimmed = line.substr(start);
+            if (trimmed.compare(0, pat1.size(), pat1) == 0 || trimmed.compare(0, pat2.size(), pat2) == 0) {
+              isProperty = true;
+              break;
+            }
+          }
+          if (!isProperty) {
+            code += "\r\n";
+            code += line;
+          }
+        }
       }
-      e.szInitCode = narrow;
-    } else {
-      e.szInitCode.clear();
     }
+    e.szInitCode = code;
+
+    // Update the init code editor to reflect the rebuilt code
+    std::wstring wInit(code.begin(), code.end());
+    SetDlgItemTextW(hw, IDC_MW_SPR_INIT_CODE, wInit.c_str());
   }
 
   // Read per-frame code from editor

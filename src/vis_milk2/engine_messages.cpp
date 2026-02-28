@@ -2148,8 +2148,13 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   initcode[0] = 0;
   code[0] = 0;
   img[0] = 0;
-  swprintf(section, L"img%02d", nSpriteNum);
-  sprintf(sectionA, "img%02d", nSpriteNum);
+  if (nSpriteNum < 100) {
+    swprintf(section, L"img%02d", nSpriteNum);
+    sprintf(sectionA, "img%02d", nSpriteNum);
+  } else {
+    swprintf(section, L"img%d", nSpriteNum);
+    sprintf(sectionA, "img%d", nSpriteNum);
+  }
 
   // 1. read in image filename
   GetPrivateProfileStringW(section, L"img", L"", img, sizeof(img) - 1, m_szImgIniFile);
@@ -2160,7 +2165,7 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
     return false;
   }
 
-  { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): img=%s", nSpriteNum, img); DebugLogW(dbg); }
+  { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): img=%s", nSpriteNum, img); DebugLogW(dbg, LOG_VERBOSE); }
 
   if (img[1] != L':')// || img[2] != '\\')
   {
@@ -2177,7 +2182,7 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
     }
   }
   { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): resolved=%s exists=%d", nSpriteNum, img,
-            GetFileAttributesW(img) != INVALID_FILE_ATTRIBUTES); DebugLogW(dbg); }
+            GetFileAttributesW(img) != INVALID_FILE_ATTRIBUTES); DebugLogW(dbg, LOG_VERBOSE); }
 
   // 2. get color key
   //unsigned int ck_lo = (unsigned int)GetPrivateProfileInt(section, "colorkey_lo", 0x00000000, m_szImgIniFile);
@@ -2247,7 +2252,7 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   { wchar_t dbg[512]; swprintf(dbg, 512, L"LaunchSprite(%d): slot=%d ret=0x%X valid=%d pSurf=%p",
     nSpriteNum, nSlot, ret,
     m_texmgr.m_tex[nSlot].dx12Surface.IsValid() ? 1 : 0,
-    m_texmgr.m_tex[nSlot].pSurface); DebugLogW(dbg); }
+    m_texmgr.m_tex[nSlot].pSurface); DebugLogW(dbg, LOG_VERBOSE); }
 
   wchar_t buf[1024];
   switch (ret & TEXMGR_ERROR_MASK) {

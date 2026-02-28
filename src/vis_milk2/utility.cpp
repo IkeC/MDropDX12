@@ -798,7 +798,7 @@ void* GetTextResource(UINT id, int no_fallback) {
 static FILE* g_debugLogFile = nullptr;
 static CRITICAL_SECTION g_debugLogCS;
 static bool g_debugLogReady = false;
-static int g_debugLogLevel = LOG_INFO; // default: show errors + info
+static int g_debugLogLevel = LOG_INFO; // default: show errors + warnings + info
 
 void DebugLogInit(const wchar_t* baseDir) {
   InitializeCriticalSection(&g_debugLogCS);

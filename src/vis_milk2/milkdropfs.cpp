@@ -6037,7 +6037,7 @@ void mdrop::Engine::DrawUserSprites()	// from system memory, to back buffer.
       for (int i = 0; i < NUM_TEX; i++)
         if (m_texmgr.m_tex[i].dx12Surface.IsValid()) nActive++;
       if (nActive > 0) {
-        wchar_t dbg[256]; swprintf(dbg, 256, L"DrawUserSprites: %d active sprite(s)", nActive); DebugLogW(dbg);
+        wchar_t dbg[256]; swprintf(dbg, 256, L"DrawUserSprites: %d active sprite(s)", nActive); DebugLogW(dbg, LOG_VERBOSE);
         s_logCount++;
       }
     }

@@ -23,8 +23,9 @@
 // diagnostics can write to debug.log, not just OutputDebugString.
 #ifndef LOG_ERROR
 #define LOG_ERROR   1
-#define LOG_INFO    2
-#define LOG_VERBOSE 3
+#define LOG_WARN    2
+#define LOG_INFO    3
+#define LOG_VERBOSE 4
 #endif
 void DebugLogA(const char* msg, int level = LOG_INFO);
 
@@ -445,7 +446,7 @@ public:
             sprintf(dbg, "  Reflect [%u] %s  Name=%-25s reg=%u cnt=%u",
                     i, typeLabel, bindDesc.Name ? bindDesc.Name : "(null)",
                     bindDesc.BindPoint, bindDesc.BindCount);
-            DebugLogA(dbg);
+            DebugLogA(dbg, LOG_VERBOSE);
         }
 
         // Enumerate bound TEXTURE resources (not samplers) for SRV binding.

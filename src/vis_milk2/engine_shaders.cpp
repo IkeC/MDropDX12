@@ -365,7 +365,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             if (!found) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
-              g_engine.dumpmsg(buf);
+              g_engine.dumpmsg(buf, LOG_WARN);
               {
                 char dbg[512];
                 sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
@@ -456,7 +456,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             if (!x.texptr) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
-              g_engine.dumpmsg(buf);
+              g_engine.dumpmsg(buf, LOG_WARN);
               if (bHardErrors)
                 MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
@@ -1042,7 +1042,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     if (!p) {
       wchar_t temp[512];
       swprintf(temp, wasabiApiLangString(IDS_ERROR_PARSING_X_X_SHADER), szProfile, szWhichShader);
-      dumpmsg(temp);
+      dumpmsg(temp, LOG_WARN);
       AddError(temp, 8.0f, ERR_PRESET, true);
       return false;
     }
@@ -1075,7 +1075,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   wchar_t tempBuffer[32768]; // Ensure the buffer size is sufficient for the content.
   wcsncpy(tempBuffer, wideShaderText.c_str(), 32767); // Copy the content safely.
   tempBuffer[32767] = L'\0'; // Null-terminate to avoid overflow.
-  dumpmsg(tempBuffer); // Pass the non-const buffer to dumpmsg.
+  dumpmsg(tempBuffer, LOG_VERBOSE); // Full shader text — only at verbose level
 
   DebugLogA("DX12: LoadShaderFromMemory: after dumpmsg, computing checksum...", LOG_VERBOSE);
 
@@ -1162,7 +1162,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         const char* errorMsg = (const char*)m_pShaderCompileErrors->GetBufferPointer();
         // Convert to wide string
         MultiByteToWideChar(CP_ACP, 0, errorMsg, -1, wideErrorMsg, _countof(wideErrorMsg));
-        dumpmsg(wideErrorMsg);
+        dumpmsg(wideErrorMsg, LOG_WARN);
 
         SafeRelease(m_pShaderCompileErrors);
         AddNotification(wideErrorMsg);

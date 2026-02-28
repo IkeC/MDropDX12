@@ -3480,6 +3480,99 @@ void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORRE
   }
 }
 
+HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup, bool visible) {
+  DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | (visible ? WS_VISIBLE : 0);
+  if (firstInGroup) style |= WS_GROUP;
+  HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw) {
+    if (hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetPropW(hw, L"IsRadio", (HANDLE)(intptr_t)1);
+    SetPropW(hw, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
+  }
+  return hw;
+}
+
+void DrawOwnerRadio(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText) {
+  HDC hdc = pDIS->hDC;
+  RECT rc = pDIS->rcItem;
+  bool bChecked = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"Checked");
+  bool bFocused = (pDIS->itemState & ODS_FOCUS) != 0;
+
+  // Fill entire background
+  HBRUSH hBrBg = CreateSolidBrush(bDark ? colBg : GetSysColor(COLOR_BTNFACE));
+  FillRect(hdc, &rc, hBrBg);
+  DeleteObject(hBrBg);
+
+  // Draw radio circle indicator, scaled to control height
+  int ctrlH = rc.bottom - rc.top;
+  int circSize = max(ctrlH / 2, 11);
+  int circY = rc.top + (ctrlH - circSize) / 2;
+  int cx = rc.left + 1 + circSize / 2;
+  int cy = circY + circSize / 2;
+  int r = circSize / 2;
+
+  if (bDark) {
+    // Draw circle background
+    HBRUSH hBrCirc = CreateSolidBrush(colCtrlBg);
+    HBRUSH hBrBorderBr = CreateSolidBrush(bFocused ? RGB(100, 150, 220) : colBorder);
+    HPEN hPenBorder = CreatePen(PS_SOLID, 1, bFocused ? RGB(100, 150, 220) : colBorder);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPenBorder);
+    HBRUSH hOldBr = (HBRUSH)SelectObject(hdc, hBrCirc);
+    Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+    SelectObject(hdc, hOldBr);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hBrCirc);
+    DeleteObject(hBrBorderBr);
+    DeleteObject(hPenBorder);
+  } else {
+    RECT rcRadio = { cx - r, cy - r, cx + r, cy + r };
+    DrawFrameControl(hdc, &rcRadio, DFC_BUTTON, DFCS_BUTTONRADIO | (bChecked ? DFCS_CHECKED : 0));
+    // Draw text for light mode and return
+    RECT rcText = { rc.left + 1 + circSize + 4, rc.top, rc.right, rc.bottom };
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+    HFONT hFont = (HFONT)SendMessage(pDIS->hwndItem, WM_GETFONT, 0, 0);
+    HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+    wchar_t szText[128] = {};
+    GetWindowTextW(pDIS->hwndItem, szText, 128);
+    DrawTextW(hdc, szText, -1, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    if (hOld) SelectObject(hdc, hOld);
+    return;
+  }
+
+  // Draw filled dot in dark mode when selected
+  if (bChecked) {
+    int dotR = max(r / 2, 2);
+    HBRUSH hBrDot = CreateSolidBrush(colText);
+    HPEN hPenDot = CreatePen(PS_SOLID, 1, colText);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPenDot);
+    HBRUSH hOldBr = (HBRUSH)SelectObject(hdc, hBrDot);
+    Ellipse(hdc, cx - dotR, cy - dotR, cx + dotR, cy + dotR);
+    SelectObject(hdc, hOldBr);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hBrDot);
+    DeleteObject(hPenDot);
+  }
+
+  // Draw text
+  RECT rcText = { rc.left + 1 + circSize + 4, rc.top, rc.right, rc.bottom };
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, colText);
+  HFONT hFont = (HFONT)SendMessage(pDIS->hwndItem, WM_GETFONT, 0, 0);
+  HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+  wchar_t szText[128] = {};
+  GetWindowTextW(pDIS->hwndItem, szText, 128);
+  DrawTextW(hdc, szText, -1, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  if (hOldFont) SelectObject(hdc, hOldFont);
+
+  if (bFocused) {
+    RECT rcFocus = rc;
+    InflateRect(&rcFocus, -1, -1);
+    DrawFocusRect(hdc, &rcFocus);
+  }
+}
+
 HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible) {
   DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | (visible ? WS_VISIBLE : 0);
   HWND hw = CreateWindowExW(0, L"BUTTON", text, style,

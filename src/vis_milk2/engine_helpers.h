@@ -51,8 +51,10 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename);
 HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont, bool visible = true);
 HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0, bool visible = true);
 HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true);
+HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup = false, bool visible = true);
 HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true);
 void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
+void DrawOwnerRadio(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
 void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised);
 void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBtnFace, COLORREF colBtnHi, COLORREF colBtnShadow, COLORREF colText);
 
@@ -216,8 +218,11 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IPC_MSG_TEXT         2128  // Read-only Edit: message content
 #define IDC_MW_IPC_CAPTURE          2129  // Button: Save Screenshot
 #define IDC_MW_SPRITES_MESSAGES     2130  // ComboBox: Messages/Sprites mode (General tab)
-#define IDC_MW_DEBUG_LOG_LEVEL      2131  // Edit: Debug Log Level (0-3)
-#define IDC_MW_DEBUG_LOG_LEVEL_SPIN 2132  // UpDown spinner for log level
+#define IDC_MW_LOGLEVEL_OFF         2131  // Radio: Log Level Off
+#define IDC_MW_LOGLEVEL_ERROR       2132  // Radio: Log Level Error
+#define IDC_MW_LOGLEVEL_WARN        2140  // Radio: Log Level Warn
+#define IDC_MW_LOGLEVEL_INFO        2141  // Radio: Log Level Info
+#define IDC_MW_LOGLEVEL_VERBOSE     2142  // Radio: Log Level Verbose
 #define IDC_MW_MSG_SHOW_MESSAGES   2133  // Checkbox: Enable Messages (Messages tab)
 #define IDC_MW_MSG_SHOW_SPRITES    2134  // Checkbox: Enable Sprites (Messages tab)
 #define IDC_MW_CONTENT_BASE_LABEL  2135  // Label: Content Base Path (Files tab)
@@ -303,6 +308,23 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPR_FRAME_CODE   5031
 #define IDC_MW_SPR_KILLALL      5036
 #define IDC_MW_SPR_DEFAULTS     5037
+
+// Sprite Import dialog control IDs
+#define IDC_SPRIMP_MODE_ADD       5100
+#define IDC_SPRIMP_MODE_REPLACE   5101
+#define IDC_SPRIMP_MAX_EDIT       5102
+#define IDC_SPRIMP_BLEND          5103
+#define IDC_SPRIMP_X              5104
+#define IDC_SPRIMP_Y              5105
+#define IDC_SPRIMP_SX             5106
+#define IDC_SPRIMP_SY             5107
+#define IDC_SPRIMP_ROT            5108
+#define IDC_SPRIMP_R              5109
+#define IDC_SPRIMP_G              5110
+#define IDC_SPRIMP_B              5111
+#define IDC_SPRIMP_A              5112
+#define IDC_SPRIMP_OK             5120
+#define IDC_SPRIMP_CANCEL         5121
 
 // Settings page count
 #define SETTINGS_NUM_PAGES      9

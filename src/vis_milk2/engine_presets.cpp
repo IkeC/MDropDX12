@@ -37,8 +37,8 @@ extern CRITICAL_SECTION g_cs;
 // Forward declaration for helper defined later in this file
 // (non-static because also called from engine.cpp and engine_input.cpp)
 
-void Engine::dumpmsg(wchar_t* s) {
-  DebugLogW(s);
+void Engine::dumpmsg(wchar_t* s, int level) {
+  DebugLogW(s, level);
 }
 
 void Engine::PrevPreset(float fBlendTime) {
@@ -1609,7 +1609,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       // This leaks a small amount of bytecode — acceptable for rare slow-shader cases.
       m_NewShaders.warp.ptr = NULL; m_NewShaders.warp.CT = NULL; m_NewShaders.warp.bytecodeBlob = NULL;
       m_NewShaders.comp.ptr = NULL; m_NewShaders.comp.CT = NULL; m_NewShaders.comp.bytecodeBlob = NULL;
-      DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)", LOG_ERROR);
+      DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)", LOG_WARN);
     } else {
       m_presetLoadThread.join();
     }

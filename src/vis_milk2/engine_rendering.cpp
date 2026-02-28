@@ -285,7 +285,7 @@ void Engine::AddNotificationAudioDevice() {
 }
 
 void Engine::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold) {
-  DebugLogW(szMsg);
+  DebugLogW(szMsg, LOG_WARN);
   if (category == ERR_NOTIFY)
     ClearErrors(category);
 

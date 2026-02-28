@@ -507,7 +507,7 @@ public:
   bool    m_ShaderCaching = true;
   bool    m_ShaderPrecompileOnStartup = true;
   bool    m_CheckDirectXOnStartup = true;
-  int     m_LogLevel = 1; // 0 = Off, 1 = Error, 2 = Info, 3 = Verbose
+  int     m_LogLevel = 1; // 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose
   bool    m_ShowLockSymbol = true;
   float   m_fAnimTime;
   float   m_fStartTime;
@@ -768,7 +768,7 @@ public:
   void        LoadCustomWavePerFrameEvallibVars(CState* pState, int i);
   void        LoadCustomShapePerFrameEvallibVars(CState* pState, int i, int instance);
   void        WriteRealtimeConfig();	// called on Finish()
-  void        dumpmsg(wchar_t* s);
+  void        dumpmsg(wchar_t* s, int level = LOG_INFO);
   void        Randomize();
   void        LoadRandomPreset(float fBlendTime);
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
@@ -866,7 +866,7 @@ public:
 
   // Sprites tab (page 6)
   struct SpriteEntry {
-    int          nIndex;           // [imgNN] number (0-99)
+    int          nIndex;           // [imgNN] number (0-99999)
     wchar_t      szImg[512];       // img= path
     unsigned int nColorkey;        // colorkey hex value
     std::string  szInitCode;       // init_N lines joined with \n

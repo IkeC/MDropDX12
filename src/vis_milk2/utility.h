@@ -91,10 +91,11 @@ intptr_t myOpenURL(HWND hwnd, wchar_t* loc);
 
 // Debug log — writes timestamped messages to debug.log in the base directory.
 // DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
-// Log levels: 0=Off, 1=Error, 2=Info (default), 3=Verbose
+// Log levels: 0=Off, 1=Error, 2=Warn, 3=Info (default), 4=Verbose
 #define LOG_ERROR   1
-#define LOG_INFO    2
-#define LOG_VERBOSE 3
+#define LOG_WARN    2
+#define LOG_INFO    3
+#define LOG_VERBOSE 4
 
 void DebugLogInit(const wchar_t* baseDir);
 void DebugLogSetLevel(int level);
