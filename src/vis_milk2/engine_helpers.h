@@ -203,6 +203,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_GPU_HEAVY_THRESHOLD  2104
 #define IDC_MW_GPU_RELOAD_PRESET    2105
 #define IDC_MW_RESTART_RENDER       2106
+#define IDC_MW_VSYNC_ENABLED        2107
 
 // Remote tab control IDs
 #define IDC_MW_IPC_TITLE            2120  // Edit: Window Title

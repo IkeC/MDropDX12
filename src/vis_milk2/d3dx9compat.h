@@ -21,7 +21,11 @@
 
 // Forward-declare logging helper (defined in utility.cpp) so reflection
 // diagnostics can write to debug.log, not just OutputDebugString.
+#ifdef _DEBUG
 void DebugLogA(const char* msg);
+#else
+#define DebugLogA(msg) ((void)0)
+#endif
 
 #include <d3d9.h>    // IDirect3DDevice9, D3DFORMAT, D3DFVF_*, D3DCOLOR, D3DMATRIX, etc.
 #include <d3dcompiler.h> // D3DCompile, D3DReflect

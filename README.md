@@ -4,6 +4,8 @@
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
+![VSync off — 630 FPS](resources/screenshots/vsync-off-630fps.png)
+
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay

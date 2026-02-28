@@ -216,7 +216,7 @@ void COverlayThread::CreateDIB(UINT w, UINT h) {
     // Create font: DPI-adjusted, matching help texture pattern
     int dpiY = GetDeviceCaps(m_hMemDC, LOGPIXELSY);
     if (dpiY <= 0) dpiY = 96;
-    int fontSize = max(14, (int)h / 50);
+    int fontSize = max(20, (int)h / 32);
     int fontRequest = MulDiv(fontSize, 96, dpiY);
 
     m_hFont = CreateFontW(

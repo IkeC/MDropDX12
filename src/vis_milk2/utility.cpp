@@ -795,6 +795,7 @@ void* GetTextResource(UINT id, int no_fallback) {
 // Debug log — writes timestamped messages to debug.log in the base directory.
 // DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
 // ---------------------------------------------------------------------------
+#ifdef _DEBUG
 static FILE* g_debugLogFile = nullptr;
 static CRITICAL_SECTION g_debugLogCS;
 static bool g_debugLogReady = false;
@@ -856,3 +857,4 @@ void DebugLogA(const char* msg) {
   MultiByteToWideChar(CP_ACP, 0, msg, -1, buf, 2048);
   DebugLogW(buf);
 }
+#endif // _DEBUG

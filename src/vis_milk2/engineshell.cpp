@@ -827,6 +827,8 @@ int EngineShell::InitDirectX(
     return FALSE;
   }
 
+  m_lpDX->m_pVSync = &m_bEnableVSync;
+
   DXCONTEXT_PARAMS params;
   StuffParams(&params);
   m_lpDX->StartOrRestartDevice(&params);

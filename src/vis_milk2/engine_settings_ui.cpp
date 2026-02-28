@@ -584,6 +584,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), L"1920");
       SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, BST_UNCHECKED, 0);
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), L"4096");
+      p->m_bEnableVSync = true;
+      SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, BST_CHECKED, 0);
       // Apply side-effects
       HWND hw = p->GetPluginWindow();
       if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
@@ -854,6 +856,9 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       case IDC_MW_GPU_SKIP_HEAVY:
         p->m_bSkipHeavyPresets = bChecked;
+        return 0;
+      case IDC_MW_VSYNC_ENABLED:
+        p->m_bEnableVSync = bChecked;
         return 0;
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
@@ -1870,6 +1875,9 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
 
+  PAGE_CTRL(1, CreateCheck(hw, L"Enable VSync", IDC_MW_VSYNC_ENABLED, x, y, rw, lineH, hFont, m_bEnableVSync, false));
+  y += lineH + gap + 4;
+
   PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
   PAGE_CTRL(1, CreateBtn(hw, L"Restart Render", IDC_MW_RESTART_RENDER, x + MulDiv(120, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont));
 
@@ -2474,6 +2482,7 @@ void Engine::UpdateVisualUI(HWND hWnd) {
   SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
   swprintf(buf, 32, L"%d", m_nHeavyPresetMaxInstances);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), buf);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, m_bEnableVSync ? BST_CHECKED : BST_UNCHECKED, 0);
   HWND hw = GetPluginWindow();
   if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
   if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);

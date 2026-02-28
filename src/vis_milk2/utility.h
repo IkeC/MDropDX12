@@ -91,8 +91,14 @@ intptr_t myOpenURL(HWND hwnd, wchar_t* loc);
 
 // Debug log — writes timestamped messages to debug.log in the base directory.
 // DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
+#ifdef _DEBUG
 void DebugLogInit(const wchar_t* baseDir);
 void DebugLogW(const wchar_t* msg);
 void DebugLogA(const char* msg);
+#else
+#define DebugLogInit(baseDir) ((void)0)
+#define DebugLogW(msg) ((void)0)
+#define DebugLogA(msg) ((void)0)
+#endif
 
 #endif

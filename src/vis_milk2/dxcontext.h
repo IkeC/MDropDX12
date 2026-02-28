@@ -263,6 +263,9 @@ public:
   UINT64              m_fenceValues[DXC_FRAME_COUNT];
   HANDLE              m_fenceEvent;
 
+  bool  m_tearingSupported = false;
+  bool* m_pVSync = nullptr;  // points to engine's m_bEnableVSync
+
 protected:
   HWND    m_hwnd;
   wchar_t m_szIniFile[MAX_PATH];

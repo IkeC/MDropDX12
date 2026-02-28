@@ -182,6 +182,7 @@ protected:
   int          m_allow_page_tearing_w;    // 0 or 1
   int          m_allow_page_tearing_fs;   // 0 or 1
   int          m_allow_page_tearing_dm;   // 0 or 1
+  bool         m_bEnableVSync = true;     // DX12 VSync toggle (default ON)
   int          m_minimize_winamp;         // 0 or 1
   int          m_desktop_show_icons;      // 0 or 1
   int          m_desktop_textlabel_boxes; // 0 or 1

@@ -142,7 +142,18 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
         m_samplerDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     }
 
-    // 2. Swap chain
+    // 2. Check tearing support
+    {
+        ComPtr<IDXGIFactory5> factory5;
+        if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory5)))) {
+            BOOL allowTearing = FALSE;
+            if (SUCCEEDED(factory5->CheckFeatureSupport(
+                    DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing))))
+                m_tearingSupported = (allowTearing != FALSE);
+        }
+    }
+
+    // 3. Swap chain
     {
         DXGI_SWAP_CHAIN_DESC1 scDesc = {};
         scDesc.Width              = (UINT)width;
@@ -156,7 +167,7 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
         scDesc.Scaling            = DXGI_SCALING_STRETCH;
         scDesc.SwapEffect         = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         scDesc.AlphaMode          = DXGI_ALPHA_MODE_UNSPECIFIED;
-        scDesc.Flags              = 0;
+        scDesc.Flags              = m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
         ComPtr<IDXGISwapChain1> swapChain1;
         hr = factory->CreateSwapChainForHwnd(
@@ -374,9 +385,11 @@ void DXContext::EndFrame()
 {
     if (!m_ready) return;
 
-    // Present (vsync = 1 sync interval)
-    // Back buffer was transitioned to PRESENT state in ExecuteCommandList().
-    HRESULT hrPresent = m_swapChain->Present(1, 0);
+    // Present: respect VSync setting; use tearing flag when VSync is off.
+    bool vsync = m_pVSync ? *m_pVSync : true;
+    UINT syncInterval = vsync ? 1 : 0;
+    UINT presentFlags = (!vsync && m_tearingSupported) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    HRESULT hrPresent = m_swapChain->Present(syncInterval, presentFlags);
     if (FAILED(hrPresent)) {
         char buf[256];
         sprintf(buf, "DX12: Present FAILED hr=0x%08X", (unsigned)hrPresent);
