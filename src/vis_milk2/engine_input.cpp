@@ -434,8 +434,9 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
   case WM_MW_IPC_MESSAGE:
   {
-    // Forwarded from hidden IPC window thread — lParam is heap-allocated wchar_t*
+    // Forwarded from IPC window thread — lParam is heap-allocated wchar_t*, wParam is dwData
     wchar_t* message = (wchar_t*)lParam;
+    DWORD_PTR dwData = (DWORD_PTR)wParam;
     if (message) {
       // Capture for IPC monitor
       SYSTEMTIME st; GetLocalTime(&st);
@@ -443,7 +444,10 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       wcsncpy_s(g_szLastIPCMessage, message, _TRUNCATE);
       g_lastIPCMessageSeq.fetch_add(1);
 
-      LaunchMessage(message);
+      if (dwData == 1) {
+        LaunchMessage(message);
+      }
+      // Future: handle other dwData values (e.g., WM_SETSPOUTSENDER)
       free(message);
     }
     return 0;

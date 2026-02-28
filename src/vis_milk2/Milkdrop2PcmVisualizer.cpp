@@ -260,38 +260,48 @@ static LRESULT CALLBACK IPCWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
   case WM_COPYDATA:
   {
     PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
-    if (pCopyData->dwData == 1) {
-      size_t cbData = pCopyData->cbData;
-      size_t messageLength = cbData / sizeof(wchar_t);
-      if (messageLength == 0)
-        return TRUE;
+    size_t cbData = pCopyData->cbData;
+    size_t messageLength = cbData / sizeof(wchar_t);
+    if (messageLength == 0)
+      return TRUE;
 
-      // Copy message to heap (WM_COPYDATA buffer is only valid during SendMessage)
-      wchar_t* copy = (wchar_t*)malloc((messageLength + 1) * sizeof(wchar_t));
-      if (!copy)
-        return TRUE;
-      memcpy(copy, pCopyData->lpData, cbData);
-      copy[messageLength] = L'\0';  // ensure null-terminated
+    // Copy message to heap (WM_COPYDATA buffer is only valid during SendMessage)
+    wchar_t* copy = (wchar_t*)malloc((messageLength + 1) * sizeof(wchar_t));
+    if (!copy)
+      return TRUE;
+    memcpy(copy, pCopyData->lpData, cbData);
+    copy[messageLength] = L'\0';  // ensure null-terminated
 
-      // Post to render window — render thread will call LaunchMessage and free the buffer
-      HWND hRender = g_hRenderWindow.load();
-      if (hRender && IsWindow(hRender)) {
-        if (!PostMessage(hRender, WM_MW_IPC_MESSAGE, 0, (LPARAM)copy)) {
-          free(copy);  // PostMessage failed (window closing?)
-        }
+    // Post to render window — render thread will call LaunchMessage and free the buffer
+    // Pass dwData as WPARAM so render thread knows the message type
+    HWND hRender = g_hRenderWindow.load();
+    if (hRender && IsWindow(hRender)) {
+      if (!PostMessage(hRender, WM_MW_IPC_MESSAGE, (WPARAM)pCopyData->dwData, (LPARAM)copy)) {
+        free(copy);  // PostMessage failed (window closing?)
       }
-      else {
-        free(copy);  // render window not ready yet
-      }
-      return TRUE;  // message handled — unblocks sender immediately
     }
-    break;
+    else {
+      free(copy);  // render window not ready yet
+    }
+    return TRUE;  // message handled — unblocks sender immediately
   }
   case WM_DESTROY:
     PostQuitMessage(0);
     return 0;
+  default:
+    // Forward WM_APP+ messages from Milkwave Remote to the render window
+    if (uMsg >= WM_APP) {
+      HWND hRender = g_hRenderWindow.load();
+      if (hRender && IsWindow(hRender))
+        PostMessage(hRender, uMsg, wParam, lParam);
+      return 0;
+    }
+    break;
   }
-  return DefWindowProc(hWnd, uMsg, wParam, lParam);
+  // Must use DefWindowProcW — class is registered with RegisterClassW, so WM_NCCREATE
+  // passes wide strings. DefWindowProc resolves to DefWindowProcA in this _MBCS project,
+  // which truncates wide titles at the first 0x00 byte (e.g., "Milkwave Visualizer" → "M").
+  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
 static unsigned __stdcall IPCWindowThread(void* data) {
@@ -307,13 +317,17 @@ static unsigned __stdcall IPCWindowThread(void* data) {
       return 0;
   }
 
-  // Create hidden window with the configured discoverable title
+  // Build IPC window title — local copy, independent of render window title
+  WCHAR ipcTitle[256];
+  lstrcpyW(ipcTitle, g_szIPCWindowTitle);
+
+  // Create 1x1 borderless window for IPC (discoverable by EnumWindows/FindWindow)
   HWND hIPC = CreateWindowExW(
-    WS_EX_TOOLWINDOW,        // excluded from taskbar and Alt+Tab
+    0,
     L"MDropDX12_IPC",
-    g_szIPCWindowTitle,       // same title as render window (discoverable by Remote)
-    WS_POPUP,                 // minimal — no decorations
-    0, 0, 0, 0,              // zero size
+    ipcTitle,
+    WS_POPUP,
+    -1, -1, 1, 1,
     NULL, NULL, hInst, NULL);
 
   if (!hIPC) {
@@ -321,12 +335,15 @@ static unsigned __stdcall IPCWindowThread(void* data) {
     return 0;
   }
 
-  // Don't call ShowWindow — keep it hidden but discoverable by EnumWindows
+  ShowWindow(hIPC, SW_SHOWNOACTIVATE);
   g_bIPCRunning.store(true);
 
+  // Verify title via GetWindowTextW (diagnostic for cross-process title issue)
+  wchar_t verifyTitle[256] = {};
+  GetWindowTextW(hIPC, verifyTitle, 256);
   wchar_t dbg[512];
-  swprintf_s(dbg, L"IPC thread: hidden window created (title: \"%s\", HWND: 0x%p)\n",
-             g_szIPCWindowTitle, (void*)hIPC);
+  swprintf_s(dbg, L"IPC thread: window HWND=0x%p, requested=\"%s\", actual=\"%s\", len=%d\n",
+             (void*)hIPC, ipcTitle, verifyTitle, (int)wcslen(verifyTitle));
   DebugLogW(dbg);
 
   // Message loop — runs independently of the render thread
