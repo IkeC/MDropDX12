@@ -426,6 +426,40 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     return 0;
   }
 
+  // Milkwave Remote messages (forwarded from IPC window)
+  case WM_MW_NEXT_PRESET:
+    if (!m_bPresetLockedByCode)
+      LoadRandomPreset(m_fBlendTimeUser);
+    return 0;
+  case WM_MW_PREV_PRESET:
+    PrevPreset(0);
+    m_fHardCutThresh *= 2.0f;
+    return 0;
+  case WM_MW_CAPTURE:
+  {
+    wchar_t filename[MAX_PATH];
+    if (CaptureScreenshotWithFilename(filename, MAX_PATH)) {
+      wchar_t msg[MAX_PATH + 32];
+      swprintf_s(msg, MAX_PATH + 32, L"capture/%s saved", filename);
+      AddNotification(msg);
+    }
+    return 0;
+  }
+  case WM_MW_ENABLESPOUTMIX:
+    ToggleSpout();
+    return 0;
+  case WM_MW_COVER_CHANGED:
+  case WM_MW_SPRITE_MODE:
+  case WM_MW_MESSAGE_MODE:
+  case WM_MW_SETVIDEODEVICE:
+  case WM_MW_ENABLEVIDEOMIX:
+  case WM_MW_SETSPOUTSENDER:
+  case WM_MW_SET_INPUTMIX_OPACITY:
+  case WM_MW_SET_INPUTMIX_LUMAKEY:
+  case WM_MW_SET_INPUTMIX_ONTOP:
+    // Not yet implemented — absorb to prevent DefWindowProc handling
+    return 0;
+
   case WM_SIZE:
     // If render window went fullscreen, move settings window to another monitor
     if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
@@ -1735,6 +1769,29 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         return 0;
       }
     }
+    // Handle character keys sent as WM_KEYDOWN by Milkwave Remote
+    // (PostMessage WM_KEYDOWN with lParam=0 won't generate WM_CHAR via TranslateMessage)
+    if (m_UI_mode == UI_REGULAR && !bCtrlHeldDown && !bShiftHeldDown) {
+      switch (wParam) {
+      case 'N':  // Sound Info toggle
+        m_bShowDebugInfo = !m_bShowDebugInfo;
+        return 0;
+      case 'K':  // Sprite/Message input mode
+      {
+        USHORT mask2 = 1 << (sizeof(SHORT) * 8 - 1);
+        bool bShift = (GetKeyState(VK_SHIFT) & mask2) != 0;
+        if (bShift) {
+          m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE_KILL;
+        } else {
+          m_nNumericInputMode = (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE)
+            ? NUMERIC_INPUT_MODE_CUST_MSG : NUMERIC_INPUT_MODE_SPRITE;
+        }
+        m_nNumericInputDigits = 0;
+        m_nNumericInputNum = 0;
+        return 0;
+      }
+      }
+    }
     return 1; // end case WM_KEYDOWN
 
   case WM_KEYUP:
@@ -2026,26 +2083,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
   case 'F':
     m_pState->m_nVideoEchoOrientation = (m_pState->m_nVideoEchoOrientation + 1) % 4;
     return 0; // we processed (or absorbed) the key
-  case 'b':
-    m_ColShiftBrightness -= 0.02f;
-    if (m_ColShiftBrightness < -1.0f) m_ColShiftBrightness = -1.0f;
-    {
-      wchar_t buf[64];
-      swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
-    }
-    SendSettingsInfoToMDropDX12Remote();
-    return 0;
-  case 'B':
-    m_ColShiftBrightness += 0.02f;
-    if (m_ColShiftBrightness > 1.0f) m_ColShiftBrightness = 1.0f;
-    {
-      wchar_t buf[64];
-      swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
-    }
-    SendSettingsInfoToMDropDX12Remote();
-    return 0;
+  // B/b formerly brightness — now on +/- keys
   case 'g':
     m_pState->m_fGammaAdj -= 0.1f;
     if (m_pState->m_fGammaAdj.eval(-1) < 0.0f) m_pState->m_fGammaAdj = 0.0f;
@@ -2204,11 +2242,19 @@ int Engine::HandleRegularKey(WPARAM wParam) {
     return 0; // we processed (or absorbed) the key
 
   case '-':
-    SetCurrentPresetRating(m_pState->m_fRating - 1.0f);
-    return 0; // we processed (or absorbed) the key
+    m_ColShiftBrightness -= 0.02f;
+    if (m_ColShiftBrightness < -1.0f) m_ColShiftBrightness = -1.0f;
+    { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+    SendSettingsInfoToMDropDX12Remote();
+    return 0;
   case '+':
-    SetCurrentPresetRating(m_pState->m_fRating + 1.0f);
-    return 0; // we processed (or absorbed) the key
+    m_ColShiftBrightness += 0.02f;
+    if (m_ColShiftBrightness > 1.0f) m_ColShiftBrightness = 1.0f;
+    { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+    SendSettingsInfoToMDropDX12Remote();
+    return 0;
 
   case '*':
     ReadCustomMessages();

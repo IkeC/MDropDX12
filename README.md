@@ -64,7 +64,6 @@
 | S | Save preset as... | ✅ |
 | Ctrl+S | Quicksave to /presets/Quicksave | ✅ |
 | Ctrl+Shift+S | Quicksave to /presets/Quicksave2 | ✅ |
-| +/- | Increase/decrease preset rating | ✅ |
 | Mouse wheel | Next/previous preset | ✅ |
 
 ### Shaders & Effects
@@ -89,7 +88,7 @@
 | U/u | Warp scale +/- | ✅ |
 | O/o | Warp amount +/- | ✅ |
 | G/g | Gamma +/- | ✅ |
-| B/b | Brightness +/- | ✅ |
+| +/- | Brightness +/- | ✅ |
 | \[/\] | X push +/- | ✅ |
 | {/} | Y push +/- | ✅ |
 | </> | Rotation +/- | ✅ |

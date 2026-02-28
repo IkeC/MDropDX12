@@ -288,6 +288,18 @@ static LRESULT CALLBACK IPCWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
   case WM_DESTROY:
     PostQuitMessage(0);
     return 0;
+  // Forward keyboard messages from Milkwave Remote to the render window
+  case WM_KEYDOWN:
+  case WM_KEYUP:
+  case WM_CHAR:
+  case WM_SYSKEYDOWN:
+  case WM_SYSKEYUP:
+  {
+    HWND hRender = g_hRenderWindow.load();
+    if (hRender && IsWindow(hRender))
+      PostMessage(hRender, uMsg, wParam, lParam);
+    return 0;
+  }
   default:
     // Forward WM_APP+ messages from Milkwave Remote to the render window
     if (uMsg >= WM_APP) {

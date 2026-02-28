@@ -34,5 +34,5 @@ U / u    Wave warp scale +/-        A        Do random mini-mash-up
 I / i    Wave zoom +/-              D        Toggle shader locks   
 O / o    Wave warp amount +/-       F        Tooggle echo orientation
 P / p    Video echo alpha +/-       !        Randomize warp shader
-B / b    Brightness +/-             G / g    Gamma adjustment +/-
++ / -    Brightness +/-             G / g    Gamma adjustment +/-
 J / j    Wave scale +/-

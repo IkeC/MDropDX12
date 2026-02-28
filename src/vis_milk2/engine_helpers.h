@@ -265,3 +265,18 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_RESTART_DEVICE    (WM_APP + 8)
 #define WM_MW_IPC_MESSAGE       (WM_APP + 9)  // lParam = heap-allocated wchar_t* from IPC thread
 #define WM_MW_RESTART_IPC       (WM_APP + 10) // settings thread requests IPC window restart
+
+// Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
+#define WM_MW_NEXT_PRESET       (WM_APP + 100)
+#define WM_MW_PREV_PRESET       (WM_APP + 101)
+#define WM_MW_COVER_CHANGED     (WM_APP + 102)
+#define WM_MW_SPRITE_MODE       (WM_APP + 103)
+#define WM_MW_MESSAGE_MODE      (WM_APP + 104)
+#define WM_MW_CAPTURE           (WM_APP + 105)
+#define WM_MW_SETVIDEODEVICE    (WM_APP + 106)
+#define WM_MW_ENABLEVIDEOMIX    (WM_APP + 107)
+#define WM_MW_SETSPOUTSENDER    (WM_APP + 108)
+#define WM_MW_ENABLESPOUTMIX    (WM_APP + 109)
+#define WM_MW_SET_INPUTMIX_OPACITY  (WM_APP + 150)
+#define WM_MW_SET_INPUTMIX_LUMAKEY  (WM_APP + 151)
+#define WM_MW_SET_INPUTMIX_ONTOP    (WM_APP + 152)
