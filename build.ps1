@@ -2,15 +2,15 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File build.ps1 [Debug|Release] [Win32|x64] [Clean]
 #
 # Examples:
-#   powershell -ExecutionPolicy Bypass -File build.ps1                  # Debug Win32 build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Release          # Release Win32 build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug x64        # Debug x64 build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Release x64      # Release x64 build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug Win32 Clean # Clean then build
+#   powershell -ExecutionPolicy Bypass -File build.ps1                  # Debug x64 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Release          # Release x64 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug Win32      # Debug Win32 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Release Win32    # Release Win32 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug x64 Clean  # Clean then build
 
 param(
     [string]$Configuration = "Debug",
-    [string]$Platform      = "Win32",  # "Win32" or "x64"
+    [string]$Platform      = "x64",  # "x64" or "Win32"
     [string]$Target        = "Build"   # "Build" or "Clean"
 )
 

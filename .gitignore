@@ -1,5 +1,6 @@
 src/**/Debug
 src/**/Release
+src/**/Release_x64
 **/.vs
 **/*.opendb
 **/*.aps
