@@ -1,202 +1,111 @@
-## v3.5 (unreleased)
+# MDropDX12 Changelog
 
-* Visualizer: Ground-up DirectX 12 rebuild of the rendering engine (replaces DX9Ex entirely)
-* Visualizer: GPU-accelerated text rendering via D3D11on12 + Direct2D + DirectWrite
-  - Replaces GDI→DIB→upload pipeline, eliminating ~33MB/frame CPU bandwidth and stuttering
-* Visualizer: In-app Settings window (F8 / Ctrl+L) with dark theme
-  - 5-tab UI: General, Visual, Colors, Sound, Files
-  - Preset browser with sequential forward/back navigation
-  - Resource viewer showing all preset textures with load status, type, and paths
-  - Fallback texture search paths for external texture collections
-  - Dedicated Random Textures Directory setting
-  - User defaults with Save Safe / Safe Reset
-  - Gamma slider with auto-reset for low-gamma presets
-  - Reset buttons on Visual and Colors tabs
-* Visualizer: DX12 3D volume texture support for noisevol_lq/noisevol_hq
-* Visualizer: HLSL variable shadowing fix
-  - Auto-renames variables that shadow built-in functions (pow, sin, cos, etc.)
-  - Fixes many presets rendering black due to shader compilation errors
-* Visualizer: x64 build support
-* Visualizer: UI fonts changed to Segoe UI / Consolas (anti-aliased via DirectWrite)
-* Visualizer: Restored DX12 features: screenshot (Ctrl+X), song title animation, sprites, preset playlist overlay
-* Visualizer: B/b keys for brightness adjust
-* Visualizer: Removed direct media transport controls (play/pause/stop/next/prev/rewind/ff)
-  - Arrow keys, X, C, V, Z no longer send media commands
-  - Track info display (middle mouse) is unchanged
-* Remote: "Preset mode" for button panel
-  - Right-click button to assign current preset (with screenshot capture)
-  - Left-click to send preset to Visualizer
-  - Middle-click to clear button
-  - Press switch button (lower right) to switch modes
-* Remote: Toggle color/monochrome display for button images
-* Remote: Automatically change Hue over time (color cycle)
-* Remote: Set preset auto change time
-* Remote: Key bindings to alter Quality (Ctrl+Q) and Hue (Ctrl+H)
+## v1.0 (2026-02-28)
 
-## v3.4 (2025-11-22)
+Initial release. Forked from Milkwave v3.5-dev Visualizer and rebuilt as a standalone DirectX 12 application.
 
-* Remote: Display current sprite preview image on button
-* Select new sprite by right-clicking sprite button
-* Fix: Audio capture not working on some systems (#16)
-* Fix: Inconsistent display of switched audio device
-* Fix: Setting Spout output to Fixed causing high GPU load
-* New presets
-  - Del + IkeC - glooper
-  - Shane + IkeC - Apollonian Structure
-  - SnoopethDuckDuck + IkeC - Breeze
+### DirectX 12 Rendering Engine
 
-## v3.3 (2025-10-31)
+- Ground-up DirectX 12 rebuild replacing DX9Ex entirely
+- x64 native build
+- DX12 3D volume texture support (noisevol_lq/noisevol_hq)
+- Async shader compilation with timeout and auto-skip (prevents GPU stalls)
+- TDR recovery with focus restoration after device lost
+- Shader precompiling and caching
+- HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
+- GLSL-to-HLSL shader conversion
+- PSVersion=4 support for AMD GPUs
+- VSync toggle and FPS cap (30/60/90/120/144/240/360/720/Unlimited)
 
-* Settings Tab: Shift Hue/Saturation/Brightness of the entire output
-* Presets Tab: Filter preset list (Ctrl+F)
-* Mouse interaction mode (Ctrl+M) (base by @OfficialIncubo)
-* "Auto" quality setting for constant perceived quality on different window sizes
-* Option to disable audio capture (bEnableAudioCapture=0)
-* Fix: Restored amp functionality
-* New or modified presets
-  - New: diatribes + IkeC - Vibe Ride
-  - New: lara - MilkDrop2077 - Flexi Romanesco Uncompressed (mouse)
-  - Mouse support: Kali + IkeC - Fractal Land
-  - Mouse support: chronos + IkeC - Astral Jelly Journey
+### Expression Evaluation
 
-## v3.2 (2025-10-03)
+- Replaced projectM-eval with native ns-eel2 (x64 JIT compiled)
+- Full MilkDrop2 expression compatibility
 
-* MIDI Tab: MIDI automation for up to 50 controls
-* Window independent Spout output (#14)
-* Adjust render quality from Remote
-* CPU/GPU monitoring
-* HiRes audio support (by @OfficialIncubo)
-* 5 new shader-based presets
-  - chronos + IkeC - Astral Jelly Journey
-  - diatribes + IkeC - Deep Cloud Mix
-  - diatribes + IkeC - Neon Chill
-  - Kali + IkeC - Fractal Land
-  - kasari39 + IkeC - Phantom Star for CineShader
+### GDI Overlay HUD
 
-## v3.1 (2025-09-04)
+- Separate layered window for text rendering (preset name, FPS, notifications, debug info)
+- Independent of DX12 render pipeline
 
-* 10 new shader-based presets in MDropDX12/Shader directory
-* All 30 MDropDX12 shader presets now react to audio input
-* New "vis_intensity", "vis_shift" and "vis_version" preset variables
-* Adjust "Intensity", "Shift" and "Version" live from Remote for supported presets (eg. *MDropDX12s shader presets)
-* Set default audio device using Ctrl+D (eg. after disconnecting Bluetooth headphones)
-* Draw a background box for text messages with custom transparency and color using box_* *message parameters
-* New message parameter "fadeout" (also for custom messages)
-* New shortcuts: Ctrl+B for toggling button panel, Ctrl+O for opening Visualizer window
-* Press Windows Media "Play/Pause" and "Stop" keys from script
-* Force soft preset transition type using "Mixtype" in settings.ini
-* Miscellaneous stability improvements
+### Settings Window (F8)
 
-## v3.0.2 (2025-08-26)
+- Dark theme UI with 10 tabs: General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, Script, About
+- Preset browser with directory navigation
+- Resource viewer showing all preset textures with load status and paths
+- Fallback texture search paths and Random Textures Directory
+- Content Base Path for textures and sprites
+- Log level control (Off/Error/Warn/Info/Verbose)
 
-* Pretty code formatting for HLSL shader code in Shader tab
-* Shader-based "Heartfelt" preset added to MDropDX12/Shader
-* Fix: Visualizer crashing when using "Link" button in MDropDX12 Remote "Preset" tab
-* Improved shader precompile notification and error messages
+### Audio
 
-## v3.0.1 (2025-08-18)
+- WASAPI loopback capture with input device support
+- On-the-fly device selection
+- Hi-res audio support
+- Smooth audio variables (bass_smooth, mid_smooth, treb_smooth, vol_smooth)
+- Signal amplification
+- Audio sensitivity with auto-adaptive mode
 
-* settings.ini: LogLevel=2 for verbose application logging
-* Shader precompiler can now handle multibyte-encoded filenames
+### Presets
 
-## v3.0 (2025-08-17)
+- .milk preset loading with full compatibility
+- Preset browser with directory navigation
+- Preset tagging system
+- Quicksave (Ctrl+S) and Quicksave2 (Ctrl+Shift+S)
+- Auto-change timer and preset change on track change
+- Drag-and-drop preset loading
+- Soft blend transitions with 19+ blend patterns
+- Beat-driven hard cuts with 13 configurable modes
+- Async shader compilation (non-blocking transitions)
 
-* Shader Tab: Convert GLSL shader code to HLSL and send it to the Visualizer instantly
-* 20 new presets in MDropDX12/Shader directory
-* Shader precompiling and caching (configurable)
-* New preset variables: bass_smooth, mid_smooth, treb_smooth, vol_smooth
-* AMD GPU detection and support for PSVersion=4 (by @OfficialIncubo)
-* New waveform, transitions and updated presets (by @OfficialIncubo)
-* Age filter: Only load presets modified within the last X days
-* Ctrl+Click on labels "Preset" or "Running" to open preset file in editor
-* Improved scaling of tab heights with high DPI displays
+### Window Modes
 
-## v2.3 (2025-07-13)
+- Fullscreen, borderless windowed, windowed fullscreen
+- Window transparency with opacity control
+- Clickthrough mode and watermark mode
+- Always on top
+- Multiple monitor stretch
+- Black mode (hide rendering)
 
-* Settings Tab: Change internal time, FPS and frame counters (#13)
-* Replaced expression evaluation library ns-eel2 with projectM-eval (by @kblaschke)
-* Fix: Visualizer crashing when resizing or going fullscreen with more than one sprite displayed (by @kblaschke)
-* Option to disable saving last used preset as startup preset (bEnablePresetStartupSavingOnClose=0)
-* Option to only load presets containing a specific text
-* Many new and updated presets (by @OfficialIncubo)
+### Messages and Sprites
 
-## v2.2 (2025-06-21)
+- Up to 100 custom message slots with per-message properties
+- Message autoplay with interval, jitter, and sequential/random order
+- Per-message randomization (position, size, font, color, effects, growth, duration)
+- Global message overrides dialog
+- Send Now button for message preview
+- Sprite management with blend modes, layers, EEL code, and positioning
+- Independent show/hide toggles for messages and sprites
 
-* Support for input devices (eg. microphones)
-* Show current audio device (Ctrl+D)
-* Remote: Allow including subdirs when loading directories
-* Set window to fixed dimensions from config (Ctrl+Shift+F2) (#10)
-* Fix: startx/starty not always working correctly (#11)
-* Screen-dependent render mode feature (by @OfficialIncubo)
+### Media Integration
 
-## v2.1 (2025-06-13)
+- Now Playing track info from Spotify, YouTube, and system media
+- Album artwork display
+- Media transport hotkeys (play/pause/stop/next/prev/rewind/ff)
+- Preset change on track change
 
-* Display multiple messages at once (#9)
-  - Move text around using start and end coordinates (startx, starty, movetime)
-  - Adjust the "burn in"-time of messages
-* Improved font proportional display and handling of font message coordinates
-* Save and restore "Always on top" window state
-* New script file commands (see script-default.txt for details)
+### Spout
 
-## v2.0 (2025-05-26)
+- Spout texture output for sharing frames with other applications
+- Window-independent fixed output resolution (64x64 to 7680x4320)
 
-* Tabbed interface
-* Preset tagging with dynamic buttons
-* Tag-based playlists
-* More live wave manipulation options
-* Live font manipulation
-* Pixel shader: MinPSVersion, MaxPSVersion with Up Arrow indicator
+### Remote Control
 
-## v1.6 (2025-04-29)
+- Milkwave Remote IPC compatibility via WM_COPYDATA protocol
+- 32 of 34 Milkwave commands handled
+- Configurable window title for Remote discovery
 
-* Improved performance: 30% -> 5% CPU usage on test system
-* Black mode (Ctrl+F12): Hides all preset rendering
-* Script file lines as drop down list in Remote
-  - Select lines from default or custom script file
-  - Send timed, randomly or manually
-* New Remote buttons: Song info, transparency, watermark mode, 88, 99 (sprites)
-* New Visualizer mouse controls: 
-  - Middle Mouse Button: Song Info
-  - Right+Left Mouse Button: Close Visualizer
-  - Right+Middle Mouse Button: Open Remote
-* Additional quicksave folder: Ctrl+Shift+S saves to presets\Quicksave2
-* New configuration options:
-  - Show cover when requesting song info
-  - Choose corner for song info
-  - Close Visualizer when closing Remote
-  - Hide notifications in Visualizer when Remote is active
-* Help screen now two pages
+### Color Effects
 
-## v1.5 (2025-04-26)
+- Hue/Saturation/Brightness shifting with auto hue cycling
+- Brighten/darken/solarize/invert effects (F11)
+- Custom preset variables (vis_intensity, vis_shift, vis_version, colshift_hue)
 
-- Windowed clickthrough fullscreen ("watermark mode") (Ctrl+Shift+F9)
-* Display current track information and artwork (eg. from Spotify or YouTube)
-* Font and color customization options
-* Improved device and window handling
+### Screenshots
 
-## v1.4 (2025-04-19)
+- Ctrl+X auto-saves to capture/ folder as timestamped PNG
+- Save Screenshot button in Settings with file dialog
 
-* Basic wave manipulation
-* Show notifications (only) in Remote
+### Script System
 
-## v1.3 (2025-04-17)
-
-* On-the-fly audio device selection
-
-## v1.2 (2025-04-14)
-
-* Double-line text with auto-wrap option
-* Remote: Signal amplification
-
-## v1.1 (2025-04-11)
-
-* Remote: Select preset files and send them to the visualizer
-* Show the currently playing Visualizer preset in the Remote window
- 
-## v1.0 (2025-04-07)
-
-* Customize message text, color, font size, position and other parameters
-* Save named style presets for quick access
-* Automatically send messages and set parameters from a file at configurable intervals
-* Send common key combinations using buttons
-* Save and restore Remote and Visualizer window positions
+- BPM-timed preset script playback
+- Loop mode with beat counter
