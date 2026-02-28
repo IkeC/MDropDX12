@@ -157,6 +157,15 @@ typedef struct {
   wchar_t szFace[128];
 
   wchar_t	szText[256];
+
+  // Per-message randomization flags (0=off, 1=on)
+  int bRandPos;
+  int bRandSize;
+  int bRandFont;
+  int bRandColor;
+  int bRandEffects;
+  int bRandGrowth;
+  int bRandDuration;
 }
 td_custom_msg;
 
@@ -991,6 +1000,7 @@ public:
   // Color shifting overrides
   bool    m_bMsgOverrideApplyHueShift = false;
   bool    m_bMsgOverrideRandomHue = false;
+  bool    m_bMsgIgnorePerMsgRandom = false;
 
   // Resource Viewer
   HWND        m_hResourceWnd = NULL;

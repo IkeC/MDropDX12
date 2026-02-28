@@ -142,7 +142,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Animated sprites | ✅ | ✅ | ✅ |
 | Sprite management UI (import, properties, defaults) | ✅ | ❌ | ❌ |
 | Sprite layer control (behind/on top of text) | ✅ | ❌ | ❌ |
-| Sprite selection from Remote | ♻️ | ✅ | ❌ |
+| Sprite selection from Remote | ✅ | ✅ | ❌ |
 
 ## Shapes & Waves
 
@@ -209,7 +209,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| ns-eel2 (native, x64 JIT) | ✅ | ❌ | ✅ |
+| ns-eel2 (native, x64 JIT) | ✅ | ❌ | ❌ |
+| ns-eel2 (native, x86) | ❌ | ❌ | ✅ |
 | projectM-eval (via ns-eel2 shim) | ❌ | ✅ | ❌ |
 
 ---

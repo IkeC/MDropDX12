@@ -256,6 +256,15 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGEDIT_OK          2112
 #define IDC_MSGEDIT_CANCEL      2113
 #define IDC_MSGEDIT_COLOR_SWATCH 2114
+#define IDC_MSGEDIT_SEND_NOW      2115
+#define IDC_MSGEDIT_RAND_ALL      2116
+#define IDC_MSGEDIT_RAND_POS      2117
+#define IDC_MSGEDIT_RAND_SIZE     2118
+#define IDC_MSGEDIT_RAND_FONT     2119
+#define IDC_MSGEDIT_RAND_COLOR    2120
+#define IDC_MSGEDIT_RAND_EFFECTS  2121
+#define IDC_MSGEDIT_RAND_GROWTH   2122
+#define IDC_MSGEDIT_RAND_DURATION 2123
 
 // Message Overrides Dialog control IDs
 #define IDC_MSGOVERRIDE_RAND_FONT     4000
@@ -276,6 +285,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGOVERRIDE_BOX           4015
 #define IDC_MSGOVERRIDE_APPLY_HUE     4016
 #define IDC_MSGOVERRIDE_RAND_HUE      4017
+#define IDC_MSGOVERRIDE_IGNORE_PERMSG 4018
 
 // Sprites tab control IDs (page 6)
 #define IDC_MW_SPR_LIST         5000

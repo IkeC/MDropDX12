@@ -194,6 +194,22 @@ void Engine::WriteCustomMessages() {
       swprintf(val, 64, L"%d", m_CustomMessage[n].bItal ? 1 : 0);
       WritePrivateProfileStringW(section, L"ital", val, m_szMsgIniFile);
     }
+
+    // Per-message randomize flags
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandPos);
+    WritePrivateProfileStringW(section, L"rand_pos", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandSize);
+    WritePrivateProfileStringW(section, L"rand_size", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandFont);
+    WritePrivateProfileStringW(section, L"rand_font", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandColor);
+    WritePrivateProfileStringW(section, L"rand_color", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandEffects);
+    WritePrivateProfileStringW(section, L"rand_effects", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandGrowth);
+    WritePrivateProfileStringW(section, L"rand_growth", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_CustomMessage[n].bRandDuration);
+    WritePrivateProfileStringW(section, L"rand_duration", val, m_szMsgIniFile);
   }
 }
 
@@ -243,6 +259,8 @@ void Engine::SaveMsgAutoplaySettings() {
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideApplyHueShift", val, pIni);
   swprintf(val, 32, L"%d", m_bMsgOverrideRandomHue ? 1 : 0);
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomHue", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgIgnorePerMsgRandom ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgIgnorePerMsgRandom", val, pIni);
 
   // Save playback order
   swprintf(val, 32, L"%d", m_nMsgAutoplayCount);
@@ -287,6 +305,7 @@ void Engine::LoadMsgAutoplaySettings() {
   // Color shifting overrides
   m_bMsgOverrideApplyHueShift = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideApplyHueShift", 0, pIni) != 0;
   m_bMsgOverrideRandomHue = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomHue", 0, pIni) != 0;
+  m_bMsgIgnorePerMsgRandom = GetPrivateProfileIntW(L"Milkwave", L"MsgIgnorePerMsgRandom", 0, pIni) != 0;
   if (m_fMsgOverrideSizeMin < 0.01f) m_fMsgOverrideSizeMin = 0.01f;
   if (m_fMsgOverrideSizeMax > 100.0f) m_fMsgOverrideSizeMax = 100.0f;
   if (m_fMsgOverrideSizeMin >= m_fMsgOverrideSizeMax) m_fMsgOverrideSizeMin = m_fMsgOverrideSizeMax * 0.5f;
@@ -341,6 +360,13 @@ struct MsgEditDlgData {
   wchar_t     szFace[128];
   int         bBold, bItal;
   int         nColorR, nColorG, nColorB;
+
+  // Per-message randomize working copies
+  bool bRandPos, bRandSize, bRandFont, bRandColor;
+  bool bRandEffects, bRandGrowth, bRandDuration;
+
+  // Original message backup (for Send Now + Cancel)
+  td_custom_msg originalMsg;
 
   static COLORREF s_acrCustColors[16];
 };
@@ -406,6 +432,15 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       if (data->fSize < 0) data->fSize = 0;
       if (data->fSize > 100) data->fSize = 100;
       if (data->fTime < 0.1f) data->fTime = 0.1f;
+
+      // Read randomize checkbox states
+      data->bRandPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_POS), L"Checked");
+      data->bRandSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_SIZE), L"Checked");
+      data->bRandFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_FONT), L"Checked");
+      data->bRandColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_COLOR), L"Checked");
+      data->bRandEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_EFFECTS), L"Checked");
+      data->bRandGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_GROWTH), L"Checked");
+      data->bRandDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_DURATION), L"Checked");
 
       data->bResult = true;
       data->bDone = true;
@@ -493,6 +528,97 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       }
       return 0;
     }
+    // Randomize All — check all per-message randomize checkboxes
+    if (id == IDC_MSGEDIT_RAND_ALL && code == BN_CLICKED) {
+      int ids[] = { IDC_MSGEDIT_RAND_POS, IDC_MSGEDIT_RAND_SIZE, IDC_MSGEDIT_RAND_FONT,
+                    IDC_MSGEDIT_RAND_COLOR, IDC_MSGEDIT_RAND_EFFECTS, IDC_MSGEDIT_RAND_GROWTH,
+                    IDC_MSGEDIT_RAND_DURATION };
+      for (int cid : ids) {
+        HWND hCtrl = GetDlgItem(hWnd, cid);
+        if (hCtrl) {
+          SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)1);
+          InvalidateRect(hCtrl, NULL, TRUE);
+        }
+      }
+      return 0;
+    }
+    // Send Now — preview the message immediately
+    if (id == IDC_MSGEDIT_SEND_NOW && code == BN_CLICKED && data) {
+      // Read current control values into data
+      wchar_t buf[256];
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TEXT), data->szText, 256);
+      if (data->szText[0] == 0) return 0;
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_SIZE), buf, 64);
+      data->fSize = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_XPOS), buf, 64);
+      data->x = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_YPOS), buf, 64);
+      data->y = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_GROWTH), buf, 64);
+      data->growth = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TIME), buf, 64);
+      data->fTime = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEIN), buf, 64);
+      data->fFade = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEOUT), buf, 64);
+      data->fFadeOut = (float)_wtof(buf);
+      int sel = (int)SendMessage(GetDlgItem(hWnd, IDC_MSGEDIT_FONT_COMBO), CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS) data->nFont = sel;
+      // Read randomize flags
+      data->bRandPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_POS), L"Checked");
+      data->bRandSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_SIZE), L"Checked");
+      data->bRandFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_FONT), L"Checked");
+      data->bRandColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_COLOR), L"Checked");
+      data->bRandEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_EFFECTS), L"Checked");
+      data->bRandGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_GROWTH), L"Checked");
+      data->bRandDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_DURATION), L"Checked");
+
+      // Temporarily write to the message slot and push it
+      Engine* p = data->plugin;
+      td_custom_msg* m = &p->m_CustomMessage[data->msgIndex];
+      wcscpy_s(m->szText, 256, data->szText);
+      m->nFont = data->nFont;
+      m->fSize = data->fSize;
+      m->x = data->x;
+      m->y = data->y;
+      m->growth = data->growth;
+      m->fTime = data->fTime;
+      m->fFade = data->fFade;
+      m->fFadeOut = data->fFadeOut;
+      m->bOverrideFace = data->bOverrideFace ? 1 : 0;
+      m->bOverrideBold = data->bOverrideBold ? 1 : 0;
+      m->bOverrideItal = data->bOverrideItal ? 1 : 0;
+      m->bOverrideColorR = data->bOverrideColorR ? 1 : 0;
+      m->bOverrideColorG = data->bOverrideColorG ? 1 : 0;
+      m->bOverrideColorB = data->bOverrideColorB ? 1 : 0;
+      wcscpy_s(m->szFace, 128, data->szFace);
+      m->bBold = data->bBold;
+      m->bItal = data->bItal;
+      m->nColorR = data->nColorR;
+      m->nColorG = data->nColorG;
+      m->nColorB = data->nColorB;
+      m->bRandPos = data->bRandPos ? 1 : 0;
+      m->bRandSize = data->bRandSize ? 1 : 0;
+      m->bRandFont = data->bRandFont ? 1 : 0;
+      m->bRandColor = data->bRandColor ? 1 : 0;
+      m->bRandEffects = data->bRandEffects ? 1 : 0;
+      m->bRandGrowth = data->bRandGrowth ? 1 : 0;
+      m->bRandDuration = data->bRandDuration ? 1 : 0;
+
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_PUSH_MESSAGE, data->msgIndex, 0);
+      return 0;
+    }
+    // Owner-drawn checkbox toggle for randomize checkboxes
+    if (code == BN_CLICKED) {
+      HWND hCtrl = (HWND)lParam;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
+      if (bIsCheckbox) {
+        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
+        InvalidateRect(hCtrl, NULL, TRUE);
+      }
+    }
     break;
   }
 
@@ -500,6 +626,16 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
     if (!pDIS) break;
     if (pDIS->CtlType == ODT_BUTTON) {
+      // Owner-drawn checkbox rendering
+      if (data && data->plugin) {
+        Engine* p = data->plugin;
+        bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+        if (bIsCheckbox) {
+          DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+          return TRUE;
+        }
+      }
       if ((int)pDIS->CtlID == IDC_MSGEDIT_COLOR_SWATCH && data) {
         // Draw color swatch
         Engine* p = data->plugin;
@@ -592,6 +728,8 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   data.bDone = false;
 
   td_custom_msg* m = &m_CustomMessage[msgIndex];
+  data.originalMsg = *m; // Save original for Cancel after Send Now
+
   if (!isNew) {
     wcscpy_s(data.szText, 256, m->szText);
     data.nFont = m->nFont;
@@ -614,6 +752,13 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     data.nColorR = m->nColorR;
     data.nColorG = m->nColorG;
     data.nColorB = m->nColorB;
+    data.bRandPos = m->bRandPos != 0;
+    data.bRandSize = m->bRandSize != 0;
+    data.bRandFont = m->bRandFont != 0;
+    data.bRandColor = m->bRandColor != 0;
+    data.bRandEffects = m->bRandEffects != 0;
+    data.bRandGrowth = m->bRandGrowth != 0;
+    data.bRandDuration = m->bRandDuration != 0;
   } else {
     data.szText[0] = 0;
     data.nFont = 0;
@@ -647,9 +792,9 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
   if (dlgLineH < 20) dlgLineH = 20;
 
-  // Scale dialog dimensions from baseline (440x400 at lineH=20)
+  // Scale dialog dimensions from baseline (440x530 at lineH=20)
   int clientW = MulDiv(440, dlgLineH, 20);
-  int clientH = MulDiv(400, dlgLineH, 20);
+  int clientH = MulDiv(530, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -770,12 +915,33 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, fadeOutLblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFadeOut);
   CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, y, editW, editH, hFont);
+  y += dlgLineH + 8;
+
+  // --- Randomize section (2-column checkboxes) ---
+  int halfW = (rw - 10) / 2;
+  int randBtnW = MulDiv(110, dlgLineH, 20);
+  CreateLabel(hDlg, L"Randomize:", margin, y + 2, MulDiv(80, dlgLineH, 20), smallH, hFont);
+  CreateBtn(hDlg, L"Randomize All", IDC_MSGEDIT_RAND_ALL, margin + rw - randBtnW, y, randBtnW, btnH, hFont);
+  y += btnH + 4;
+
+  CreateCheck(hDlg, L"Position", IDC_MSGEDIT_RAND_POS, margin, y, halfW, editH, hFont, data.bRandPos, true);
+  CreateCheck(hDlg, L"Font", IDC_MSGEDIT_RAND_FONT, margin + halfW + 10, y, halfW, editH, hFont, data.bRandFont, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Size", IDC_MSGEDIT_RAND_SIZE, margin, y, halfW, editH, hFont, data.bRandSize, true);
+  CreateCheck(hDlg, L"Color", IDC_MSGEDIT_RAND_COLOR, margin + halfW + 10, y, halfW, editH, hFont, data.bRandColor, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Effects (bold/ital)", IDC_MSGEDIT_RAND_EFFECTS, margin, y, halfW, editH, hFont, data.bRandEffects, true);
+  CreateCheck(hDlg, L"Growth", IDC_MSGEDIT_RAND_GROWTH, margin + halfW + 10, y, halfW, editH, hFont, data.bRandGrowth, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Duration", IDC_MSGEDIT_RAND_DURATION, margin, y, halfW, editH, hFont, data.bRandDuration, true);
   y += dlgLineH + 12;
 
-  // OK / Cancel buttons
+  // Send Now / OK / Cancel buttons
   int okBtnW = MulDiv(80, dlgLineH, 20);
-  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
+  int sendBtnW = MulDiv(90, dlgLineH, 20);
+  CreateBtn(hDlg, L"Send Now", IDC_MSGEDIT_SEND_NOW, margin, y, sendBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW + 20, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + okBtnW + 20, y, okBtnW, btnH, hFont);
 
   // Update the font preview
   UpdateMsgEditFontPreview(&data);
@@ -833,6 +999,16 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     m->nColorR = data.nColorR;
     m->nColorG = data.nColorG;
     m->nColorB = data.nColorB;
+    m->bRandPos = data.bRandPos ? 1 : 0;
+    m->bRandSize = data.bRandSize ? 1 : 0;
+    m->bRandFont = data.bRandFont ? 1 : 0;
+    m->bRandColor = data.bRandColor ? 1 : 0;
+    m->bRandEffects = data.bRandEffects ? 1 : 0;
+    m->bRandGrowth = data.bRandGrowth ? 1 : 0;
+    m->bRandDuration = data.bRandDuration ? 1 : 0;
+  } else {
+    // Restore original message (Send Now may have modified it)
+    *m = data.originalMsg;
   }
 
   return data.bResult;
@@ -864,6 +1040,8 @@ struct MsgOverridesDlgData {
   // Color shifting overrides
   bool        bApplyHueShift;
   bool        bRandomHue;
+  // Per-message randomization
+  bool        bIgnorePerMsg;
 };
 
 static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -901,6 +1079,8 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       // Color shifting overrides
       data->bApplyHueShift = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_APPLY_HUE), L"Checked");
       data->bRandomHue = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_HUE), L"Checked");
+      // Per-message randomization
+      data->bIgnorePerMsg = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_IGNORE_PERMSG), L"Checked");
 
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
       data->fSizeMin = (float)_wtof(buf);
@@ -1030,6 +1210,7 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   data.bBox = m_bMsgOverrideBox;
   data.bApplyHueShift = m_bMsgOverrideApplyHueShift;
   data.bRandomHue = m_bMsgOverrideRandomHue;
+  data.bIgnorePerMsg = m_bMsgIgnorePerMsgRandom;
 
   // Create font for controls (use settings font size)
   HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -1046,9 +1227,9 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
   if (dlgLineH < 20) dlgLineH = 20;
 
-  // Scale dialog dimensions from baseline (350x480 at lineH=20)
+  // Scale dialog dimensions from baseline (350x530 at lineH=20)
   int clientW = MulDiv(350, dlgLineH, 20);
-  int clientH = MulDiv(480, dlgLineH, 20);
+  int clientH = MulDiv(530, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -1139,6 +1320,12 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   CreateCheck(hDlg, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, margin, y, rw, editH, hFont, data.bApplyHueShift, true);
   y += dlgLineH + 2;
   CreateCheck(hDlg, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, margin, y, rw, editH, hFont, data.bRandomHue, true);
+  y += dlgLineH + 8;
+
+  // --- Per-message section ---
+  CreateLabel(hDlg, L"Per-Message:", margin, y, rw, smallH, hFont);
+  y += dlgLineH;
+  CreateCheck(hDlg, L"Ignore per-message randomization", IDC_MSGOVERRIDE_IGNORE_PERMSG, margin, y, rw, editH, hFont, data.bIgnorePerMsg, true);
   y += dlgLineH + 12;
 
   // OK / Cancel
@@ -1191,6 +1378,7 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
     m_bMsgOverrideBox = data.bBox;
     m_bMsgOverrideApplyHueShift = data.bApplyHueShift;
     m_bMsgOverrideRandomHue = data.bRandomHue;
+    m_bMsgIgnorePerMsgRandom = data.bIgnorePerMsg;
     SaveMsgAutoplaySettings();
   }
 
@@ -1296,6 +1484,15 @@ void Engine::ReadCustomMessages() {
       m_CustomMessage[n].bOverrideColorR = (m_CustomMessage[n].nColorR != -1);
       m_CustomMessage[n].bOverrideColorG = (m_CustomMessage[n].nColorG != -1);
       m_CustomMessage[n].bOverrideColorB = (m_CustomMessage[n].nColorB != -1);
+
+      // Per-message randomize flags
+      m_CustomMessage[n].bRandPos = GetPrivateProfileIntW(szSectionName, L"rand_pos", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandSize = GetPrivateProfileIntW(szSectionName, L"rand_size", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandFont = GetPrivateProfileIntW(szSectionName, L"rand_font", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandColor = GetPrivateProfileIntW(szSectionName, L"rand_color", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandEffects = GetPrivateProfileIntW(szSectionName, L"rand_effects", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandGrowth = GetPrivateProfileIntW(szSectionName, L"rand_growth", 0, m_szMsgIniFile);
+      m_CustomMessage[n].bRandDuration = GetPrivateProfileIntW(szSectionName, L"rand_duration", 0, m_szMsgIniFile);
     }
   }
 }
@@ -1430,6 +1627,47 @@ void Engine::LaunchCustomMessage(int nMsgNum) {
     if (m_bMsgOverrideApplyHueShift) {
       float hue = m_ColShiftHue * 360.0f;
       HueRotateRGB(st.nColorR, st.nColorG, st.nColorB, hue);
+    }
+
+    // Per-message randomization (unless globally ignored)
+    if (!m_bMsgIgnorePerMsgRandom) {
+      if (m_CustomMessage[nMsgNum].bRandFont) {
+        int candidates[MAX_CUSTOM_MESSAGE_FONTS], nCandidates = 0;
+        for (int f = 0; f < MAX_CUSTOM_MESSAGE_FONTS; f++)
+          if (m_CustomMessageFont[f].szFace[0])
+            candidates[nCandidates++] = f;
+        if (nCandidates > 0) {
+          int pick = candidates[rand() % nCandidates];
+          lstrcpyW(st.nFontFace, m_CustomMessageFont[pick].szFace);
+        }
+      }
+      if (m_CustomMessage[nMsgNum].bRandColor) {
+        int pick = rand() % MAX_CUSTOM_MESSAGE_FONTS;
+        st.nColorR = m_CustomMessageFont[pick].nColorR;
+        st.nColorG = m_CustomMessageFont[pick].nColorG;
+        st.nColorB = m_CustomMessageFont[pick].nColorB;
+        if (st.nColorR < 0) st.nColorR = 255;
+        if (st.nColorG < 0) st.nColorG = 255;
+        if (st.nColorB < 0) st.nColorB = 255;
+      }
+      if (m_CustomMessage[nMsgNum].bRandEffects) {
+        st.bBold = (rand() % 2) != 0;
+        st.bItal = (rand() % 2) != 0;
+      }
+      if (m_CustomMessage[nMsgNum].bRandSize) {
+        float range = m_fMsgOverrideSizeMax - m_fMsgOverrideSizeMin;
+        st.fFontSize = m_fMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
+      }
+      if (m_CustomMessage[nMsgNum].bRandPos) {
+        st.fX = 0.1f + (rand() % 800) / 1000.0f;
+        st.fY = 0.1f + (rand() % 800) / 1000.0f;
+      }
+      if (m_CustomMessage[nMsgNum].bRandGrowth) {
+        st.fGrowth = 0.5f + (rand() % 1500) / 1000.0f;
+      }
+      if (m_CustomMessage[nMsgNum].bRandDuration) {
+        st.fDuration = 2.0f + (rand() % 8000) / 1000.0f;
+      }
     }
 
     m_supertexts[nextFreeSupertextIndex].fStartTime = GetTime();
