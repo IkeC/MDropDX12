@@ -253,6 +253,14 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGOVERRIDE_OK            4007
 #define IDC_MSGOVERRIDE_CANCEL        4008
 #define IDC_MW_MSG_OVERRIDES          4009
+#define IDC_MSGOVERRIDE_RAND_POS      4010
+#define IDC_MSGOVERRIDE_RAND_GROWTH   4011
+#define IDC_MSGOVERRIDE_SLIDE_IN      4012
+#define IDC_MSGOVERRIDE_RAND_DURATION 4013
+#define IDC_MSGOVERRIDE_SHADOW        4014
+#define IDC_MSGOVERRIDE_BOX           4015
+#define IDC_MSGOVERRIDE_APPLY_HUE     4016
+#define IDC_MSGOVERRIDE_RAND_HUE      4017
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)

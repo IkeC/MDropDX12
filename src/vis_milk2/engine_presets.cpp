@@ -1676,19 +1676,11 @@ void Engine::OnFinishedLoadingPreset() {
   for (int mash = 0; mash < MASH_SLOTS; mash++)
     m_nMashPreset[mash] = m_nCurrentPreset;
 
-  // Update render window title with preset name (keeps IPC window discoverable by base title)
+  // Set render window title to "MDropDX12" (IPC window handles Milkwave Remote discovery)
   {
     HWND hPlugin = GetPluginWindow();
-    if (hPlugin) {
-      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
-      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
-      name = name ? name + 1 : m_szCurrentPresetFile;
-      wchar_t title[512];
-      const wchar_t* baseTitle = (m_szWindowTitle[0] != L'\0')
-        ? m_szWindowTitle : L"MDropDX12 Visualizer";
-      swprintf_s(title, L"%s  \u2014  %s", baseTitle, name);
-      SetWindowTextW(hPlugin, title);
-    }
+    if (hPlugin)
+      SetWindowTextW(hPlugin, L"MDropDX12");
   }
 
   SendPresetChangedInfoToMDropDX12Remote();

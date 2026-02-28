@@ -927,6 +927,16 @@ public:
   int     m_nMsgOverrideSizeMin = 10;           // min random size (floor: 5)
   int     m_nMsgOverrideSizeMax = 40;           // max random size (ceiling: 50)
   int     m_nMsgMaxOnScreen = 1;                // max concurrent messages (1..NUM_SUPERTEXTS)
+  // Animation overrides
+  bool    m_bMsgOverrideRandomPos = false;
+  bool    m_bMsgOverrideRandomGrowth = false;
+  bool    m_bMsgOverrideSlideIn = false;
+  bool    m_bMsgOverrideRandomDuration = false;
+  bool    m_bMsgOverrideShadow = false;
+  bool    m_bMsgOverrideBox = false;
+  // Color shifting overrides
+  bool    m_bMsgOverrideApplyHueShift = false;
+  bool    m_bMsgOverrideRandomHue = false;
 
   // Resource Viewer
   HWND        m_hResourceWnd = NULL;

@@ -32,6 +32,43 @@
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
+// RGB hue rotation helper — rotates RGB color by hue degrees (0–360)
+static void HueRotateRGB(int& r, int& g, int& b, float hueDeg) {
+  // Convert RGB to HSV
+  float rf = r / 255.0f, gf = g / 255.0f, bf = b / 255.0f;
+  float cmax = max(rf, max(gf, bf));
+  float cmin = min(rf, min(gf, bf));
+  float delta = cmax - cmin;
+  float h = 0, s = 0, v = cmax;
+  if (delta > 0.0001f) {
+    s = delta / cmax;
+    if (cmax == rf)      h = 60.0f * fmodf((gf - bf) / delta, 6.0f);
+    else if (cmax == gf) h = 60.0f * ((bf - rf) / delta + 2.0f);
+    else                 h = 60.0f * ((rf - gf) / delta + 4.0f);
+    if (h < 0) h += 360.0f;
+  }
+  // Rotate hue
+  h = fmodf(h + hueDeg, 360.0f);
+  if (h < 0) h += 360.0f;
+  // Convert HSV back to RGB
+  float c = v * s;
+  float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+  float m = v - c;
+  float r1, g1, b1;
+  if (h < 60)       { r1 = c; g1 = x; b1 = 0; }
+  else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+  else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+  else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+  else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+  else              { r1 = c; g1 = 0; b1 = x; }
+  r = (int)((r1 + m) * 255.0f + 0.5f);
+  g = (int)((g1 + m) * 255.0f + 0.5f);
+  b = (int)((b1 + m) * 255.0f + 0.5f);
+  if (r < 0) r = 0; if (r > 255) r = 255;
+  if (g < 0) g = 0; if (g > 255) g = 255;
+  if (b < 0) b = 0; if (b > 255) b = 255;
+}
+
 namespace mdrop {
 
 extern Engine g_engine;
@@ -188,6 +225,24 @@ void Engine::SaveMsgAutoplaySettings() {
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMax", val, pIni);
   swprintf(val, 32, L"%d", m_nMsgMaxOnScreen);
   WritePrivateProfileStringW(L"Milkwave", L"MsgMaxOnScreen", val, pIni);
+  // Animation overrides
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomPos ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomPos", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomGrowth ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomGrowth", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideSlideIn ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSlideIn", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomDuration ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomDuration", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideShadow ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideShadow", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideBox ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideBox", val, pIni);
+  // Color shifting overrides
+  swprintf(val, 32, L"%d", m_bMsgOverrideApplyHueShift ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideApplyHueShift", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomHue ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomHue", val, pIni);
 
   // Save playback order
   swprintf(val, 32, L"%d", m_nMsgAutoplayCount);
@@ -217,6 +272,16 @@ void Engine::LoadMsgAutoplaySettings() {
   m_nMsgOverrideSizeMin = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMin", 10, pIni);
   m_nMsgOverrideSizeMax = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMax", 40, pIni);
   m_nMsgMaxOnScreen = GetPrivateProfileIntW(L"Milkwave", L"MsgMaxOnScreen", 1, pIni);
+  // Animation overrides
+  m_bMsgOverrideRandomPos = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomPos", 0, pIni) != 0;
+  m_bMsgOverrideRandomGrowth = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomGrowth", 0, pIni) != 0;
+  m_bMsgOverrideSlideIn = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSlideIn", 0, pIni) != 0;
+  m_bMsgOverrideRandomDuration = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomDuration", 0, pIni) != 0;
+  m_bMsgOverrideShadow = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideShadow", 0, pIni) != 0;
+  m_bMsgOverrideBox = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideBox", 0, pIni) != 0;
+  // Color shifting overrides
+  m_bMsgOverrideApplyHueShift = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideApplyHueShift", 0, pIni) != 0;
+  m_bMsgOverrideRandomHue = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomHue", 0, pIni) != 0;
   if (m_nMsgOverrideSizeMin < 5) m_nMsgOverrideSizeMin = 5;
   if (m_nMsgOverrideSizeMax > 50) m_nMsgOverrideSizeMax = 50;
   if (m_nMsgOverrideSizeMin >= m_nMsgOverrideSizeMax) m_nMsgOverrideSizeMin = m_nMsgOverrideSizeMax - 1;
@@ -784,6 +849,16 @@ struct MsgOverridesDlgData {
   int         nSizeMin;
   int         nSizeMax;
   int         nMaxOnScreen;
+  // Animation overrides
+  bool        bRandomPos;
+  bool        bRandomGrowth;
+  bool        bSlideIn;
+  bool        bRandomDuration;
+  bool        bShadow;
+  bool        bBox;
+  // Color shifting overrides
+  bool        bApplyHueShift;
+  bool        bRandomHue;
 };
 
 static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -811,6 +886,16 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       data->bRandomColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_COLOR), L"Checked");
       data->bRandomSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_SIZE), L"Checked");
       data->bRandomEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_EFFECTS), L"Checked");
+      // Animation overrides
+      data->bRandomPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_POS), L"Checked");
+      data->bRandomGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_GROWTH), L"Checked");
+      data->bSlideIn = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SLIDE_IN), L"Checked");
+      data->bRandomDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_DURATION), L"Checked");
+      data->bShadow = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SHADOW), L"Checked");
+      data->bBox = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_BOX), L"Checked");
+      // Color shifting overrides
+      data->bApplyHueShift = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_APPLY_HUE), L"Checked");
+      data->bRandomHue = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_HUE), L"Checked");
 
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
       data->nSizeMin = _wtoi(buf);
@@ -933,6 +1018,14 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   data.nSizeMin = m_nMsgOverrideSizeMin;
   data.nSizeMax = m_nMsgOverrideSizeMax;
   data.nMaxOnScreen = m_nMsgMaxOnScreen;
+  data.bRandomPos = m_bMsgOverrideRandomPos;
+  data.bRandomGrowth = m_bMsgOverrideRandomGrowth;
+  data.bSlideIn = m_bMsgOverrideSlideIn;
+  data.bRandomDuration = m_bMsgOverrideRandomDuration;
+  data.bShadow = m_bMsgOverrideShadow;
+  data.bBox = m_bMsgOverrideBox;
+  data.bApplyHueShift = m_bMsgOverrideApplyHueShift;
+  data.bRandomHue = m_bMsgOverrideRandomHue;
 
   // Create font for controls (use settings font size)
   HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -949,9 +1042,9 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
   if (dlgLineH < 20) dlgLineH = 20;
 
-  // Scale dialog dimensions from baseline (350x280 at lineH=20)
+  // Scale dialog dimensions from baseline (350x480 at lineH=20)
   int clientW = MulDiv(350, dlgLineH, 20);
-  int clientH = MulDiv(280, dlgLineH, 20);
+  int clientH = MulDiv(480, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -1018,6 +1111,30 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   swprintf(buf, 32, L"%d", data.nMaxOnScreen);
   CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0);
   CreateLabel(hDlg, L"(1-10)", margin + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont);
+  y += dlgLineH + 8;
+
+  // --- Animations section ---
+  CreateLabel(hDlg, L"Animations:", margin, y, rw, smallH, hFont);
+  y += dlgLineH;
+  CreateCheck(hDlg, L"Random position", IDC_MSGOVERRIDE_RAND_POS, margin, y, rw, editH, hFont, data.bRandomPos, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Random growth (text scales over time)", IDC_MSGOVERRIDE_RAND_GROWTH, margin, y, rw, editH, hFont, data.bRandomGrowth, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Slide in from edge", IDC_MSGOVERRIDE_SLIDE_IN, margin, y, rw, editH, hFont, data.bSlideIn, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Random duration (2\x2013" L"10 seconds)", IDC_MSGOVERRIDE_RAND_DURATION, margin, y, rw, editH, hFont, data.bRandomDuration, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Drop shadow", IDC_MSGOVERRIDE_SHADOW, margin, y, rw, editH, hFont, data.bShadow, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Background box", IDC_MSGOVERRIDE_BOX, margin, y, rw, editH, hFont, data.bBox, true);
+  y += dlgLineH + 8;
+
+  // --- Color Shifting section ---
+  CreateLabel(hDlg, L"Color Shifting:", margin, y, rw, smallH, hFont);
+  y += dlgLineH;
+  CreateCheck(hDlg, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, margin, y, rw, editH, hFont, data.bApplyHueShift, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, margin, y, rw, editH, hFont, data.bRandomHue, true);
   y += dlgLineH + 12;
 
   // OK / Cancel
@@ -1062,6 +1179,14 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
     m_nMsgOverrideSizeMin = data.nSizeMin;
     m_nMsgOverrideSizeMax = data.nSizeMax;
     m_nMsgMaxOnScreen = data.nMaxOnScreen;
+    m_bMsgOverrideRandomPos = data.bRandomPos;
+    m_bMsgOverrideRandomGrowth = data.bRandomGrowth;
+    m_bMsgOverrideSlideIn = data.bSlideIn;
+    m_bMsgOverrideRandomDuration = data.bRandomDuration;
+    m_bMsgOverrideShadow = data.bShadow;
+    m_bMsgOverrideBox = data.bBox;
+    m_bMsgOverrideApplyHueShift = data.bApplyHueShift;
+    m_bMsgOverrideRandomHue = data.bRandomHue;
     SaveMsgAutoplaySettings();
   }
 
@@ -1265,6 +1390,42 @@ void Engine::LaunchCustomMessage(int nMsgNum) {
     if (m_bMsgOverrideRandomSize) {
       float range = (float)(m_nMsgOverrideSizeMax - m_nMsgOverrideSizeMin);
       m_supertexts[nextFreeSupertextIndex].fFontSize = m_nMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
+    }
+
+    // Animation overrides
+    td_supertext& st = m_supertexts[nextFreeSupertextIndex];
+    if (m_bMsgOverrideRandomPos) {
+      st.fX = 0.1f + (rand() % 800) / 1000.0f;
+      st.fY = 0.1f + (rand() % 800) / 1000.0f;
+    }
+    if (m_bMsgOverrideRandomGrowth) {
+      st.fGrowth = 0.5f + (rand() % 1500) / 1000.0f;
+    }
+    if (m_bMsgOverrideSlideIn) {
+      int edge = rand() % 4;
+      st.fStartX = (edge == 0) ? -0.3f : (edge == 1) ? 1.3f : st.fX;
+      st.fStartY = (edge == 2) ? -0.3f : (edge == 3) ? 1.3f : st.fY;
+      st.fMoveTime = 0.5f + (rand() % 500) / 1000.0f;
+      st.nEaseMode = 2;
+    }
+    if (m_bMsgOverrideRandomDuration) {
+      st.fDuration = 2.0f + (rand() % 8000) / 1000.0f;
+    }
+    if (m_bMsgOverrideShadow) {
+      st.fShadowOffset = 2.0f;
+    }
+    if (m_bMsgOverrideBox) {
+      st.fBoxAlpha = 0.5f;
+      st.fBoxColR = 0; st.fBoxColG = 0; st.fBoxColB = 0;
+    }
+    // Color shifting overrides
+    if (m_bMsgOverrideRandomHue) {
+      float hue = (rand() % 3600) / 10.0f;
+      HueRotateRGB(st.nColorR, st.nColorG, st.nColorB, hue);
+    }
+    if (m_bMsgOverrideApplyHueShift) {
+      float hue = m_ColShiftHue * 360.0f;
+      HueRotateRGB(st.nColorR, st.nColorG, st.nColorB, hue);
     }
 
     m_supertexts[nextFreeSupertextIndex].fStartTime = GetTime();
