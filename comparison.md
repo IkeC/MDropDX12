@@ -22,6 +22,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Adjustable render quality | ✅ | ✅ | ✅ |
 | Auto quality (window-size adaptive) | ✅ | ✅ | ❌ |
 | Fixed window dimensions (config) | ✅ | ✅ | ❌ |
+| VSync toggle | ✅ | ✅ | ✅ |
 | Black mode (hide rendering) | ✅ | ✅ | ❌ |
 
 ## Audio
@@ -85,6 +86,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | Disk texture loading | ✅ | ✅ | ✅ |
+| Content Base Path (textures, sprites) | ✅ | ❌ | ❌ |
 | Fallback texture search paths | ✅ | ❌ | ❌ |
 | Random Textures Directory | ✅ | ❌ | ❌ |
 | Fallback to 1x1 white texture | ✅ | ❌ | ❌ |
@@ -107,6 +109,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
+| Independent messages/sprites toggles | ✅ | ❌ | ❌ |
 | Custom text messages (from Remote) | ♻️ | ✅ | ❌ |
 | Font/color customization | ♻️ | ✅ | ❌ |
 | Multiple simultaneous messages | ♻️ | ✅ | ❌ |
@@ -124,7 +127,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Brighten/darken/solarize/invert | ✅ | ✅ | ✅ |
 | Custom preset vars (vis_intensity, vis_shift, vis_version) | ✅ | ✅ | ❌ |
 | colshift_hue preset variable | ✅ | ✅ | ❌ |
-| Screen-dependent render mode | ❌ | ✅ | ❌ |
+| Screen-dependent render mode | ✅ | ✅ | ❌ |
 | Color/monochrome display toggle | ❌ | ✅ | ❌ |
 
 ## Sprites
@@ -168,7 +171,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ |
 | WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ |
 | Tabbed Remote UI | ❌ | ✅ | ❌ |
-| Button panel | ❌ | ✅ | ❌ |
+| Button panel (Remote buttons) | ♻️ | ✅ | ❌ |
 
 ## Spout
 
@@ -182,6 +185,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | TDR recovery (device lost handling) | ✅ | ❌ | ❌ |
+| Focus restoration after TDC rebuild | ✅ | ❌ | ❌ |
 | Device restart from settings UI | ✅ | ❌ | ❌ |
 | Async compilation (prevents GPU stall) | ✅ | ❌ | ❌ |
 | Shader compile timeout | ✅ | ❌ | ❌ |
@@ -199,8 +203,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| projectM-eval (via ns-eel2 shim) | ✅ | ✅ | ❌ |
-| ns-eel2 (original) | ❌ | ❌ | ✅ |
+| ns-eel2 (native, x64 JIT) | ✅ | ❌ | ✅ |
+| projectM-eval (via ns-eel2 shim) | ❌ | ✅ | ❌ |
 
 ---
 
