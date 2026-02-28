@@ -741,6 +741,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (sel >= 0 && sel <= 3) {
         p->m_nSpriteMessagesMode = sel;
         p->SaveSettingToINI(SET_SPRITES_MESSAGES);
+        CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_MESSAGES, (sel & 1) ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_SPRITES, (sel & 2) ? BST_CHECKED : BST_UNCHECKED);
       }
       return 0;
     }
@@ -891,6 +893,18 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_MSG_AUTOSIZE:
         p->m_bMessageAutoSize = bChecked;
         p->SaveMsgAutoplaySettings();
+        return 0;
+      case IDC_MW_MSG_SHOW_MESSAGES:
+        p->m_nSpriteMessagesMode = (p->m_nSpriteMessagesMode & ~1) | (bChecked ? 1 : 0);
+        p->SaveSettingToINI(SET_SPRITES_MESSAGES);
+        { HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPRITES_MESSAGES);
+          if (hCombo) SendMessage(hCombo, CB_SETCURSEL, p->m_nSpriteMessagesMode, 0); }
+        return 0;
+      case IDC_MW_MSG_SHOW_SPRITES:
+        p->m_nSpriteMessagesMode = (p->m_nSpriteMessagesMode & ~2) | (bChecked ? 2 : 0);
+        p->SaveSettingToINI(SET_SPRITES_MESSAGES);
+        { HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPRITES_MESSAGES);
+          if (hCombo) SendMessage(hCombo, CB_SETCURSEL, p->m_nSpriteMessagesMode, 0); }
         return 0;
 
       // Messages tab button handlers (non-checkbox)
@@ -2033,6 +2047,14 @@ void Engine::BuildSettingsControls() {
 
   // ===== Messages tab (page 5) =====
   y = tabTop + 10;
+
+  // Show Messages / Show Sprites toggles
+  {
+    int halfW = rw / 2 - 2;
+    PAGE_CTRL(5, CreateCheck(hw, L"Show Messages", IDC_MW_MSG_SHOW_MESSAGES, x, y, halfW, lineH, hFont, (m_nSpriteMessagesMode & 1) != 0, false));
+    PAGE_CTRL(5, CreateCheck(hw, L"Show Sprites", IDC_MW_MSG_SHOW_SPRITES, x + halfW + 4, y, halfW, lineH, hFont, (m_nSpriteMessagesMode & 2) != 0, false));
+  }
+  y += lineH + gap;
 
   PAGE_CTRL(5, CreateLabel(hw, L"Custom Messages:", x, y, rw, lineH, hFont, false));
   y += lineH + 2;

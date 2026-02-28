@@ -218,6 +218,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPRITES_MESSAGES     2130  // ComboBox: Messages/Sprites mode (General tab)
 #define IDC_MW_DEBUG_LOG_LEVEL      2131  // Edit: Debug Log Level (0-3)
 #define IDC_MW_DEBUG_LOG_LEVEL_SPIN 2132  // UpDown spinner for log level
+#define IDC_MW_MSG_SHOW_MESSAGES   2133  // Checkbox: Enable Messages (Messages tab)
+#define IDC_MW_MSG_SHOW_SPRITES    2134  // Checkbox: Enable Sprites (Messages tab)
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 
