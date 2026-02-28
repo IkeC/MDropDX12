@@ -4,7 +4,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v3.5-dev) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.0-dev) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5-dev) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active |
 
