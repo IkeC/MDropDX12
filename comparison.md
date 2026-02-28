@@ -23,7 +23,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Auto quality (window-size adaptive) | ✅ | ✅ | ❌ |
 | Fixed window dimensions (config) | ✅ | ✅ | ❌ |
 | VSync toggle | ✅ | ✅ | ✅ |
-| FPS cap settings (dropdown + hotkey) | ✅ | ❌ | ❌ |
+| FPS cap settings (dropdown + hotkey) | ✅ | ✅ | ✅ |
 | Black mode (hide rendering) | ✅ | ✅ | ❌ |
 
 ## Audio
