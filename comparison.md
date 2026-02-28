@@ -23,7 +23,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Auto quality (window-size adaptive) | ✅ | ✅ | ❌ |
 | Fixed window dimensions (config) | ✅ | ✅ | ❌ |
 | VSync toggle | ✅ | ✅ | ✅ |
-| FPS cap settings (dropdown + hotkey) | ✅ | ✅ | ✅ |
+| FPS cap dropdown in settings UI | ✅ | ❌ | ❌ |
+| FPS cap hotkey cycling | ✅ | ✅ | ✅ |
 | Black mode (hide rendering) | ✅ | ✅ | ❌ |
 
 ## Audio
@@ -43,7 +44,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | .milk preset loading | ✅ | ✅ | ✅ |
-| .milk2 double-preset format | ❌ | ❌ | ✅ |
+| .milk2 double-preset format | ✅ | ❌ | ✅ |
 | Preset browser (in-app) | ✅ | ✅ | ✅ |
 | Preset browser filtering (Ctrl+F) | ✅ | ✅ | ❌ |
 | Preset tagging | ✅ | ✅ | ❌ |
@@ -54,6 +55,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Quicksave2 folder (Ctrl+Shift+S) | ✅ | ✅ | ❌ |
 | Preset auto-change timer | ✅ | ✅ | ✅ |
 | Preset change on track change | ✅ | ✅ | ❌ |
+| Drag-and-drop preset loading | ✅ | ❌ | ❌ |
 | Preset mode buttons (assign/recall) | ❌ | ✅ | ❌ |
 | Deep mashup (multi-layer) | ❌ | ❌ | ✅ |
 
@@ -64,7 +66,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Soft blend transitions | ✅ | ✅ | ✅ |
 | Hard cut (H key) | ✅ | ✅ | ✅ |
 | Beat-driven hard cuts | ✅ | ✅ | ✅ |
-| 19+ blend patterns (.milk2) | ❌ | ❌ | ✅ |
+| 19+ blend patterns (.milk2) | ✅ | ❌ | ✅ |
 | Async shader compilation (non-blocking) | ✅ | ❌ | ❌ |
 | Compilation timeout with auto-skip | ✅ | ❌ | ❌ |
 | Force soft transition type (Mixtype) | ✅ | ✅ | ❌ |
@@ -104,7 +106,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Help screen | ✅ | ✅ | ✅ |
 | Notifications | ✅ | ✅ | ✅ |
 | CPU/GPU monitoring | ❌ | ✅ | ❌ |
-| Save screenshot (Ctrl+X) | ♻️ | ✅ | ❌ |
+| Save screenshot (Ctrl+X) | ✅ | ✅ | ❌ |
 
 ## Text & Messages
 
@@ -136,8 +138,9 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Static sprites | ♻️ | ✅ | ✅ |
-| Animated sprites | ♻️ | ✅ | ✅ |
+| Static sprites | ✅ | ✅ | ✅ |
+| Animated sprites | ✅ | ✅ | ✅ |
+| Sprite management UI (import, properties, defaults) | ✅ | ❌ | ❌ |
 | Sprite layer control (behind/on top of text) | ✅ | ❌ | ❌ |
 | Sprite selection from Remote | ♻️ | ✅ | ❌ |
 
@@ -197,9 +200,9 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| In-app settings window (F2) | ✅ | ✅ | ✅ |
+| In-app settings window (F8) | ✅ | ✅ | ✅ |
 | Dark theme settings UI | ✅ | ❌ | ❌ |
-| Multi-tab settings | ✅ | ✅ | ✅ |
+| Multi-tab settings (9 tabs) | ✅ | ✅ | ✅ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
 
 ## Expression Evaluation
