@@ -147,6 +147,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPOUT_FIXED      2040
 #define IDC_MW_SPOUT_WIDTH      2041
 #define IDC_MW_SPOUT_HEIGHT     2042
+#define IDC_MW_HOTKEY_LIST      2043
+#define IDC_MW_HOTKEY_EDIT      2044
+#define IDC_MW_HOTKEY_SET       2045
+#define IDC_MW_HOTKEY_CLEAR     2046
 #define IDC_MW_TAB              2050
 #define IDC_MW_PRESET_LIST      2051
 #define IDC_MW_PRESET_PREV      2052

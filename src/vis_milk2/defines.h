@@ -47,13 +47,13 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // their old settings and reset them to the defaults for the new version;
 // but that only works if you keep this value up-to-date.  ***To disable this
 // behavior, just always leave this at 100. ***
-#define INT_VERSION     200
+#define INT_VERSION     100
 // INT_SUBVERSION is the minor version #, counting up from 0 as you do
 // mini-releases.  If the plugin goes to read the old INI file and sees that
 // the major version # is the same but the minor version # is not, it will,
 // again, ignore their old settings and reset them to the defaults for the
 // new version.  ***To disable this behavior, just always leave this at 0. ***
-#define INT_SUBVERSION  5      //straight=0, a=1, b=2, ...
+#define INT_SUBVERSION  0      //straight=0, a=1, b=2, ...
 
 // SUBDIR puts milkdrop's documentation, INI file, presets folder, etc.
 // in a subdir underneath Winamp\Plugins.

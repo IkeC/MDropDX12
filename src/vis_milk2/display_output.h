@@ -29,6 +29,8 @@ struct DisplayOutputConfig {
     wchar_t szDeviceName[32] = {};     // e.g. L"\\\\.\\DISPLAY2"
     bool bFullscreen = true;
     RECT rcMonitor = {};               // Cached monitor rect
+    int nOpacity = 100;                // 1-100%; per-mirror opacity
+    bool bClickThrough = false;        // Per-mirror click-through
 
     // Spout-specific
     bool bFixedSize = false;

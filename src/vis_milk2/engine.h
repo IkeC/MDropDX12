@@ -34,6 +34,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // SPOUT & DISPLAY OUTPUTS
 #include "SpoutDX12.h" // Spout2 DX12 support class (D3D11On12 interop)
 #include "display_output.h"
+#include "hotkeys.h"
 #include <io.h> // for file existence check
 // =========================================================
 
@@ -377,8 +378,6 @@ public:
   ComPtr<ID3D12GraphicsCommandList>  m_mirrorCmdList;
   bool m_bMirrorClassRegistered = false;
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
-  bool m_bMirrorClickThrough = false;  // Displays tab checkbox; not persisted
-  int  m_nMirrorOpacity = 100;         // 1-100%; persisted to INI
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   void EnumerateDisplayOutputs();
   void LoadDisplayOutputSettings();
@@ -392,6 +391,14 @@ public:
   void UpdateMirrorWindowStyles();  // apply click-through + opacity to all active mirrors
   void UpdateDisplaysTabSelection(int sel);
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
+
+  // Global hotkeys
+  HotkeyBinding m_hotkeys[HK_COUNT - 1];  // HK_TOGGLE_FULLSCREEN=1, so index 0..1
+  void LoadHotkeySettings();
+  void SaveHotkeySettings();
+  void RegisterGlobalHotkeys(HWND hwnd);
+  void UnregisterGlobalHotkeys(HWND hwnd);
+  std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
   // =========================================================
 
 

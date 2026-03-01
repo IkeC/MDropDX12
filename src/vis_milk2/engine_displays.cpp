@@ -111,9 +111,9 @@ void Engine::LoadDisplayOutputSettings()
     wchar_t* pIni = GetConfigIniFile();
 
     int count = GetPrivateProfileIntW(L"DisplayOutputs", L"Count", -1, pIni);
-    m_nMirrorOpacity = GetPrivateProfileIntW(L"DisplayOutputs", L"MirrorOpacity", 100, pIni);
-    if (m_nMirrorOpacity < 1) m_nMirrorOpacity = 1;
-    if (m_nMirrorOpacity > 100) m_nMirrorOpacity = 100;
+    int legacyOpacity = GetPrivateProfileIntW(L"DisplayOutputs", L"MirrorOpacity", 100, pIni);
+    if (legacyOpacity < 1) legacyOpacity = 1;
+    if (legacyOpacity > 100) legacyOpacity = 100;
     m_bMirrorModeForAltS = GetPrivateProfileBoolW(L"DisplayOutputs", L"MirrorModeForAltS", false, pIni);
 
     if (count < 0) {
@@ -154,6 +154,10 @@ void Engine::LoadDisplayOutputSettings()
             GetPrivateProfileStringW(section, L"DeviceName", L"", devBuf, 32, pIni);
             wcsncpy_s(out.config.szDeviceName, devBuf, _TRUNCATE);
             out.config.bFullscreen = GetPrivateProfileBoolW(section, L"Fullscreen", true, pIni);
+            out.config.nOpacity = GetPrivateProfileIntW(section, L"Opacity", legacyOpacity, pIni);
+            if (out.config.nOpacity < 1) out.config.nOpacity = 1;
+            if (out.config.nOpacity > 100) out.config.nOpacity = 100;
+            out.config.bClickThrough = GetPrivateProfileBoolW(section, L"ClickThrough", false, pIni);
         }
         else {
             out.config.bFixedSize = GetPrivateProfileBoolW(section, L"FixedSize", false, pIni);
@@ -170,6 +174,8 @@ void Engine::LoadDisplayOutputSettings()
                     // Update the enumerated entry with saved settings
                     existing.config.bEnabled = out.config.bEnabled;
                     existing.config.bFullscreen = out.config.bFullscreen;
+                    existing.config.nOpacity = out.config.nOpacity;
+                    existing.config.bClickThrough = out.config.bClickThrough;
                     matched = true;
                     break;
                 }
@@ -203,8 +209,6 @@ void Engine::SaveDisplayOutputSettings()
     wchar_t buf[64];
     swprintf(buf, 64, L"%d", count);
     WritePrivateProfileStringW(L"DisplayOutputs", L"Count", buf, pIni);
-    swprintf(buf, 64, L"%d", m_nMirrorOpacity);
-    WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorOpacity", buf, pIni);
     swprintf(buf, 64, L"%d", m_bMirrorModeForAltS ? 1 : 0);
     WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorModeForAltS", buf, pIni);
 
@@ -223,6 +227,10 @@ void Engine::SaveDisplayOutputSettings()
             WritePrivateProfileStringW(section, L"DeviceName", cfg.szDeviceName, pIni);
             swprintf(buf, 64, L"%d", cfg.bFullscreen ? 1 : 0);
             WritePrivateProfileStringW(section, L"Fullscreen", buf, pIni);
+            swprintf(buf, 64, L"%d", cfg.nOpacity);
+            WritePrivateProfileStringW(section, L"Opacity", buf, pIni);
+            swprintf(buf, 64, L"%d", cfg.bClickThrough ? 1 : 0);
+            WritePrivateProfileStringW(section, L"ClickThrough", buf, pIni);
         }
         else {
             swprintf(buf, 64, L"%d", cfg.bFixedSize ? 1 : 0);
@@ -352,7 +360,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         // WS_EX_LAYERED enables SetLayeredWindowAttributes for opacity control.
         // WS_EX_TRANSPARENT (click-through) is added dynamically via UpdateMirrorWindowStyles().
         DWORD exStyle = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED;
-        if (m_bMirrorClickThrough)
+        if (out.config.bClickThrough)
             exStyle |= WS_EX_TRANSPARENT;
         ms.hWnd = CreateWindowExW(
             exStyle,
@@ -366,8 +374,8 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             out.monitorState.reset();
             return;
         }
-        // Apply opacity from settings (1-100% → 3-255)
-        BYTE alpha = (BYTE)(m_nMirrorOpacity * 255 / 100);
+        // Apply opacity from per-output settings (1-100% → 3-255)
+        BYTE alpha = (BYTE)(out.config.nOpacity * 255 / 100);
         if (alpha < 3) alpha = 3;
         SetLayeredWindowAttributes(ms.hWnd, 0, alpha, LWA_ALPHA);
         SetWindowPos(ms.hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -651,18 +659,18 @@ void Engine::SendToDisplayOutputs()
 
 void Engine::UpdateMirrorWindowStyles()
 {
-    // Compute alpha from opacity percentage (1-100 → 3-255)
-    BYTE alpha = (BYTE)(m_nMirrorOpacity * 255 / 100);
-    if (alpha < 3) alpha = 3;  // floor at ~1% so window doesn't vanish completely
-
     for (auto& out : m_displayOutputs) {
         if (out.config.type != DisplayOutputType::Monitor || !out.monitorState)
             continue;
         HWND hWnd = out.monitorState->hWnd;
         if (!hWnd) continue;
 
+        // Compute alpha from per-output opacity percentage (1-100 → 3-255)
+        BYTE alpha = (BYTE)(out.config.nOpacity * 255 / 100);
+        if (alpha < 3) alpha = 3;
+
         LONG_PTR ex = GetWindowLongPtrW(hWnd, GWL_EXSTYLE);
-        if (m_bMirrorClickThrough)
+        if (out.config.bClickThrough)
             ex |= WS_EX_TRANSPARENT;
         else
             ex &= ~WS_EX_TRANSPARENT;
@@ -709,9 +717,6 @@ void Engine::RefreshDisplaysTab()
     HWND hBtn = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_ACTIVATE);
     if (hBtn) SetWindowTextW(hBtn, m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors");
 
-    // Sync click-through checkbox
-    HWND hCT = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_CLICKTHRU);
-    if (hCT) SendMessage(hCT, BM_SETCHECK, m_bMirrorClickThrough ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 void Engine::UpdateDisplaysTabSelection(int sel)
@@ -721,6 +726,9 @@ void Engine::UpdateDisplaysTabSelection(int sel)
 
     HWND hEnable    = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_ENABLE);
     HWND hFullscr   = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_FULLSCREEN);
+    HWND hClickThru = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_CLICKTHRU);
+    HWND hOpacity   = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_OPACITY);
+    HWND hOpSpin    = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_OPACITY_SPIN);
     HWND hName      = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_NAME);
     HWND hFixed     = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_FIXED);
     HWND hW         = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_W);
@@ -735,23 +743,40 @@ void Engine::UpdateDisplaysTabSelection(int sel)
 
     if (sel < 0 || sel >= (int)m_displayOutputs.size()) {
         // Nothing selected — clear/disable controls
-        if (hEnable)  { SetCheckbox(hEnable, false); EnableWindow(hEnable, FALSE); }
-        if (hFullscr) { SetCheckbox(hFullscr, false); EnableWindow(hFullscr, FALSE); }
-        if (hName)    { SetWindowTextW(hName, L""); EnableWindow(hName, FALSE); }
-        if (hFixed)   { SetCheckbox(hFixed, false); EnableWindow(hFixed, FALSE); }
-        if (hW)       { SetWindowTextW(hW, L""); EnableWindow(hW, FALSE); }
-        if (hH)       { SetWindowTextW(hH, L""); EnableWindow(hH, FALSE); }
+        if (hEnable)    { SetCheckbox(hEnable, false); EnableWindow(hEnable, FALSE); }
+        if (hFullscr)   { SetCheckbox(hFullscr, false); EnableWindow(hFullscr, FALSE); }
+        if (hClickThru) { SetCheckbox(hClickThru, false); EnableWindow(hClickThru, FALSE); }
+        if (hOpacity)   { SetWindowTextW(hOpacity, L""); EnableWindow(hOpacity, FALSE); }
+        if (hOpSpin)    { EnableWindow(hOpSpin, FALSE); }
+        if (hName)      { SetWindowTextW(hName, L""); EnableWindow(hName, FALSE); }
+        if (hFixed)     { SetCheckbox(hFixed, false); EnableWindow(hFixed, FALSE); }
+        if (hW)         { SetWindowTextW(hW, L""); EnableWindow(hW, FALSE); }
+        if (hH)         { SetWindowTextW(hH, L""); EnableWindow(hH, FALSE); }
         return;
     }
 
     auto& cfg = m_displayOutputs[sel].config;
     bool isSpout = (cfg.type == DisplayOutputType::Spout);
+    bool isMon = !isSpout;
 
     // Enable checkbox — always available
     if (hEnable)  { SetCheckbox(hEnable, cfg.bEnabled); EnableWindow(hEnable, TRUE); }
 
     // Fullscreen — only for monitors
-    if (hFullscr) { SetCheckbox(hFullscr, cfg.bFullscreen); EnableWindow(hFullscr, !isSpout); }
+    if (hFullscr) { SetCheckbox(hFullscr, cfg.bFullscreen); EnableWindow(hFullscr, isMon); }
+
+    // Click-through and opacity — only for monitors
+    if (hClickThru) { SetCheckbox(hClickThru, cfg.bClickThrough); EnableWindow(hClickThru, isMon); }
+    if (hOpacity) {
+        wchar_t buf[8];
+        swprintf(buf, 8, L"%d", cfg.nOpacity);
+        SetWindowTextW(hOpacity, isMon ? buf : L"");
+        EnableWindow(hOpacity, isMon);
+    }
+    if (hOpSpin) {
+        if (isMon) SendMessage(hOpSpin, UDM_SETPOS32, 0, cfg.nOpacity);
+        EnableWindow(hOpSpin, isMon);
+    }
 
     // Spout-specific fields
     if (hName) { SetWindowTextW(hName, isSpout ? cfg.szName : L""); EnableWindow(hName, isSpout); }

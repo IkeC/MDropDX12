@@ -1212,6 +1212,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   switch (uMsg) {
   case WM_CLOSE:
   {
+    g_engine.UnregisterGlobalHotkeys(hWnd);
     g_engine.SaveWindowSizeAndPosition(hWnd);
 
     // Signal render thread to exit its loop
@@ -1474,34 +1475,36 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     break;
   }
 
-  case WM_SYSKEYDOWN:
+  case WM_HOTKEY:
   {
-    if (wParam == VK_F4) { // Alt+F4: close via WM_CLOSE for proper render thread shutdown
-      PostMessage(hWnd, WM_CLOSE, 0, 0);
-    }
-    else if (wParam == 'S' || wParam == 's') {
+    int id = (int)wParam;
+    switch (id) {
+    case HK_TOGGLE_FULLSCREEN:
+      ToggleFullScreen(hWnd);
+      break;
+    case HK_TOGGLE_STRETCH:
       if (g_engine.m_bMirrorModeForAltS) {
         if (!g_engine.m_bMirrorsActive) {
-          // Activate: fullscreen primary render + activate mirrors
-          if (!fullscreen) {
-            ToggleFullScreen(hWnd);
-          }
+          if (!fullscreen) ToggleFullScreen(hWnd);
           g_engine.m_bMirrorsActive = true;
           g_engine.AddNotification(L"Mirror outputs active");
         } else {
-          // Deactivate: disable mirrors + restore primary render window
           g_engine.m_bMirrorsActive = false;
-          if (fullscreen) {
-            ToggleFullScreen(hWnd);
-          }
+          if (fullscreen) ToggleFullScreen(hWnd);
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
       } else {
         ToggleStretch(hWnd);
       }
+      break;
     }
-    else if (wParam == VK_RETURN) {
-      ToggleFullScreen(hWnd);
+    break;
+  }
+
+  case WM_SYSKEYDOWN:
+  {
+    if (wParam == VK_F4) { // Alt+F4: close via WM_CLOSE for proper render thread shutdown
+      PostMessage(hWnd, WM_CLOSE, 0, 0);
     }
     else {
       g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
@@ -2071,6 +2074,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     BackbufferWidth = g_engine.nSpoutFixedWidth;
     BackbufferHeight = g_engine.nSpoutFixedHeight;
   }
+
+  // Register global hotkeys on the message pump thread's window
+  g_engine.RegisterGlobalHotkeys(hwnd);
 
   // --- Phase 3: Spawn dedicated render thread for DX12 ---
   g_bQuitRequested.store(false);

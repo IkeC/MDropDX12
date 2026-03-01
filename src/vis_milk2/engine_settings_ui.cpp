@@ -725,14 +725,18 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
       if (p) p->ShowSettingsPage(sel);
     }
-    // Mirror opacity spin control
+    // Per-output opacity spin control
     if (p && pnm->idFrom == IDC_MW_DISP_OPACITY_SPIN && pnm->code == UDN_DELTAPOS) {
       NMUPDOWN* pud = (NMUPDOWN*)lParam;
       int newVal = pud->iPos + pud->iDelta;
       if (newVal < 1) newVal = 1;
       if (newVal > 100) newVal = 100;
-      p->m_nMirrorOpacity = newVal;
-      p->UpdateMirrorWindowStyles();
+      int sel = p->m_nDisplaysTabSel;
+      if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+          p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
+        p->m_displayOutputs[sel].config.nOpacity = newVal;
+        p->UpdateMirrorWindowStyles();
+      }
     }
     // Sprite ListView selection change
     if (p && pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
@@ -1249,6 +1253,72 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Hotkey Set button
+    if (id == IDC_MW_HOTKEY_SET && code == BN_CLICKED) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
+      HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
+      int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < HK_COUNT - 1 && hHotkey) {
+        DWORD hk = (DWORD)SendMessage(hHotkey, HKM_GETHOTKEY, 0, 0);
+        UINT vk = LOBYTE(LOWORD(hk));
+        UINT hkMod = HIBYTE(LOWORD(hk));
+        // Convert HOTKEYF_* to MOD_*
+        UINT mod = 0;
+        if (hkMod & HOTKEYF_ALT)     mod |= MOD_ALT;
+        if (hkMod & HOTKEYF_CONTROL) mod |= MOD_CONTROL;
+        if (hkMod & HOTKEYF_SHIFT)   mod |= MOD_SHIFT;
+        if (vk != 0) {
+          // Try to register the new hotkey
+          HWND hRender = p->GetPluginWindow();
+          if (hRender) {
+            // Unregister old first
+            UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
+            if (RegisterHotKey(hRender, p->m_hotkeys[sel].id, mod | MOD_NOREPEAT, vk)) {
+              p->m_hotkeys[sel].modifiers = mod;
+              p->m_hotkeys[sel].vk = vk;
+              p->SaveHotkeySettings();
+              // Refresh list
+              std::wstring entry = p->m_hotkeys[sel].szAction;
+              entry += L": ";
+              entry += p->FormatHotkeyDisplay(mod, vk);
+              SendMessage(hList, LB_DELETESTRING, sel, 0);
+              SendMessage(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
+              SendMessage(hList, LB_SETCURSEL, sel, 0);
+            } else {
+              // Re-register old binding
+              if (p->m_hotkeys[sel].vk != 0)
+                RegisterHotKey(hRender, p->m_hotkeys[sel].id, p->m_hotkeys[sel].modifiers | MOD_NOREPEAT, p->m_hotkeys[sel].vk);
+              p->AddNotification(L"Hotkey already in use by another application");
+            }
+          }
+        }
+      }
+      return 0;
+    }
+
+    // Hotkey Clear button
+    if (id == IDC_MW_HOTKEY_CLEAR && code == BN_CLICKED) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
+      int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < HK_COUNT - 1) {
+        HWND hRender = p->GetPluginWindow();
+        if (hRender) UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
+        p->m_hotkeys[sel].vk = 0;
+        p->m_hotkeys[sel].modifiers = 0;
+        p->SaveHotkeySettings();
+        // Refresh list
+        std::wstring entry = p->m_hotkeys[sel].szAction;
+        entry += L": (none)";
+        SendMessage(hList, LB_DELETESTRING, sel, 0);
+        SendMessage(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
+        SendMessage(hList, LB_SETCURSEL, sel, 0);
+        // Clear the hotkey edit control
+        HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
+        if (hHotkey) SendMessage(hHotkey, HKM_SETHOTKEY, 0, 0);
+      }
+      return 0;
+    }
+
     // Close button
     if (id == IDC_MW_CLOSE && code == BN_CLICKED) {
       PostMessage(hWnd, WM_CLOSE, 0, 0);
@@ -1328,11 +1398,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_WindowBorderless = bChecked;
         p->SaveSettingToINI(SET_BORDERLESS);
         return 0;
-      case IDC_MW_SPOUT:
-        if (bChecked != p->bSpoutOut) {
-          if (hw) PostMessage(hw, WM_MW_TOGGLE_SPOUT, 0, 0);
-        }
-        return 0;
       // ── Displays tab checkboxes ──
       case IDC_MW_DISP_ENABLE: {
         int sel = p->m_nDisplaysTabSel;
@@ -1352,9 +1417,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
             }
             if (isFirst) {
               p->bSpoutOut = bChecked;
-              // Update Sound tab checkbox if visible
-              HWND hSpoutCheck = GetDlgItem(hWnd, IDC_MW_SPOUT);
-              if (hSpoutCheck) SendMessage(hSpoutCheck, BM_SETCHECK, bChecked ? BST_CHECKED : BST_UNCHECKED, 0);
             }
           }
           p->bSpoutChanged = true;
@@ -1387,11 +1449,16 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         }
         return 0;
       }
-      case IDC_MW_DISP_CLICKTHRU:
-        p->m_bMirrorClickThrough = bChecked;
-        p->UpdateMirrorWindowStyles();
-        p->RefreshDisplaysTab();
+      case IDC_MW_DISP_CLICKTHRU: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
+          p->m_displayOutputs[sel].config.bClickThrough = bChecked;
+          p->UpdateMirrorWindowStyles();
+          p->SaveDisplayOutputSettings();
+        }
         return 0;
+      }
       case IDC_MW_DISP_MIRROR_ALTS:
         p->m_bMirrorModeForAltS = bChecked;
         p->SaveDisplayOutputSettings();
@@ -1411,14 +1478,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
-        return 0;
-      case IDC_MW_SPOUT_FIXED:
-        p->bSpoutFixedSize = bChecked;
-        // Sync first Spout output
-        for (auto& o : p->m_displayOutputs) {
-          if (o.config.type == DisplayOutputType::Spout) { o.config.bFixedSize = bChecked; break; }
-        }
-        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
         return 0;
       case IDC_MW_DARK_THEME:
         p->m_bSettingsDarkTheme = bChecked;
@@ -1859,26 +1918,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_AutoHueSeconds = (float)_wtof(buf);
         if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
         return 0;
-      case IDC_MW_SPOUT_WIDTH:
-        p->nSpoutFixedWidth = _wtoi(buf);
-        if (p->nSpoutFixedWidth < 64) p->nSpoutFixedWidth = 64;
-        if (p->nSpoutFixedWidth > 7680) p->nSpoutFixedWidth = 7680;
-        // Sync first Spout output
-        for (auto& o : p->m_displayOutputs) {
-          if (o.config.type == DisplayOutputType::Spout) { o.config.nWidth = p->nSpoutFixedWidth; break; }
-        }
-        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
-        return 0;
-      case IDC_MW_SPOUT_HEIGHT:
-        p->nSpoutFixedHeight = _wtoi(buf);
-        if (p->nSpoutFixedHeight < 64) p->nSpoutFixedHeight = 64;
-        if (p->nSpoutFixedHeight > 4320) p->nSpoutFixedHeight = 4320;
-        // Sync first Spout output
-        for (auto& o : p->m_displayOutputs) {
-          if (o.config.type == DisplayOutputType::Spout) { o.config.nHeight = p->nSpoutFixedHeight; break; }
-        }
-        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
-        return 0;
       case IDC_MW_MSG_INTERVAL: {
         float val = (float)_wtof(buf);
         if (val < 1.0f) val = 1.0f;
@@ -1944,8 +1983,13 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         int val = _wtoi(buf);
         if (val < 1) val = 1;
         if (val > 100) val = 100;
-        p->m_nMirrorOpacity = val;
-        p->UpdateMirrorWindowStyles();
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
+          p->m_displayOutputs[sel].config.nOpacity = val;
+          p->UpdateMirrorWindowStyles();
+          p->SaveDisplayOutputSettings();
+        }
         return 0;
       }
       case IDC_MW_IPC_TITLE: {
@@ -2712,7 +2756,7 @@ void Engine::BuildSettingsControls() {
   SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"Displays", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"System", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"Displays", L"About" };
   for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
@@ -3004,23 +3048,10 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap + 4;
   PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
 
-  // ====== PAGE 3: Sound (created hidden) ======
+  // ====== PAGE 3: System (created hidden) ======
   y = tabTop + 10;
 
-  PAGE_CTRL(3, CreateCheck(hw, L"Spout Output",    IDC_MW_SPOUT,       x, y, rw, lineH, hFont, bSpoutOut, false));
-  y += lineH + 2;
-  PAGE_CTRL(3, CreateCheck(hw, L"Fixed Size",      IDC_MW_SPOUT_FIXED, x, y, rw, lineH, hFont, bSpoutFixedSize, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(3, CreateLabel(hw, L"Width:", x, y, 50, lineH, hFont, false));
-  swprintf(buf, 64, L"%d", nSpoutFixedWidth);
-  PAGE_CTRL(3, CreateEdit(hw, buf, IDC_MW_SPOUT_WIDTH, x + 54, y, 70, lineH, hFont, 0, false));
-  PAGE_CTRL(3, CreateLabel(hw, L"Height:", x + 140, y, 50, lineH, hFont, false));
-  swprintf(buf, 64, L"%d", nSpoutFixedHeight);
-  PAGE_CTRL(3, CreateEdit(hw, buf, IDC_MW_SPOUT_HEIGHT, x + 194, y, 70, lineH, hFont, 0, false));
-  y += lineH + gap + 8;
-
-  // Audio Device (moved here from General tab)
+  // Audio Device
   PAGE_CTRL(3, CreateLabel(hw, L"Audio Device:", x, y, rw, lineH, hFont, false));
   y += lineH;
   {
@@ -3030,6 +3061,48 @@ void Engine::BuildSettingsControls() {
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
     EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
     PAGE_CTRL(3, hCombo);
+  }
+  y += lineH + gap + 8;
+
+  // Global Hotkeys
+  PAGE_CTRL(3, CreateLabel(hw, L"Global Hotkeys", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
+
+  // ListBox showing hotkey bindings
+  {
+    int listH = lineH * 4;
+    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_HOTKEY_LIST, GetModuleHandle(NULL), NULL);
+    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    // Populate hotkey list
+    for (int i = 0; i < HK_COUNT - 1; i++) {
+      std::wstring entry = m_hotkeys[i].szAction;
+      entry += L": ";
+      entry += FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry.c_str());
+    }
+    PAGE_CTRL(3, hList);
+    y += listH + gap;
+  }
+
+  // Hotkey capture control + Set/Clear buttons
+  {
+    int editW = rw - MulDiv(140, lineH, 26);
+    int btnW = MulDiv(60, lineH, 26);
+    int btnGap = 8;
+
+    HWND hHotkey = CreateWindowExW(0, HOTKEY_CLASSW, NULL,
+      WS_CHILD | WS_TABSTOP | WS_BORDER,
+      x, y, editW, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_HOTKEY_EDIT, GetModuleHandle(NULL), NULL);
+    if (hHotkey && hFont) SendMessage(hHotkey, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(3, hHotkey);
+
+    int bx = x + editW + btnGap;
+    PAGE_CTRL(3, CreateBtn(hw, L"Set", IDC_MW_HOTKEY_SET, bx, y, btnW, lineH, hFont));
+    bx += btnW + btnGap;
+    PAGE_CTRL(3, CreateBtn(hw, L"Clear", IDC_MW_HOTKEY_CLEAR, bx, y, btnW, lineH, hFont));
   }
 
   // ====== PAGE 4: Files (created hidden) ======
@@ -3509,17 +3582,15 @@ void Engine::BuildSettingsControls() {
       IDC_MW_DISP_ACTIVATE, x, y, rw, lineH, hFont));
     y += lineH + gap;
 
-    // Mirror click-through checkbox + opacity
-    PAGE_CTRL(9, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false, m_bMirrorClickThrough));
+    // Per-output click-through checkbox + opacity
+    PAGE_CTRL(9, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false, false));
     {
-      wchar_t opBuf[8];
-      swprintf(opBuf, 8, L"%d", m_nMirrorOpacity);
       int opLblW = MulDiv(60, lineH, 26);
       int opEditW = MulDiv(50, lineH, 26);
       int opPctW = MulDiv(20, lineH, 26);
       int opX = x + rw / 2;
       PAGE_CTRL(9, CreateLabel(hw, L"Opacity:", opX, y, opLblW, lineH, hFont, false));
-      HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", opBuf,
+      HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"100",
         WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_RIGHT,
         opX + opLblW + 2, y, opEditW, lineH, hw,
         (HMENU)(INT_PTR)IDC_MW_DISP_OPACITY, GetModuleHandle(NULL), NULL);
@@ -3533,7 +3604,7 @@ void Engine::BuildSettingsControls() {
       if (hSpin) {
         SendMessage(hSpin, UDM_SETBUDDY, (WPARAM)hEdit, 0);
         SendMessage(hSpin, UDM_SETRANGE32, 1, 100);
-        SendMessage(hSpin, UDM_SETPOS32, 0, m_nMirrorOpacity);
+        SendMessage(hSpin, UDM_SETPOS32, 0, 100);
       }
       PAGE_CTRL(9, hSpin);
       PAGE_CTRL(9, CreateLabel(hw, L"%", opX + opLblW + 2 + opEditW + 2, y, opPctW, lineH, hFont, false));
@@ -3551,7 +3622,7 @@ void Engine::BuildSettingsControls() {
 
   {
     wchar_t szVersion[128];
-    swprintf(szVersion, 128, L"Version %d.%d-dev", INT_VERSION / 100, INT_SUBVERSION);
+    swprintf(szVersion, 128, L"Version %d.%d", INT_VERSION / 100, INT_SUBVERSION);
     PAGE_CTRL(10, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
