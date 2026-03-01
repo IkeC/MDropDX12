@@ -27,6 +27,9 @@ extern const unsigned char LC2UC[256];
 // Case-insensitive wide-string compare — defined in engine_input.cpp.
 int mystrcmpiW(const wchar_t* s1, const wchar_t* s2);
 
+// Drag-and-drop preset loading — defined in engine_input.cpp.
+void LoadPresetFilesViaDragAndDrop(WPARAM wParam);
+
 // OnUserEdited callbacks — defined in engine.cpp, used as function pointers in menus.
 void OnUserEditedPerFrame(LPARAM param1, LPARAM param2);
 void OnUserEditedPerPixel(LPARAM param1, LPARAM param2);

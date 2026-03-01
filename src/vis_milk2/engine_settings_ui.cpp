@@ -2733,6 +2733,24 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     }
     break;
 
+  case WM_DROPFILES:
+    LoadPresetFilesViaDragAndDrop(wParam);
+    // Refresh settings UI after potential directory change
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), p->m_szPresetDir);
+    {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList) {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < p->m_nPresets; i++) {
+          if (p->m_presets[i].szFilename.empty()) continue;
+          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+        }
+        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
+          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+      }
+    }
+    return 0;
+
   }
   return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
@@ -2868,6 +2886,7 @@ void Engine::CreateSettingsWindowOnThread() {
     m_bSettingsThreadRunning.store(false);
     return;
   }
+  DragAcceptFiles(m_hSettingsWnd, TRUE);
   BuildSettingsControls();
   ApplySettingsDarkTheme();
 

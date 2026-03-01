@@ -338,48 +338,137 @@ bool Engine::IsBorderlessFullscreen(HWND hWnd) {
     currentRect.bottom == workArea.bottom);
 }
 
+static bool HasPresetExtension(const wchar_t* path) {
+  size_t len = wcslen(path);
+  if (len >= 5 && _wcsicmp(path + len - 5, L".milk") == 0) return true;
+  if (len >= 6 && _wcsicmp(path + len - 6, L".milk2") == 0) return true;
+  return false;
+}
+
+static void ScanFolderForPresets(const wchar_t* folderPath, std::vector<std::wstring>& out) {
+  const wchar_t* patterns[] = { L"\\*.milk", L"\\*.milk2" };
+  for (const wchar_t* pat : patterns) {
+    wchar_t searchPath[MAX_PATH];
+    lstrcpyW(searchPath, folderPath);
+    lstrcatW(searchPath, pat);
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(searchPath, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+      do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+          std::wstring fullPath(folderPath);
+          if (fullPath.back() != L'\\') fullPath += L'\\';
+          fullPath += fd.cFileName;
+          out.push_back(fullPath);
+        }
+      } while (FindNextFileW(hFind, &fd));
+      FindClose(hFind);
+    }
+  }
+}
+
 void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
-
-#ifdef UNICODE
-  TCHAR szDroppedPresetName[MAX_PATH]; // Unicode string
-#else
-  TCHAR szDroppedPresetName[MAX_PATH]; // ANSI string
-#endif
-
-  //TCHAR szDroppedPresetName[MAX_PATH];
   HDROP hDrop = (HDROP)wParam;
+  int count = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+  if (count == 0) { DragFinish(hDrop); return; }
 
-  int count = DragQueryFile(hDrop, 0xFFFFFFFF, szDroppedPresetName, 0);
-
-  //int len = MultiByteToWideChar(MB_PRECOMPOSED, 0, szDroppedPresetName, -1, NULL, 0);
-  //wchar_t* wConvertedDroppedPresetName = new wchar_t[len];
-  //MultiByteToWideChar(MB_PRECOMPOSED, 0, szDroppedPresetName, -1, wConvertedDroppedPresetName, len);
-  //int len2 = lstrlenW(wConvertedDroppedPresetName);
+  // Collect dropped items
+  std::vector<std::wstring> milkFiles;
+  std::vector<std::wstring> folders;
 
   for (int i = 0; i < count; i++) {
-    DragQueryFile(hDrop, i, szDroppedPresetName, MAX_PATH);
-  }
-
-  //ChatGPT
-#ifdef UNICODE
-    // No conversion needed for Unicode build
-  const wchar_t* convertedFileName = szDroppedPresetName;
-#else
-// Convert ANSI string to Unicode
-  wchar_t convertedFileName[MAX_PATH];
-  MultiByteToWideChar(CP_ACP, 0, szDroppedPresetName, -1, convertedFileName, MAX_PATH);
-#endif
-
-  //if (MAX_PATH < 5 || wcsicmp(convertedFileName + MAX_PATH - 5, L".milk") != 0)
-  std::string GetFilename = szDroppedPresetName;
-  if (GetFilename.substr(GetFilename.find_last_of(".") + 1) == "milk") //from https://stackoverflow.com/a/51999
-    g_engine.LoadPreset(convertedFileName, 0.0f);
-  else {
-    wchar_t buf[1024];
-    swprintf(buf, L"Error: Failed to load dropped preset file: %s", convertedFileName);
-    g_engine.AddError(buf, 5.0f, ERR_NOTIFY, true);
+    wchar_t path[MAX_PATH];
+    DragQueryFileW(hDrop, i, path, MAX_PATH);
+    DWORD attrs = GetFileAttributesW(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) continue;
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY)
+      folders.push_back(path);
+    else if (HasPresetExtension(path))
+      milkFiles.push_back(path);
   }
   DragFinish(hDrop);
+
+  int totalItems = (int)milkFiles.size() + (int)folders.size();
+  if (totalItems == 0) {
+    g_engine.AddError((wchar_t*)L"No preset files or folders found in drop", 3.5f, ERR_NOTIFY, true);
+    return;
+  }
+
+  // Case 1: Single preset file — load from original location
+  if (totalItems == 1 && milkFiles.size() == 1) {
+    g_engine.LoadPreset(milkFiles[0].c_str(), 0.0f);
+    return;
+  }
+
+  // Case 2: Single folder — use as preset directory
+  if (totalItems == 1 && folders.size() == 1) {
+    std::wstring dir = folders[0];
+    if (dir.back() != L'\\') dir += L'\\';
+    lstrcpyW(g_engine.m_szPresetDir, dir.c_str());
+    WritePrivateProfileStringW(L"Settings", L"szPresetDir", g_engine.m_szPresetDir, g_engine.GetConfigIniFile());
+    g_engine.UpdatePresetList(false, true);
+    wchar_t buf[512];
+    swprintf(buf, 512, L"Preset directory: %s", g_engine.m_szPresetDir);
+    g_engine.AddNotification(buf);
+    return;
+  }
+
+  // Case 3: Multiple items — create Preset-DND directory, copy presets
+  // Scan dropped folders for preset files
+  for (const auto& folder : folders)
+    ScanFolderForPresets(folder.c_str(), milkFiles);
+
+  if (milkFiles.empty()) {
+    g_engine.AddError((wchar_t*)L"No preset files found in dropped items", 3.5f, ERR_NOTIFY, true);
+    return;
+  }
+
+  // Create timestamped DND directory
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+  wchar_t timestamp[16];
+  swprintf(timestamp, 16, L"%02d%02d%02d%02d%02d", st.wYear % 100, st.wMonth, st.wDay, st.wHour, st.wMinute);
+
+  wchar_t parentDir[MAX_PATH];
+  swprintf(parentDir, MAX_PATH, L"%sPreset-DND", g_engine.m_szBaseDir);
+  CreateDirectoryW(parentDir, NULL);
+
+  wchar_t dndDir[MAX_PATH];
+  swprintf(dndDir, MAX_PATH, L"%sPreset-DND\\%s\\", g_engine.m_szBaseDir, timestamp);
+  wchar_t dndDirNoSlash[MAX_PATH];
+  swprintf(dndDirNoSlash, MAX_PATH, L"%sPreset-DND\\%s", g_engine.m_szBaseDir, timestamp);
+  CreateDirectoryW(dndDirNoSlash, NULL);
+
+  // Copy preset files into DND directory
+  int copied = 0;
+  std::wstring firstDest;
+  for (const auto& src : milkFiles) {
+    size_t pos = src.find_last_of(L'\\');
+    std::wstring filename = (pos != std::wstring::npos) ? src.substr(pos + 1) : src;
+    std::wstring dest = std::wstring(dndDir) + filename;
+    if (CopyFileW(src.c_str(), dest.c_str(), FALSE)) {
+      if (firstDest.empty()) firstDest = dest;
+      copied++;
+    }
+  }
+
+  if (copied == 0) {
+    g_engine.AddError((wchar_t*)L"Failed to copy preset files", 3.5f, ERR_NOTIFY, true);
+    return;
+  }
+
+  // Set as preset directory
+  lstrcpyW(g_engine.m_szPresetDir, dndDir);
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", g_engine.m_szPresetDir, g_engine.GetConfigIniFile());
+  g_engine.UpdatePresetList(false, true);
+
+  // Load first preset
+  if (!firstDest.empty())
+    g_engine.LoadPreset(firstDest.c_str(), 0.0f);
+
+  wchar_t buf[512];
+  swprintf(buf, 512, L"Preset-DND/%s \u2014 %d presets copied", timestamp, copied);
+  g_engine.AddNotification(buf);
 }
 //----------------------------------------------------------------------
 
@@ -777,6 +866,20 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
   case WM_DROPFILES:
     LoadPresetFilesViaDragAndDrop(wParam);
+    // Refresh settings window if open
+    if (m_hSettingsWnd) {
+      SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR), m_szPresetDir);
+      HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_LIST);
+      if (hList) {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < m_nPresets; i++) {
+          if (m_presets[i].szFilename.empty()) continue;
+          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+        }
+        if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
+          SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
+      }
+    }
     return 0;
 
 
