@@ -94,6 +94,12 @@ void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pF
 
   if (!lpDX) return;
 
+  // Scale HUD fonts (SIMPLE_FONT, DECORATIVE_FONT) proportional to window height.
+  // Baseline at 720p (scale=1.0); at 1080p ~1.5x, at 1440p ~2.0x.
+  // This replaces the GDI overlay's dynamic font sizing (h/32).
+  int clientH = lpDX->m_client_height;
+  m_hudFontScale = (clientH > 0) ? max(1.0f, (float)clientH / 720.0f) : 1.0f;
+
   // Build a font atlas for each configured font
   for (int i = 0; i < nFonts && i < MAX_TEXT_FONTS; i++) {
     if (!BuildFontAtlas(i)) {
@@ -115,8 +121,14 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   td_fontinfo& fi = fonts[fontIdx];
 
   // 1. Create GDI font matching the configured settings
+  // Scale HUD fonts (SIMPLE=0, DECORATIVE=1) proportional to window height.
+  // Other fonts (help, playlist, extras) keep their configured sizes.
+  int fontSize = fi.nSize;
+  if (fontIdx <= 1 && m_hudFontScale > 1.0f) {
+    fontSize = (int)(fi.nSize * m_hudFontScale);
+  }
   HFONT hFont = CreateFontW(
-    fi.nSize, 0, 0, 0,
+    fontSize, 0, 0, 0,
     fi.bBold ? FW_BOLD : FW_NORMAL,
     fi.bItalic, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -290,8 +302,17 @@ void CTextManager::CleanupDX12() {
 }
 
 void CTextManager::OnResize(int newW, int newH) {
-  // Font atlases are independent of back buffer size — nothing to do.
-  (void)newW; (void)newH;
+  // Recalculate HUD font scale and rebuild SIMPLE/DECORATIVE atlases if scale changed.
+  float newScale = (newH > 0) ? max(1.0f, (float)newH / 720.0f) : 1.0f;
+  if (fabsf(newScale - m_hudFontScale) > 0.01f) {
+    m_hudFontScale = newScale;
+    // Rebuild only the HUD font atlases (indices 0 and 1)
+    for (int i = 0; i < 2 && i < m_nFonts; i++) {
+      m_atlases[i].texture.Reset();
+      m_atlases[i].valid = false;
+      BuildFontAtlas(i);
+    }
+  }
 }
 
 void CTextManager::ClearAll() {

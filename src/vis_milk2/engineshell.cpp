@@ -635,10 +635,11 @@ int EngineShell::AllocateDX9Stuff() {
   m_playlist_top_idx = -1;    // invalidating playlist cache forces recompute of playlist width
   //m_icon_list.clear();      // clear desktop mode icon list, so it has to read the bitmaps back in
 
-  // Start debug overlay thread (transparent layered window for FPS/debug info)
-  if (m_lpDX && !m_overlay.IsAlive()) {
-    m_overlay.Init(GetPluginWindow(), m_lpDX->m_client_width, m_lpDX->m_client_height);
-  }
+  // GDI overlay disabled — HUD text now rendered via DX12 font atlas (CTextManager).
+  // The overlay had layered window issues in fullscreen and during move/resize.
+  // All HUD elements (FPS, preset name, debug info, notifications) use the
+  // !m_overlay.IsAlive() fallback paths in MyRenderUI / engine_rendering.cpp.
+  // Menu is rendered via m_pCurMenu->DrawMenu() (DX12 text pipeline).
 
   return ret;
 }
@@ -2376,7 +2377,6 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
     break;
 
   case WM_SIZE:
-
     // clear or set activity flag to reflect focus
     if (m_lpDX && m_lpDX->m_ready && !m_resizing) {
       m_hidden = (SIZE_MAXHIDE == wParam || SIZE_MINIMIZED == wParam) ? TRUE : FALSE;

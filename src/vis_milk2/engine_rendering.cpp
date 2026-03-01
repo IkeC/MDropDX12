@@ -1052,9 +1052,23 @@ void Engine::MyRenderUI(
       }
     }
     else if (m_UI_mode == UI_MENU) {
-      // Menu is rendered entirely via the overlay window (GDI layered window).
-      // Data is fed to the overlay thread earlier in this function.
-      // No DX12 rendering needed here.
+      if (m_pCurMenu) {
+        RECT rect;
+        SetRect(&rect, xL, *upper_left_corner_y, xR, *lower_left_corner_y);
+
+        // First pass: calculate bounding box for dark background
+        RECT box;
+        m_pCurMenu->DrawMenu(rect, xR, *lower_right_corner_y, 1, &box);
+        box.top -= PLAYLIST_INNER_MARGIN;
+        box.left -= PLAYLIST_INNER_MARGIN;
+        box.right += PLAYLIST_INNER_MARGIN;
+        box.bottom += PLAYLIST_INNER_MARGIN;
+        DrawDarkTranslucentBox(&box);
+        *upper_left_corner_y += box.bottom - box.top + PLAYLIST_INNER_MARGIN * 3;
+
+        // Second pass: draw menu items
+        m_pCurMenu->DrawMenu(rect, xR, *lower_right_corner_y);
+      }
     }
     else if (m_UI_mode == UI_UPGRADE_PIXEL_SHADER) {
       RECT rect = { 0 };

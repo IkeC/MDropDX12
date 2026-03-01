@@ -142,6 +142,7 @@ protected:
   // Font atlases (one per font slot)
   FontAtlas     m_atlases[MAX_TEXT_FONTS];
   bool          m_ready;
+  float         m_hudFontScale = 1.0f;  // scale factor for HUD fonts (SIMPLE, DECORATIVE) based on window height
 
 private:
   bool BuildFontAtlas(int fontIdx);
