@@ -11,9 +11,12 @@ void Engine::LoadHotkeySettings()
 {
     wchar_t* pIni = GetConfigIniFile();
 
-    // Initialize defaults
-    m_hotkeys[0] = { HK_TOGGLE_FULLSCREEN, MOD_ALT, VK_RETURN, L"Toggle Fullscreen", L"ToggleFullscreen" };
-    m_hotkeys[1] = { HK_TOGGLE_STRETCH,    MOD_ALT, 'S',       L"Toggle Stretch/Mirror", L"ToggleStretch" };
+    // Initialize defaults (disabled until user configures them in Settings → System)
+    m_hotkeys[0] = { HK_TOGGLE_FULLSCREEN, 0, 0, L"Toggle Fullscreen", L"ToggleFullscreen" };
+    m_hotkeys[1] = { HK_TOGGLE_STRETCH,    0, 0, L"Toggle Stretch/Mirror", L"ToggleStretch" };
+
+    // Read master enable flag
+    m_bGlobalHotkeysEnabled = GetPrivateProfileIntW(L"Hotkeys", L"Enabled", 0, pIni) != 0;
 
     // Read from INI
     for (int i = 0; i < HK_COUNT - 1; i++) {
@@ -31,6 +34,8 @@ void Engine::SaveHotkeySettings()
     wchar_t* pIni = GetConfigIniFile();
     wchar_t buf[64];
 
+    WritePrivateProfileStringW(L"Hotkeys", L"Enabled", m_bGlobalHotkeysEnabled ? L"1" : L"0", pIni);
+
     for (int i = 0; i < HK_COUNT - 1; i++) {
         wchar_t modKey[128], vkKey[128];
         swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
@@ -45,7 +50,7 @@ void Engine::SaveHotkeySettings()
 
 void Engine::RegisterGlobalHotkeys(HWND hwnd)
 {
-    if (!hwnd) return;
+    if (!hwnd || !m_bGlobalHotkeysEnabled) return;
     for (int i = 0; i < HK_COUNT - 1; i++) {
         if (m_hotkeys[i].vk != 0) {
             RegisterHotKey(hwnd, m_hotkeys[i].id, m_hotkeys[i].modifiers | MOD_NOREPEAT, m_hotkeys[i].vk);

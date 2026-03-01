@@ -4,7 +4,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.0-dev) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.0) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5-dev) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active |
 
@@ -208,6 +208,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 | In-app settings window (F8) | ✅ | ✅ | ✅ |
 | Dark theme settings UI | ✅ | ❌ | ❌ |
 | Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ |
+| Per-display opacity and click-through | ✅ | ❌ | ❌ |
+| Configurable global hotkeys | ✅ | ❌ | ❌ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
 
 ## Expression Evaluation

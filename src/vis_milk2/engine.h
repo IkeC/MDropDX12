@@ -393,6 +393,7 @@ public:
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
 
   // Global hotkeys
+  bool m_bGlobalHotkeysEnabled = false;    // Off by default; user enables in Settings → System
   HotkeyBinding m_hotkeys[HK_COUNT - 1];  // HK_TOGGLE_FULLSCREEN=1, so index 0..1
   void LoadHotkeySettings();
   void SaveHotkeySettings();

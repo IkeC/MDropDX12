@@ -673,11 +673,32 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
 }
 
 static void ToggleFullScreen(HWND hwnd) {
-  if (g_engine.IsBorderlessFullscreen(hwnd)) {
-    // ShowCursor(TRUE);
+  if (fullscreen) {
+    // Regular fullscreen → restore to saved position
+    ShowCursor(TRUE);
+
+    int x = lastRect.left;
+    int y = lastRect.top;
+    int width = lastRect.right - lastRect.left;
+    int height = lastRect.bottom - lastRect.top;
+
+    g_engine.SetVariableBackBuffer(width, height);
+    SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
+    fullscreen = false;
+
+    SetWindowLongPtrW(hwnd, GWL_STYLE, lastWindowStyle);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, lastRect.left, lastRect.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
+    SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+    if (borderless) {
+      SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+      SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
+    }
+  }
+  else if (g_engine.IsBorderlessFullscreen(hwnd)) {
     ToggleBorderlessFullscreen(hwnd);
   }
-  else if (!fullscreen) {
+  else {
     ShowCursor(FALSE);
 
     if (!stretch) {
@@ -707,28 +728,6 @@ static void ToggleFullScreen(HWND hwnd) {
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     DragAcceptFiles(hwnd, TRUE);
     fullscreen = true;
-  }
-  else {
-    ShowCursor(TRUE);
-
-    int x = lastRect.left;
-    int y = lastRect.top;
-    int width = lastRect.right - lastRect.left;
-    int height = lastRect.bottom - lastRect.top;
-
-    g_engine.SetVariableBackBuffer(width, height);
-    // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
-    SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
-    fullscreen = false;
-
-    SetWindowLongPtrW(hwnd, GWL_STYLE, lastWindowStyle);
-    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
-    SetWindowPos(hwnd, HWND_NOTOPMOST, lastRect.left, lastRect.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
-    SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
-    if (borderless) {
-      SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-      SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
-    }
   }
   stretch = false;
 }
@@ -1505,6 +1504,24 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   {
     if (wParam == VK_F4) { // Alt+F4: close via WM_CLOSE for proper render thread shutdown
       PostMessage(hWnd, WM_CLOSE, 0, 0);
+    }
+    else if (wParam == 'S' || wParam == 's') {
+      if (g_engine.m_bMirrorModeForAltS) {
+        if (!g_engine.m_bMirrorsActive) {
+          if (!fullscreen) ToggleFullScreen(hWnd);
+          g_engine.m_bMirrorsActive = true;
+          g_engine.AddNotification(L"Mirror outputs active");
+        } else {
+          g_engine.m_bMirrorsActive = false;
+          if (fullscreen) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs disabled");
+        }
+      } else {
+        ToggleStretch(hWnd);
+      }
+    }
+    else if (wParam == VK_RETURN) {
+      ToggleFullScreen(hWnd);
     }
     else {
       g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);

@@ -1258,41 +1258,48 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
       HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
       int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < HK_COUNT - 1 && hHotkey) {
-        DWORD hk = (DWORD)SendMessage(hHotkey, HKM_GETHOTKEY, 0, 0);
-        UINT vk = LOBYTE(LOWORD(hk));
-        UINT hkMod = HIBYTE(LOWORD(hk));
-        // Convert HOTKEYF_* to MOD_*
-        UINT mod = 0;
-        if (hkMod & HOTKEYF_ALT)     mod |= MOD_ALT;
-        if (hkMod & HOTKEYF_CONTROL) mod |= MOD_CONTROL;
-        if (hkMod & HOTKEYF_SHIFT)   mod |= MOD_SHIFT;
-        if (vk != 0) {
-          // Try to register the new hotkey
-          HWND hRender = p->GetPluginWindow();
-          if (hRender) {
-            // Unregister old first
-            UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
-            if (RegisterHotKey(hRender, p->m_hotkeys[sel].id, mod | MOD_NOREPEAT, vk)) {
-              p->m_hotkeys[sel].modifiers = mod;
-              p->m_hotkeys[sel].vk = vk;
-              p->SaveHotkeySettings();
-              // Refresh list
-              std::wstring entry = p->m_hotkeys[sel].szAction;
-              entry += L": ";
-              entry += p->FormatHotkeyDisplay(mod, vk);
-              SendMessage(hList, LB_DELETESTRING, sel, 0);
-              SendMessage(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
-              SendMessage(hList, LB_SETCURSEL, sel, 0);
-            } else {
-              // Re-register old binding
-              if (p->m_hotkeys[sel].vk != 0)
-                RegisterHotKey(hRender, p->m_hotkeys[sel].id, p->m_hotkeys[sel].modifiers | MOD_NOREPEAT, p->m_hotkeys[sel].vk);
-              p->AddNotification(L"Hotkey already in use by another application");
-            }
-          }
+      if (sel < 0 || sel >= HK_COUNT - 1) {
+        p->AddNotification(L"Select a hotkey action from the list first");
+        return 0;
+      }
+      if (!hHotkey) return 0;
+      DWORD hk = (DWORD)SendMessage(hHotkey, HKM_GETHOTKEY, 0, 0);
+      UINT vk = LOBYTE(LOWORD(hk));
+      UINT hkMod = HIBYTE(LOWORD(hk));
+      if (vk == 0) {
+        p->AddNotification(L"Press a key combination in the hotkey field first");
+        return 0;
+      }
+      // Convert HOTKEYF_* to MOD_*
+      UINT mod = 0;
+      if (hkMod & HOTKEYF_ALT)     mod |= MOD_ALT;
+      if (hkMod & HOTKEYF_CONTROL) mod |= MOD_CONTROL;
+      if (hkMod & HOTKEYF_SHIFT)   mod |= MOD_SHIFT;
+      // Save binding (and register if global hotkeys are enabled)
+      HWND hRender = p->GetPluginWindow();
+      if (hRender && p->m_bGlobalHotkeysEnabled) {
+        // Unregister old first
+        UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
+        if (!RegisterHotKey(hRender, p->m_hotkeys[sel].id, mod | MOD_NOREPEAT, vk)) {
+          // Re-register old binding
+          if (p->m_hotkeys[sel].vk != 0)
+            RegisterHotKey(hRender, p->m_hotkeys[sel].id, p->m_hotkeys[sel].modifiers | MOD_NOREPEAT, p->m_hotkeys[sel].vk);
+          p->AddNotification(L"Hotkey already in use by another application");
+          return 0;
         }
       }
+      p->m_hotkeys[sel].modifiers = mod;
+      p->m_hotkeys[sel].vk = vk;
+      p->SaveHotkeySettings();
+      // Refresh list
+      std::wstring entry = p->m_hotkeys[sel].szAction;
+      entry += L": ";
+      entry += p->FormatHotkeyDisplay(mod, vk);
+      SendMessageW(hList, LB_DELETESTRING, sel, 0);
+      SendMessageW(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
+      SendMessageW(hList, LB_SETCURSEL, sel, 0);
+      std::wstring notif = L"Hotkey set: " + p->FormatHotkeyDisplay(mod, vk);
+      p->AddNotification((wchar_t*)notif.c_str());
       return 0;
     }
 
@@ -1309,12 +1316,12 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         // Refresh list
         std::wstring entry = p->m_hotkeys[sel].szAction;
         entry += L": (none)";
-        SendMessage(hList, LB_DELETESTRING, sel, 0);
-        SendMessage(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
-        SendMessage(hList, LB_SETCURSEL, sel, 0);
+        SendMessageW(hList, LB_DELETESTRING, sel, 0);
+        SendMessageW(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
+        SendMessageW(hList, LB_SETCURSEL, sel, 0);
         // Clear the hotkey edit control
         HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
-        if (hHotkey) SendMessage(hHotkey, HKM_SETHOTKEY, 0, 0);
+        if (hHotkey) SendMessageW(hHotkey, HKM_SETHOTKEY, 0, 0);
       }
       return 0;
     }
@@ -1479,6 +1486,17 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
         return 0;
+      case IDC_MW_HOTKEY_ENABLE: {
+        p->m_bGlobalHotkeysEnabled = bChecked;
+        HWND hRender = p->GetPluginWindow();
+        if (hRender) {
+          p->UnregisterGlobalHotkeys(hRender);
+          if (bChecked)
+            p->RegisterGlobalHotkeys(hRender);
+        }
+        p->SaveHotkeySettings();
+        return 0;
+      }
       case IDC_MW_DARK_THEME:
         p->m_bSettingsDarkTheme = bChecked;
         WritePrivateProfileStringW(L"SettingsTheme", L"DarkTheme",
@@ -2618,7 +2636,7 @@ void Engine::CreateSettingsWindowOnThread() {
   RegisterClassExW(&wc);
 
   // Init common controls for trackbar and tab support
-  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
+  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS };
   InitCommonControlsEx(&icex);
 
   // Create theme brushes BEFORE window creation so WM_ERASEBKGND works during CreateWindowEx
@@ -3065,7 +3083,8 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap + 8;
 
   // Global Hotkeys
-  PAGE_CTRL(3, CreateLabel(hw, L"Global Hotkeys", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(3, CreateLabel(hw, L"Global Hotkeys", x, y, rw / 2 - 4, lineH, hFontBold, false));
+  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_HOTKEY_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bGlobalHotkeysEnabled));
   y += lineH + gap;
 
   // ListBox showing hotkey bindings
@@ -3082,11 +3101,14 @@ void Engine::BuildSettingsControls() {
       entry += FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
       SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry.c_str());
     }
+    SendMessage(hList, LB_SETCURSEL, 0, 0);  // Auto-select first item
     PAGE_CTRL(3, hList);
     y += listH + gap;
   }
 
   // Hotkey capture control + Set/Clear buttons
+  PAGE_CTRL(3, CreateLabel(hw, L"Press new key combo below, then click Set:", x, y, rw, lineH, hFont, false));
+  y += lineH + 2;
   {
     int editW = rw - MulDiv(140, lineH, 26);
     int btnW = MulDiv(60, lineH, 26);

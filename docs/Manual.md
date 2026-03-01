@@ -185,12 +185,10 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Auto Hue**: Automatically cycle hue over a configurable period
 - **Reset**: Restore color defaults
 
-### Sound Tab
+### System Tab
 
 - **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
-- **Spout Output**: Enable/disable Spout texture sharing (see Spout Output section below)
-- **Fixed Size**: Use fixed Spout output resolution
-- **Spout Width / Height**: Fixed output dimensions
+- **Global Hotkeys**: Configure system-wide hotkeys that work even when MDropDX12 is not the active window. Check **Enable** to activate global hotkeys. Select an action from the list, press a key combination in the capture field, and click **Set** to assign it. Click **Clear** to remove a hotkey. If a hotkey conflicts with another application, a notification appears and the previous binding is kept. Global hotkeys are disabled by default. ALT+S and ALT+ENTER always work as local shortcuts when the visualizer window has focus.
 
 ### Files Tab
 
