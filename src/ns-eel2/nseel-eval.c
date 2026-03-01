@@ -148,7 +148,7 @@ const char *nseel_simple_tokenizer(const char **ptr, const char *endptr, int *le
 {
   const char *p = *ptr;
   const char *rv = p;
-  char delim;
+  char delim = 0;
 
   if (state) // if state set, returns comments as tokens
   {

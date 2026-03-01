@@ -6338,7 +6338,7 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   }
 
   // bind "texsize_XYZ" params
-  int N = p->texsize_params.size();
+  int N = (int)p->texsize_params.size();
   for (int i = 0; i < N; i++) {
     TexSizeParamInfo* q = &(p->texsize_params[i]);
     pCT->SetVector(lpDevice, q->texsize_param, &D3DXVECTOR4((float)q->w, (float)q->h, 1.0f / q->w, 1.0f / q->h));

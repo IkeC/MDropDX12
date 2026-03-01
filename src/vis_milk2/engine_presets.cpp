@@ -2122,11 +2122,11 @@ retry:
           char* p = szLine;
 
           int bytes_to_read = sizeof(szLine) - 1;
-          int count = fread(szLine, bytes_to_read, 1, f);
+          size_t count = fread(szLine, bytes_to_read, 1, f);
           if (count < 1) {
             fseek(f, SEEK_SET, 0);
             count = fread(szLine, 1, bytes_to_read, f);
-            szLine[count] = 0;
+            szLine[(int)count] = 0;
           }
           else
             szLine[bytes_to_read - 1] = 0;
@@ -2313,7 +2313,7 @@ void Engine::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectCu
   DWORD flags = (bForce ? 1 : 0) | (bTryReselectCurrentPreset ? 2 : 0);
   g_bThreadShouldQuit = false;
   g_bThreadAlive = true;
-  g_hThread = (HANDLE)_beginthreadex(NULL, 0, __UpdatePresetList, (void*)flags, 0, 0);
+  g_hThread = (HANDLE)_beginthreadex(NULL, 0, __UpdatePresetList, (void*)(uintptr_t)flags, 0, 0);
 
   if (!bBackground) {
     // crank up priority, wait for it to finish, and then return

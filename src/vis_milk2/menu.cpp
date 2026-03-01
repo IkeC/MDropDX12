@@ -465,14 +465,14 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
             g_engine.m_waitstring.bFilterBadChars = false;
             g_engine.m_waitstring.bDisplayAsCode = false;
             g_engine.m_waitstring.nSelAnchorPos = -1;
-            g_engine.m_waitstring.nMaxLen = min(sizeof(g_engine.m_waitstring.szText) - 1, MAX_PATH - wcslen(g_engine.GetPresetDir()) - 6);	// 6 for the extension + null char.    We set this because win32 LoadFile, MoveFile, etc. barf if the path+filename+ext are > MAX_PATH chars.
+            g_engine.m_waitstring.nMaxLen = (int)min(sizeof(g_engine.m_waitstring.szText) - 1, MAX_PATH - wcslen(g_engine.GetPresetDir()) - 6);	// 6 for the extension + null char.    We set this because win32 LoadFile, MoveFile, etc. barf if the path+filename+ext are > MAX_PATH chars.
             swprintf(g_engine.m_waitstring.szText, L"%sfile.dat", g_engine.m_szPresetDir);
             if (g_engine.m_UI_mode == UI_IMPORT_WAVE || g_engine.m_UI_mode == UI_IMPORT_SHAPE)
               wasabiApiLangString(IDS_LOAD_FROM_FILE, g_engine.m_waitstring.szPrompt, 512);
             else
               wasabiApiLangString(IDS_SAVE_TO_FILE, g_engine.m_waitstring.szPrompt, 512);
             g_engine.m_waitstring.szToolTip[0] = 0;
-            g_engine.m_waitstring.nCursorPos = wcslen(g_engine.m_waitstring.szText);	// set the starting edit position
+            g_engine.m_waitstring.nCursorPos = (int)wcslen(g_engine.m_waitstring.szText);	// set the starting edit position
           }
           break;
         case MENUITEMTYPE_BOOL:
@@ -511,7 +511,7 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
           lstrcpyA((char*)g_engine.m_waitstring.szText, (char*)addr);
           swprintf(g_engine.m_waitstring.szPrompt, wasabiApiLangString(IDS_ENTER_THE_NEW_STRING), pItem->m_szName);
           lstrcpyW(g_engine.m_waitstring.szToolTip, pItem->m_szToolTip);
-          g_engine.m_waitstring.nCursorPos = strlen/*wcslen*/((char*)g_engine.m_waitstring.szText);
+          g_engine.m_waitstring.nCursorPos = (int)strlen/*wcslen*/((char*)g_engine.m_waitstring.szText);
           if (pItem->m_nLastCursorPos < g_engine.m_waitstring.nCursorPos)
             g_engine.m_waitstring.nCursorPos = pItem->m_nLastCursorPos;
           break;

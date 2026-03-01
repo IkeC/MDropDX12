@@ -47,7 +47,7 @@ CShaderParams::CShaderParams() {
 CShaderParams::~CShaderParams() {
   auto first = global_CShaderParams_master_list.begin();
 
-  int N = global_CShaderParams_master_list.size();
+  int N = (int)global_CShaderParams_master_list.size();
   for (int i = 0; i < N; i++)
     if (global_CShaderParams_master_list[i] == this)
       global_CShaderParams_master_list.erase(first + i);
@@ -265,7 +265,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
         // see if <szRootName>.tga or .jpg has already been loaded.
         //   (if so, grab a pointer to it)
         //   (if NOT, create & load it).
-        int N = g_engine.m_textures.size();
+        int N = (int)g_engine.m_textures.size();
         for (int n = 0; n < N; n++) {
           if (!wcscmp(g_engine.m_textures[n].texname, szRootName)) {
             // found a match - texture was already loaded
@@ -390,7 +390,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             while (1) {
               int nTexturesCached = 0;
               int nBytesCached = 0;
-              int N = g_engine.m_textures.size();
+              int N = (int)g_engine.m_textures.size();
               for (int i = 0; i < N; i++)
                 if (g_engine.m_textures[i].bEvictable && g_engine.m_textures[i].texptr) {
                   nBytesCached += g_engine.m_textures[i].nSizeInBytes;
@@ -545,7 +545,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 
           // see if <szRootName>.tga or .jpg has already been loaded.
           bool bTexFound = false;
-          int N = g_engine.m_textures.size();
+          int N = (int)g_engine.m_textures.size();
           for (int n = 0; n < N; n++) {
             if (!wcscmp(g_engine.m_textures[n].texname, szRootName)) {
               // found a match - texture was loaded

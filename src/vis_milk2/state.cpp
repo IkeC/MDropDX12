@@ -133,7 +133,7 @@ bool _GetLineByName(FILE* f, const char* szVarName, char* szRet, int nMaxRetChar
 
   // if current line isn't the one, check all the others...
   if (MyLineNum < 0 || (size_t)MyLineNum >= line_varName.size() || strcmp(line_varName[MyLineNum].c_str(), szVarName) != 0) {
-    int N = line_varName.size();
+    int N = (int)line_varName.size();
     int i;
     for (i = 0; i < N; i++)
       if (strcmp(line_varName[i].c_str(), szVarName) == 0) {
@@ -1066,7 +1066,7 @@ void ReadCode(FILE* f, char* pStr, char* prefix) {
     sprintf(szLineName, "%s%d", prefix, line);
 
     GetFastString(szLineName, "~!@#$", szLine, MAX_BIGSTRING_LEN, f);	// fixme
-    len = strlen(szLine);
+    len = (int)strlen(szLine);
 
     if ((strcmp(szLine, "~!@#$") == 0) ||		// if the key was missing,
       (len >= MAX_BIGSTRING_LEN - 1 - char_pos - 1))			// or if we're out of space
@@ -1406,7 +1406,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     ReadCode(f, m_szWarpShadersText, "warp_");
     {
       char dbg[512];
-      int textLen = strlen(m_szWarpShadersText);
+      int textLen = (int)strlen(m_szWarpShadersText);
       char preview[201] = {0};
       if (textLen > 0) {
         strncpy(preview, m_szWarpShadersText, 200);
@@ -1431,7 +1431,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     ReadCode(f, m_szCompShadersText, "comp_");
     {
       char dbg[512];
-      int textLen = strlen(m_szCompShadersText);
+      int textLen = (int)strlen(m_szCompShadersText);
       char preview[201] = {0};
       if (textLen > 0) {
         strncpy(preview, m_szCompShadersText, 200);
@@ -1548,7 +1548,7 @@ void CState::StripLinefeedCharsAndComments(char* src, char* dest) {
   // Restriction: sizeof(dest) must be >= sizeof(src).
 
   int i2 = 0;
-  int len = strlen(src);
+  int len = (int)strlen(src);
   int bComment = false;
   for (int i = 0; i < len; i++) {
     if (bComment) {

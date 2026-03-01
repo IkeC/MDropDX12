@@ -757,9 +757,9 @@ int GetDesktopIconSize() {
 
 // handy functions for populating Combo Boxes:
 int SelectItemByValue(HWND ctrl, DWORD value) {
-  int count = SendMessage(ctrl, CB_GETCOUNT, 0, 0);
+  int count = (int)SendMessage(ctrl, CB_GETCOUNT, 0, 0);
   for (int i = 0; i < count; i++) {
-    DWORD value_i = SendMessage(ctrl, CB_GETITEMDATA, i, 0);
+    DWORD value_i = (DWORD)SendMessage(ctrl, CB_GETITEMDATA, i, 0);
     if (value_i == value) {
       SendMessage(ctrl, CB_SETCURSEL, i, 0);
       return i;
@@ -772,7 +772,7 @@ bool ReadCBValue(HWND hwnd, DWORD ctrl_id, int* pRetValue) {
   if (!pRetValue)
     return false;
   HWND ctrl = GetDlgItem(hwnd, ctrl_id);
-  int t = SendMessage(ctrl, CB_GETCURSEL, 0, 0);
+  int t = (int)SendMessage(ctrl, CB_GETCURSEL, 0, 0);
   if (t == CB_ERR)
     return false;
   *pRetValue = (int)SendMessage(ctrl, CB_GETITEMDATA, t, 0);

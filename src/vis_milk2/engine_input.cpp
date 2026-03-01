@@ -573,7 +573,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
           if (m_waitstring.bDisplayAsCode) {
             char buf[16];
-            sprintf(buf, "%c", wParam);
+            sprintf(buf, "%c", (int)wParam);
 
             if (m_waitstring.nSelAnchorPos != -1)
               WaitString_NukeSelection();
@@ -606,7 +606,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           }
           else {
             wchar_t buf[16];
-            swprintf(buf, L"%c", wParam);
+            swprintf(buf, L"%c", (int)wParam);
 
             if (m_waitstring.nSelAnchorPos != -1)
               WaitString_NukeSelection();
@@ -1894,7 +1894,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
     return 0; // we processed (or absorbed) the key
   }
   else if (m_UI_mode == UI_MASHUP && wParam >= '1' && wParam <= ('0' + MASH_SLOTS)) {
-    m_nMashSlot = wParam - '1';
+    m_nMashSlot = (int)(wParam - '1');
   }
   else switch (wParam) {
   case '0':
@@ -1908,7 +1908,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
   case '8':
   case '9':
   {
-    int digit = wParam - '0';
+    int digit = (int)(wParam - '0');
     m_nNumericInputNum = (m_nNumericInputNum * 10) + digit;
     m_nNumericInputDigits++;
 

@@ -487,7 +487,7 @@ bool Engine::EvictSomeTexture() {
   }
 #endif
 
-  int N = m_textures.size();
+  int N = (int)m_textures.size();
 
   // find age gap
   int newest = 99999999;
@@ -525,7 +525,7 @@ bool Engine::EvictSomeTexture() {
   assert(m_textures[biggest_index].texptr);
 
   // notify all CShaderParams classes that we're releasing a bindable texture!!
-  N = global_CShaderParams_master_list.size();
+  N = (int)global_CShaderParams_master_list.size();
   for (int i = 0; i < N; i++)
     global_CShaderParams_master_list[i]->OnTextureEvict(m_textures[biggest_index].texptr);
 
@@ -613,12 +613,12 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
   else {
     // only pick from files w/the right prefix
     StringVec temp_list;
-    int N = texfiles.size();
+    int N = (int)texfiles.size();
     int len = lstrlenW(prefix);
     for (int i = 0; i < N; i++)
       if (!_wcsnicmp(prefix, texfiles[i].c_str(), len))
         temp_list.push_back(texfiles[i]);
-    N = temp_list.size();
+    N = (int)temp_list.size();
     if (N == 0)
       return false;
     // pick randomly from the subset

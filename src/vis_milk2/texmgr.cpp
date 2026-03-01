@@ -371,7 +371,7 @@ void texmgr::StripLinefeedCharsAndComments(char* src, char* dest) {
   // Restriction: sizeof(dest) must be >= sizeof(src).
 
   int i2 = 0;
-  int len = strlen(src);
+  int len = (int)strlen(src);
   int bComment = false;
   for (int i = 0; i < len; i++) {
     if (bComment) {

@@ -154,6 +154,7 @@ void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
 #define MTO_LOWER_RIGHT 2
 #define MTO_LOWER_LEFT  3
 
+#undef SelectFont  // avoid conflict with wingdi.h macro
 #define SelectFont(n) { \
     pFont = GetFont(n); \
     h = GetFontHeight(n); \
@@ -318,7 +319,7 @@ void Engine::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
 
 void Engine::ClearErrors(int category)  // 0=all categories
 {
-  int N = m_errors.size();
+  int N = (int)m_errors.size();
   for (int i = 0; i < N; i++)
     if (category == ERR_ALL || m_errors[i].category == category) {
       m_errors.erase(m_errors.begin() + i);
@@ -867,7 +868,7 @@ void Engine::MyRenderUI(
               bufA[temp_cursor_pos + 1] = 0;
             }
             else if (bufA[temp_cursor_pos] == LINEFEED_CONTROL_CHAR) {
-              for (int i = strlen(bufA); i >= temp_cursor_pos; i--)
+              for (int i = (int)strlen(bufA); i >= temp_cursor_pos; i--)
                 bufA[i + 1] = bufA[i];
               bufA[temp_cursor_pos] = '_';
             }
@@ -882,7 +883,7 @@ void Engine::MyRenderUI(
               bufA[temp_cursor_pos + 1] = 0;
             }
             else if (bufA[temp_cursor_pos] == LINEFEED_CONTROL_CHAR) {
-              for (int i = strlen(bufA); i >= temp_cursor_pos; i--)
+              for (int i = (int)strlen(bufA); i >= temp_cursor_pos; i--)
                 bufA[i + 1] = bufA[i];
               bufA[temp_cursor_pos] = ' ';
             }
@@ -899,7 +900,7 @@ void Engine::MyRenderUI(
               buf[temp_cursor_pos + 1] = 0;
             }
             else if (buf[temp_cursor_pos] == LINEFEED_CONTROL_CHAR) {
-              for (int i = wcslen(buf); i >= temp_cursor_pos; i--)
+              for (int i = (int)wcslen(buf); i >= temp_cursor_pos; i--)
                 buf[i + 1] = buf[i];
               buf[temp_cursor_pos] = L'_';
             }
@@ -914,7 +915,7 @@ void Engine::MyRenderUI(
               buf[temp_cursor_pos + 1] = 0;
             }
             else if (buf[temp_cursor_pos] == LINEFEED_CONTROL_CHAR) {
-              for (int i = wcslen(buf); i >= temp_cursor_pos; i--)
+              for (int i = (int)wcslen(buf); i >= temp_cursor_pos; i--)
                 buf[i + 1] = buf[i];
               buf[temp_cursor_pos] = L' ';
             }
@@ -1588,7 +1589,7 @@ void Engine::MyRenderUI(
     if (!m_bWarningsDisabled2) {
       wchar_t buf[512] = { 0 };
       float t = GetTime();
-      int N = m_errors.size();
+      int N = (int)m_errors.size();
       for (int i = 0; i < N; i++) {
         if (t >= m_errors[i].birthTime && t < m_errors[i].expireTime) {
           if (m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_1 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_2 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_3) {

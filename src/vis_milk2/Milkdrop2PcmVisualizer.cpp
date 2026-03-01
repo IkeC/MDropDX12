@@ -194,8 +194,8 @@ static ComPtr<ID3D12Device>       pD3DDevice;
 static ComPtr<ID3D12CommandQueue> pCommandQueue;
 static ComPtr<IDXGIFactory4>      pDXGIFactory;
 
-static LONG lastWindowStyle = 0;
-static LONG lastWindowStyleEx = 0;
+static LONG_PTR lastWindowStyle = 0;
+static LONG_PTR lastWindowStyleEx = 0;
 
 static bool fullscreen = false;
 static bool stretch = false;
