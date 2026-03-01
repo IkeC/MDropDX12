@@ -2635,19 +2635,8 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
     }
     case RenderCmd::IPCMessage:
       if (!cmd.sParam.empty()) {
-        // LaunchMessage takes non-const wchar_t*; make a mutable copy
         std::wstring msgCopy = cmd.sParam;
-        {
-          LARGE_INTEGER freq, t0, t1;
-          QueryPerformanceFrequency(&freq);
-          QueryPerformanceCounter(&t0);
-          LaunchMessage(msgCopy.data());
-          QueryPerformanceCounter(&t1);
-          double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
-          wchar_t dbg[512];
-          swprintf_s(dbg, L"IPC LaunchMessage took %.2f ms for: %.80s\n", ms, msgCopy.c_str());
-          DebugLogW(dbg);
-        }
+        LaunchMessage(msgCopy.data());
       }
       break;
     case RenderCmd::PushSprite:

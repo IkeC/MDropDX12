@@ -2893,23 +2893,9 @@ void EngineShell::ProcessPendingCommands() {
   if (localQueue.empty())
     return;
 
-  LARGE_INTEGER freq, t0, t1;
-  QueryPerformanceFrequency(&freq);
-  QueryPerformanceCounter(&t0);
-  int count = 0;
-
   while (!localQueue.empty()) {
     ExecuteRenderCommand(localQueue.front());
     localQueue.pop();
-    count++;
-  }
-
-  QueryPerformanceCounter(&t1);
-  double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
-  if (ms > 1.0) { // Only log if > 1ms
-    wchar_t dbg[256];
-    swprintf_s(dbg, L"ProcessPendingCommands: %d cmds in %.2f ms\n", count, ms);
-    DebugLogW(dbg);
   }
 }
 
