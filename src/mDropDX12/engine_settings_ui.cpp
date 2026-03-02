@@ -133,7 +133,7 @@ static void UpdateWindowTitlePreview(HWND hSettingsWnd, const wchar_t* windowReg
   int idx = g_engine.m_nActiveWindowTitleProfile;
   if (idx >= 0 && idx < (int)g_engine.m_windowTitleProfiles.size() && g_engine.m_windowTitleProfiles[idx].szParseRegex[0]) {
     try {
-      std::wregex parseRegex(g_engine.m_windowTitleProfiles[idx].szParseRegex, std::regex_constants::ECMAScript);
+      std::wregex parseRegex(StripNamedGroups(g_engine.m_windowTitleProfiles[idx].szParseRegex), std::regex_constants::ECMAScript);
       std::wsmatch match;
       if (std::regex_search(ctx.matchedTitle, match, parseRegex)) {
         // Build name→index map for named groups
@@ -6396,7 +6396,7 @@ static void WTPUpdateParsedResult(HWND hWnd, WTPContext* ctx, const std::wstring
 
   std::wregex parseRegex;
   try {
-    parseRegex = std::wregex(parseBuf, std::regex_constants::ECMAScript);
+    parseRegex = std::wregex(StripNamedGroups(parseBuf), std::regex_constants::ECMAScript);
   } catch (const std::regex_error&) {
     SetWindowTextW(hParsed, L"(invalid parse regex)");
     return;

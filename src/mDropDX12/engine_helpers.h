@@ -3,6 +3,36 @@
 #include <vector>
 #include <Windows.h>
 
+// Strip named capture groups (?<name>...) → (...) for std::wregex compatibility.
+// MSVC ECMAScript mode doesn't support named groups, but we parse them separately
+// via BuildNamedGroupMap() and access by index.
+inline std::wstring StripNamedGroups(const std::wstring& pattern) {
+  std::wstring result;
+  result.reserve(pattern.size());
+  for (size_t i = 0; i < pattern.size(); i++) {
+    if (pattern[i] == L'\\') {
+      result += pattern[i];
+      if (i + 1 < pattern.size()) result += pattern[++i];
+      continue;
+    }
+    if (pattern[i] == L'(' && i + 2 < pattern.size() && pattern[i + 1] == L'?') {
+      if (pattern[i + 2] == L'<' && i + 3 < pattern.size() && pattern[i + 3] != L'=' && pattern[i + 3] != L'!') {
+        // Named group (?<name>...) — emit just '(' and skip past '>'
+        result += L'(';
+        size_t close = pattern.find(L'>', i + 3);
+        if (close != std::wstring::npos) { i = close; continue; }
+      } else if (pattern[i + 2] == L'\'' && i + 3 < pattern.size()) {
+        // Named group (?'name'...) — emit just '(' and skip past closing quote
+        result += L'(';
+        size_t close = pattern.find(L'\'', i + 3);
+        if (close != std::wstring::npos) { i = close; continue; }
+      }
+    }
+    result += pattern[i];
+  }
+  return result;
+}
+
 // Shared macros — used by shader and texture modules
 #define IsAlphabetChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z'))
 #define IsAlphanumericChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') || (x >= '0' && x <= '9') || x == '.')

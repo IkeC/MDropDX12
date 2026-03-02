@@ -1896,7 +1896,7 @@ static void PollWindowTitle() {
       parseRegexValid = false;
     } else {
       try {
-        compiledParseRegex = std::wregex(parseRegexStr, std::regex_constants::ECMAScript);
+        compiledParseRegex = std::wregex(StripNamedGroups(parseRegexStr), std::regex_constants::ECMAScript);
         parseRegexValid = true;
       } catch (...) {
         parseRegexValid = false;
