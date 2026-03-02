@@ -137,9 +137,9 @@
 
 ## History
 
-The original [MilkDrop2](https://www.geisswerks.com/milkdrop/) WinAmp plugin created by Ryan Geiss was turned into a Windows standalone application by Maxim Volskiy as [BeatDrop](https://github.com/mvsoft74/BeatDrop) and has since been improved upon eg. in the [BeatDrop-Music-Visualizer](https://github.com/OfficialIncubo/BeatDrop-Music-Visualizer) project. MDropDX12 originally started as a fork of BeatDrop-Music-Visualizer.
+The original [MilkDrop2](https://www.geisswerks.com/milkdrop/) WinAmp plugin created by Ryan Geiss was turned into a Windows standalone application by Maxim Volskiy as [BeatDrop](https://github.com/mvsoft74/BeatDrop) and has since been improved upon eg. in the [BeatDrop-Music-Visualizer](https://github.com/OfficialIncubo/BeatDrop-Music-Visualizer) project. IkeC forked BeatDrop-Music-Visualizer into [Milkwave](https://github.com/IkeC/Milkwave), adding IPC remote control and other features. MDropDX12 originally started as a fork of IkeC's Milkwave.
 
-This version of the Visualizer is a ground-up rebuild of the rendering engine on DirectX 12, replacing the original DX9Ex backend entirely. The text rendering pipeline, settings UI, texture management, shader compilation, and resource handling have all been rewritten. While preset compatibility with the MilkDrop2 ecosystem is maintained, the codebase has diverged significantly from the upstream MDropDX12 project.
+MDropDX12 is maintained by [shanevbg](https://github.com/shanevbg). This version is a ground-up rebuild of the rendering engine on DirectX 12, replacing the original DX9Ex backend entirely. The text rendering pipeline, settings UI, texture management, shader compilation, and resource handling have all been rewritten. While preset compatibility with the MilkDrop2 ecosystem is maintained, the codebase has diverged significantly from the upstream projects.
 
 For a more detailed explanation of all features, please read the [Manual](https://github.com/shanevbg/MDropDX12/blob/main/docs/Manual.md).
 
@@ -172,9 +172,9 @@ See the [Development Guide](docs/Development.md) for full setup instructions usi
 
 ## Support
 
-This project incorporates the work of many different authors over the years, as listed below. Naturally, the entirety of this project is Open Source and there will never be a paid version of it.
+This project incorporates the work of many different authors over the years, as listed below. The entirety of this project is Open Source and there will never be a paid version of it.
 
-I may add new features or fix bugs if people are actually using this, so don't be shy to [open an issue](https://github.com/shanevbg/MDropDX12/issues) or join my [**Discord**](https://bit.ly/Ikes-Discord)!
+If you find bugs or have feature requests, [open an issue](https://github.com/shanevbg/MDropDX12/issues) on GitHub.
 
 ## Acknowledgements
 
@@ -191,7 +191,7 @@ Many thanks to:
 * milkdrop2077 - [MilkDrop3](https://github.com/milkdrop2077/MilkDrop3)
 * and all the preset authors!
 
-If you believe you or someone else should be mentioned here, please let me know.
+If you believe you or someone else should be mentioned here, please [open an issue](https://github.com/shanevbg/MDropDX12/issues).
 
 ## License
 
@@ -201,9 +201,9 @@ MDropDX12 is licensed under the [Creative Commons Attribution-NonCommercial 4.0 
 
 ## Public use of MilkDrop Presets
 
-The presets themselves are not covered by either of these licenses, they either have their own license or none (in most cases). None of the presets in MDropDX12 should have a restrictive license preventing you from using them in public. All preset filenames from shaders I converted have the original author's name in them, with the full original source mentioned in the preset file itself.
+The presets themselves are not covered by either of these licenses, they either have their own license or none (in most cases). None of the presets in MDropDX12 should have a restrictive license preventing you from using them in public. All preset filenames from converted shaders have the original author's name in them, with the full original source mentioned in the preset file itself.
 
-So, my pragmatic and common sense approach would be: Always keep in mind that you are using the artistic work of someone else. Respect the original authors work by showing the preset filename (at least briefly), and you should be fine. If in doubt, always ask the creator of the piece you use.
+Always keep in mind that you are using the artistic work of someone else. Respect the original authors' work by showing the preset filename (at least briefly), and you should be fine. If in doubt, always ask the creator of the piece you use.
 
 ## Contributions
 
