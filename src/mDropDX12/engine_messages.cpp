@@ -23,7 +23,6 @@
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "../audio/log.h"
 #include "AMDDetection.h"
 #include <commctrl.h>
 #include <commdlg.h>
@@ -2737,22 +2736,20 @@ void Engine::DoCustomSoundAnalysis() {
     else
       mysound.avg_rel[i] = mysound.avg[i] / mysound.long_avg[i];
 
-    if (mysound.recent[i].size() == 0) {
-      mysound.recent[i] = std::vector<float>();
-    }
+    // smooth — O(1) ring buffer insert, then average the most recent entries
+    {
+      int bufMax = td_mysounddata::RECENT_BUF_MAX;
+      mysound.recent_buf[i][mysound.recent_pos[i]] = mysound.imm_rel[i];
+      mysound.recent_pos[i] = (mysound.recent_pos[i] + 1) % bufMax;
+      if (mysound.recent_len[i] < bufMax) mysound.recent_len[i]++;
 
-    // smooth
-    mysound.recent[i].push_back(mysound.imm_rel[i]);
-    if ((int)mysound.recent[i].size() > recentBufferSize) {
-      mysound.recent[i].erase(mysound.recent[i].begin());
-    }
-    mysound.smooth[i] = 0;
-    int k = 0;
-    for (; k < (int)mysound.recent[i].size(); k++) {
-      mysound.smooth[i] += mysound.recent[i][k];
-    }
-    if (k > 0) {
-      mysound.smooth[i] /= k;
+      int nAvg = min(mysound.recent_len[i], recentBufferSize);
+      float sum = 0;
+      for (int k = 0; k < nAvg; k++) {
+        int idx = (mysound.recent_pos[i] - 1 - k + bufMax) % bufMax;
+        sum += mysound.recent_buf[i][idx];
+      }
+      mysound.smooth[i] = (nAvg > 0) ? sum / nAvg : 0;
     }
 
     if (fabsf(mysound.long_avg[i]) < 0.001f)

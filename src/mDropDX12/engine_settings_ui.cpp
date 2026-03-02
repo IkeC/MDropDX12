@@ -24,7 +24,6 @@
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "../audio/log.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
@@ -4536,6 +4535,23 @@ void Engine::BuildSettingsControls() {
   y += lineH + 4;
   PAGE_CTRL(10, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
+
+  // Paths section
+  PAGE_CTRL(10, CreateLabel(hw, L"Paths:", x, y, rw, lineH, hFontBold, false));
+  y += lineH + 2;
+  {
+    wchar_t buf[MAX_PATH + 64];
+    swprintf(buf, MAX_PATH + 64, L"Base Dir:  %s", m_szBaseDir);
+    PAGE_CTRL(10, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    y += lineH + 2;
+    swprintf(buf, MAX_PATH + 64, L"Settings:  %s", GetConfigIniFile());
+    PAGE_CTRL(10, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    y += lineH + 2;
+    swprintf(buf, MAX_PATH + 64, L"Presets:   %s", m_szPresetDir);
+    PAGE_CTRL(10, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    y += lineH + 2;
+  }
+  y += 8;
 
   // Debug Log Level radio buttons
   PAGE_CTRL(10, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));

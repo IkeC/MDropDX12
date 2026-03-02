@@ -338,11 +338,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\audio\audiobuf.cpp" />
-    <ClCompile Include="..\audio\guid.cpp" />
-    <ClCompile Include="..\audio\log.cpp" />
-    <ClCompile Include="..\audio\loopback-capture.cpp" />
-    <ClCompile Include="..\audio\prefs.cpp" />
+    <ClCompile Include="audio_capture.cpp" />
     <!-- Spout2 DX12 SDK (fetched by build.ps1 to external/Spout2/) -->
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp" />
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.cpp" />
@@ -406,12 +402,7 @@
     <ClCompile Include="..\ns-eel2\nseel-host.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\audio\cleanup.h" />
-    <ClInclude Include="..\audio\common.h" />
-    <ClInclude Include="..\audio\audiobuf.h" />
-    <ClInclude Include="..\audio\log.h" />
-    <ClInclude Include="..\audio\loopback-capture.h" />
-    <ClInclude Include="..\audio\prefs.h" />
+    <ClInclude Include="audio_capture.h" />
     <ClInclude Include="..\ns-eel2\ns-eel.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-int.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />

@@ -1531,6 +1531,7 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   CreateDX12PresetPSOs();
 
   m_fPresetStartTime = GetTime();
+  m_bPresetDiagLogged = false;
   m_fNextPresetTime  = -1.0f;
   NumTotalPresetsLoaded++;
   OnFinishedLoadingPreset();
@@ -1860,6 +1861,7 @@ void Engine::LoadPresetTick() {
     }
 
     m_fPresetStartTime = GetTime();
+    m_bPresetDiagLogged = false;
     m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
 
     // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.

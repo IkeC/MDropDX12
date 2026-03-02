@@ -61,20 +61,8 @@
     <ClCompile Include="fft.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
-    <ClCompile Include="..\audio\guid.cpp">
-      <Filter>musikcube</Filter>
-    </ClCompile>
-    <ClCompile Include="..\audio\log.cpp">
-      <Filter>musikcube</Filter>
-    </ClCompile>
-    <ClCompile Include="..\audio\loopback-capture.cpp">
-      <Filter>musikcube</Filter>
-    </ClCompile>
-    <ClCompile Include="..\audio\prefs.cpp">
-      <Filter>musikcube</Filter>
-    </ClCompile>
-    <ClCompile Include="..\audio\audiobuf.cpp">
-      <Filter>musikcube</Filter>
+    <ClCompile Include="audio_capture.cpp">
+      <Filter>sources</Filter>
     </ClCompile>
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp">
       <Filter>Spout2</Filter>
@@ -234,23 +222,8 @@
     <ClInclude Include="api.h">
       <Filter>library\headers</Filter>
     </ClInclude>
-    <ClInclude Include="..\audio\audiobuf.h">
-      <Filter>library\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\audio\cleanup.h">
-      <Filter>library\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\audio\common.h">
-      <Filter>library\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\audio\log.h">
-      <Filter>library\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\audio\loopback-capture.h">
-      <Filter>library\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\audio\prefs.h">
-      <Filter>library\headers</Filter>
+    <ClInclude Include="audio_capture.h">
+      <Filter>headers</Filter>
     </ClInclude>
     <ClInclude Include="App.h">
       <Filter>library\headers</Filter>

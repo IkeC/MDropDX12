@@ -758,6 +758,7 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
     if (GetFrame() == 0) {
       m_fStartTime = GetTime();
       m_fPresetStartTime = GetTime();
+      m_bPresetDiagLogged = false;
     }
 
     if (m_fNextPresetTime < 0) {
@@ -1077,10 +1078,6 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 
         float fTimeAfterFullDuration = GetTime() - m_supertexts[i].fStartTime - m_supertexts[i].fDuration;
         ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
-
-        wchar_t debugMsg[128];
-        swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"RenderFrame: fTimeAfterFullDuration=%.2f\n", fTimeAfterFullDuration);
-        DebugLogW(debugMsg, LOG_VERBOSE);
 
         if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
           m_supertexts[i].fStartTime = -1.0f;	// 'off' state
@@ -1687,7 +1684,8 @@ void mdrop::Engine::DX12_BlurPasses()
   int passes = min(NUM_BLUR_TEX, m_nHighestBlurTexUsedThisFrame * 2);
 
   // Diagnostic: log blur pass info once per preset load
-  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+  bool bLogDiag = !m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f;
+  if (bLogDiag) {
     char dbg[256];
     sprintf(dbg, "DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
             m_nHighestBlurTexUsedThisFrame, passes,
@@ -1739,8 +1737,7 @@ void mdrop::Engine::DX12_BlurPasses()
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_blurRootSignature.Get());
 
-  // DIAG: log blur details once per preset load
-  bool blurDiag = (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f);
+  // DIAG: log blur details once per preset load (using flag set above)
 
   for (int i = 0; i < passes; i++) {
     // Source: pass 0 reads VS[0], subsequent passes read blur[i-1]
@@ -1778,7 +1775,7 @@ void mdrop::Engine::DX12_BlurPasses()
     float fscale_now = fscale[i / 2];
     float fbias_now = fbias[i / 2];
 
-    if (blurDiag) {
+    if (bLogDiag) {
       char dbg[512];
       sprintf(dbg, "DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
               "CT=%p h[0]=%p h[1]=%p h[2]=%p h[3]=%p h[5]=%p h[6]=%p "
@@ -1933,8 +1930,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots);
     m_lpDX->UpdatePerFrameBindings(warpSlots, compSlots);
 
-    // Diagnostic: log binding slots once per preset load (first 100ms)
-    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    // Diagnostic: log binding slots once per preset load
+    if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
       // Log comp shader's m_texcode and resulting binding slots
       {
         char dbg[512];
@@ -1983,8 +1980,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
     }
 
-    // Diagnostic: log warp pass state once per preset load (first 100ms)
-    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    // Diagnostic: log warp pass state once per preset load
+    if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
       char dbg[256];
       sprintf(dbg, "DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
               m_dx12WarpPSO ? "PRESET" : "FALLBACK",
@@ -2181,7 +2178,9 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
-  DebugLogA("DX12: RenderWarpAndComposite done", LOG_VERBOSE);
+  // Mark preset diagnostics as logged after all sub-functions have had their chance
+  if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f)
+    m_bPresetDiagLogged = true;
 }
 
 // Forward declaration — defined later in this file
@@ -3332,8 +3331,8 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
     }
   }
 
-  // Diagnostic: log shape draw stats once per preset load (first 100ms)
-  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+  // Diagnostic: log shape draw stats once per preset load
+  if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
     char dbg[512];
     sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
             diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
@@ -6011,20 +6010,6 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
-
-  // One-time diagnostic: log active sprite slots
-  {
-    static int s_logCount = 0;
-    if (s_logCount < 30) {
-      int nActive = 0;
-      for (int i = 0; i < NUM_TEX; i++)
-        if (m_texmgr.m_tex[i].dx12Surface.IsValid()) nActive++;
-      if (nActive > 0) {
-        wchar_t dbg[256]; swprintf(dbg, 256, L"DrawUserSprites: %d active sprite(s)", nActive); DebugLogW(dbg, LOG_VERBOSE);
-        s_logCount++;
-      }
-    }
-  }
 
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
     if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {

@@ -100,7 +100,10 @@ typedef struct {
   float   fWave[2][576];
   float   fSpecLeft[MY_FFT_SAMPLES];
   float   fSpecRight[MY_FFT_SAMPLES];
-  std::array<std::vector<float>, 3> recent;
+  static const int RECENT_BUF_MAX = 4096;
+  float   recent_buf[3][RECENT_BUF_MAX];
+  int     recent_pos[3];
+  int     recent_len[3];
   float	  smooth[3];
   float	  smooth_rel[3];
 } td_mysounddata;
@@ -607,6 +610,7 @@ public:
   float   m_fAnimTime;
   float   m_fStartTime;
   float   m_fPresetStartTime;
+  bool    m_bPresetDiagLogged = false;
   float   m_fNextPresetTime;
   float   m_fSnapPoint;
   CState* m_pState;				// points to current CState

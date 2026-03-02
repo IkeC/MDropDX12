@@ -637,7 +637,6 @@ std::chrono::steady_clock::time_point LastSentMDropDX12Message{};
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "../audio/log.h"
 #include "AMDDetection.h"
 #include <cstdint>
 #include <commctrl.h>  // Trackbar, tab, and list-view controls
@@ -779,96 +778,62 @@ static void CopyEmbeddedToBuffer(const char* src, char* szDestText, int nMaxByte
   szDestText[len++] = ' ';  // trailing whitespace (matches original behavior)
 }
 
-// Helper: auto-extract embedded shader to disk so it exists for future runs.
-static void ExtractEmbeddedShaderToDisk(const wchar_t* szFile, const char* embeddedData) {
-  // Ensure parent directories exist
-  wchar_t szDir[MAX_PATH];
-  wcscpy(szDir, szFile);
-  // Walk backwards to find last backslash and create directory chain
-  for (int pass = 0; pass < 2; pass++) {
-    wchar_t* p = wcsrchr(szDir, L'\\');
-    if (p) {
-      *p = 0;
-      if (pass == 0) {
-        // szDir is now "...\resources\data" — create it
-        // But first try creating parent "...\resources"
-        wchar_t szParent[MAX_PATH];
-        wcscpy(szParent, szDir);
-        wchar_t* pp = wcsrchr(szParent, L'\\');
-        if (pp) {
-          *pp = 0;
-          // szParent = "...\resources" parent, szDir after *pp = "...\resources"
-          // Actually we need "...\resources" itself
-        }
-        CreateDirectoryW(szParent, NULL);  // e.g. "C:\path\resources" (may already exist)
-        CreateDirectoryW(szDir, NULL);     // e.g. "C:\path\resources\data"
-        break;
-      }
-    }
-  }
-
-  FILE* f = _wfopen(szFile, L"wb");
-  if (f) {
-    size_t dataLen = strlen(embeddedData);
-    fwrite(embeddedData, 1, dataLen, f);
-    fclose(f);
-    wchar_t dbg[512];
-    swprintf(dbg, L"Extracted embedded shader: %s", szFile);
-    g_engine.dumpmsg(dbg);
-  }
-}
-
 bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertLFsToSpecialChar) {
   wchar_t szFile[MAX_PATH];
   swprintf(szFile, L"%s%s", g_engine.m_szMilkdrop2Path, szBaseFilename);
 
-  // read in all chars.  Replace char combos:  { 13;  13+10;  10 } with LINEFEED_CONTROL_CHAR, if bConvertLFsToSpecialChar is true.
+  // Embedded shaders are the primary source. Disk .fx files serve as user overrides.
+  const char* embedded = FindEmbeddedShader(szBaseFilename);
+
+  // If a disk file exists, use it (user override). Otherwise use embedded.
   FILE* f = _wfopen(szFile, L"rb");
-  if (!f) {
-    // Fallback: try embedded shader data
-    const char* embedded = FindEmbeddedShader(szBaseFilename);
+  if (f) {
     if (embedded) {
       wchar_t dbg[512];
-      swprintf(dbg, L"Using embedded fallback for: %s", szBaseFilename);
+      swprintf(dbg, L"Using disk override for: %s", szBaseFilename);
       g_engine.dumpmsg(dbg);
-
-      CopyEmbeddedToBuffer(embedded, szDestText, nMaxBytes, bConvertLFsToSpecialChar);
-      ExtractEmbeddedShaderToDisk(szFile, embedded);
-      return true;
     }
 
-    wchar_t buf[1024], title[64];
-    swprintf(buf, wasabiApiLangString(IDS_UNABLE_TO_READ_DATA_FILE_X), szFile);
-    g_engine.dumpmsg(buf);
-    MessageBoxW(NULL, buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
-    return false;
-  }
-  int len = 0;
-  int x;
-  char prev_ch = 0;
-  while ((x = fgetc(f)) >= 0 && len < nMaxBytes - 4) {
-    char orig_ch = (char)x;
-    char ch = orig_ch;
-    bool bSkipChar = false;
-    if (bConvertLFsToSpecialChar) {
-      if (ch == 10) {
-        if (prev_ch == 13)
-          bSkipChar = true;
-        else
+    // Read from disk. Replace { 13; 13+10; 10 } with LINEFEED_CONTROL_CHAR if requested.
+    int len = 0;
+    int x;
+    char prev_ch = 0;
+    while ((x = fgetc(f)) >= 0 && len < nMaxBytes - 4) {
+      char orig_ch = (char)x;
+      char ch = orig_ch;
+      bool bSkipChar = false;
+      if (bConvertLFsToSpecialChar) {
+        if (ch == 10) {
+          if (prev_ch == 13)
+            bSkipChar = true;
+          else
+            ch = LINEFEED_CONTROL_CHAR;
+        }
+        else if (ch == 13)
           ch = LINEFEED_CONTROL_CHAR;
       }
-      else if (ch == 13)
-        ch = LINEFEED_CONTROL_CHAR;
+      if (!bSkipChar)
+        szDestText[len++] = ch;
+      prev_ch = orig_ch;
     }
-
-    if (!bSkipChar)
-      szDestText[len++] = ch;
-    prev_ch = orig_ch;
+    szDestText[len] = 0;
+    szDestText[len++] = ' ';   // make sure there is some whitespace after
+    fclose(f);
+    return true;
   }
-  szDestText[len] = 0;
-  szDestText[len++] = ' ';   // make sure there is some whitespace after
-  fclose(f);
-  return true;
+
+  // No disk file — use embedded if available
+  if (embedded) {
+    CopyEmbeddedToBuffer(embedded, szDestText, nMaxBytes, bConvertLFsToSpecialChar);
+    return true;
+  }
+
+  // Neither embedded nor on disk
+  wchar_t buf[1024], title[64];
+  swprintf(buf, wasabiApiLangString(IDS_UNABLE_TO_READ_DATA_FILE_X), szFile);
+  g_engine.dumpmsg(buf);
+  MessageBoxW(NULL, buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+  return false;
 }
 
 // these callback functions are called by menu.cpp whenever the user finishes editing an eval_ expression.
@@ -3310,6 +3275,7 @@ void Engine::MyRenderFn(int redraw) {
       // OR, to freeze time @ [preset] zero, so that when you exit menus,
       //   you don't run the risk of it changing the preset on you right away:
       m_fPresetStartTime = GetTime();
+      m_bPresetDiagLogged = false;
       m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this.
     }
 

@@ -162,7 +162,7 @@ using Microsoft::WRL::ComPtr;
 //#include <core/sdk/IPcmVisualizer.h>
 //#include <core/sdk/IPlaybackRemote.h>
 
-#include "..\audio\common.h"
+#include "audio_capture.h"
 #include "mdropdx12.h"
 #include <locale>
 #include <codecvt>
@@ -1154,55 +1154,7 @@ static void ShowAudioDeviceDialog(HWND hParent) {
   }
 }
 
-HRESULT GetDefaultAudioDeviceName(IMMDevice** ppMMDevice, std::wstring* m_szAudioDeviceDisplayName) {
-  HRESULT hr = S_OK;
-  IMMDeviceEnumerator* pMMDeviceEnumerator;
-
-  // activate a device enumerator
-  hr = CoCreateInstance(
-    __uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-    __uuidof(IMMDeviceEnumerator),
-    (void**)&pMMDeviceEnumerator
-  );
-  if (FAILED(hr)) {
-    ERR(L"CoCreateInstance(IMMDeviceEnumerator) failed: hr = 0x%08x", hr);
-    return hr;
-  }
-  ReleaseOnExit releaseMMDeviceEnumerator(pMMDeviceEnumerator);
-
-  // get the default render endpoint
-  hr = pMMDeviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, ppMMDevice);
-  if (FAILED(hr)) {
-    ERR(L"IMMDeviceEnumerator::GetDefaultAudioEndpoint failed: hr = 0x%08x", hr);
-    return hr;
-  }
-
-  // open the property store on that device
-  IPropertyStore* pPropertyStore;
-  hr = (*ppMMDevice)->OpenPropertyStore(STGM_READ, &pPropertyStore);
-  if (FAILED(hr)) {
-    ERR(L"IMMDevice::OpenPropertyStore failed: hr = 0x%08x", hr);
-    return hr;
-  }
-  ReleaseOnExit releasePropertyStore(pPropertyStore);
-
-  // get the long name property
-  PROPVARIANT pv; PropVariantInit(&pv);
-  hr = pPropertyStore->GetValue(PKEY_Device_FriendlyName, &pv);
-  if (FAILED(hr)) {
-    ERR(L"IPropertyStore::GetValue failed: hr = 0x%08x", hr);
-    return hr;
-  }
-  PropVariantClearOnExit clearPv(&pv);
-
-  if (VT_LPWSTR != pv.vt) {
-    ERR(L"PKEY_Device_FriendlyName variant type is %u - expected VT_LPWSTR", pv.vt);
-    return E_UNEXPECTED;
-  }
-  *m_szAudioDeviceDisplayName = std::wstring(pv.pwszVal);
-
-  return S_OK;
-}
+// GetDefaultAudioDeviceName removed — replaced by GetDefaultLoopbackDevice() in audio_capture.h
 
 LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
@@ -1356,9 +1308,10 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         wcscpy_s(g_engine.m_szAudioDevicePrevious, g_engine.m_szAudioDevice);
         g_engine.m_nAudioDevicePreviousType = g_engine.m_nAudioDeviceActiveType;
 
-        IMMDevice* m_pMMDevice;
+        IMMDevice* pMMDevice = nullptr;
         std::wstring sAudioDeviceDisplayName;
-        GetDefaultAudioDeviceName(&m_pMMDevice, &sAudioDeviceDisplayName);
+        GetDefaultLoopbackDevice(&pMMDevice, sAudioDeviceDisplayName);
+        if (pMMDevice) pMMDevice->Release();
         wcscpy(g_engine.m_szAudioDevice, sAudioDeviceDisplayName.c_str());
 
         g_engine.SetAudioDeviceDisplayName(sAudioDeviceDisplayName.c_str(), true);
@@ -2472,50 +2425,48 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
 
     hr = CoInitialize(NULL);
     if (FAILED(hr)) {
-      ERR(L"CoInitialize failed: hr = 0x%08x", hr);
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: CoInitialize failed");
       return -__LINE__;
     }
     CoUninitializeOnExit cuoe;
 
-    // argc==1 No additional params. Output disabled.
-    // argc==3 Two additional params. Output file enabled (32bit IEEE 754 FLOAT).
-    // argc==4 Three additional params. Output file enabled (LITTLE ENDIAN PCM).
-    int argc = 1;
-    // LPCWSTR argv[4] = { L"", L"--file", L"loopback-capture.wav", L"--int-16" };
-    LPCWSTR argv[4] = { L"", L"", L"", L"" };
+    // Resolve audio device directly (replaces CPrefs command-line parsing)
+    IMMDevice* pMMDevice = nullptr;
+    bool bIsRenderDevice = true;
+    bool bInt16 = false;
+    std::wstring deviceDisplayName;
 
     if (wcslen(g_engine.m_szAudioDevice) > 0) {
-      argc = 3;
-      argv[1] = L"--device";
-      argv[2] = g_engine.m_szAudioDevice;
-    };
-
-    /*
-    L"%ls [--device \"Device long name\"] [--file \"file name\"] [--int-16]\n"
-      L"\n"
-      L"    -? prints this message.\n"
-      L"    --list-devices displays the long names of all active playback devices.\n"
-      L"    --device captures from the specified device (default if omitted)\n"
-      L"    --file saves the output to a file (%ls if omitted)\n"
-      L"    --int-16 attempts to coerce data to 16-bit integer format",
-     */
-
-    hr = S_OK;
-
-    CPrefs prefs(argc, argv, hr, g_engine.m_nAudioDeviceRequestType);
-    if (FAILED(hr)) {
-      ERR(L"CPrefs::CPrefs constructor failed: hr = 0x%08x", hr);
-      return -__LINE__;
+      // Try capture device first (type 0=auto or 1=capture)
+      if (g_engine.m_nAudioDeviceRequestType == 0 || g_engine.m_nAudioDeviceRequestType == 1) {
+        hr = GetSpecificAudioDevice(g_engine.m_szAudioDevice, &pMMDevice, false, deviceDisplayName);
+        if (SUCCEEDED(hr)) bIsRenderDevice = false;
+      }
+      // Try render device (type 0=auto or 2=render)
+      if (!pMMDevice && (g_engine.m_nAudioDeviceRequestType == 0 || g_engine.m_nAudioDeviceRequestType == 2)) {
+        hr = GetSpecificAudioDevice(g_engine.m_szAudioDevice, &pMMDevice, true, deviceDisplayName);
+        if (SUCCEEDED(hr)) bIsRenderDevice = true;
+      }
+      // Fall back to default
+      if (!pMMDevice) {
+        hr = GetDefaultLoopbackDevice(&pMMDevice, deviceDisplayName);
+        if (SUCCEEDED(hr)) bIsRenderDevice = true;
+      }
     }
-    if (S_FALSE == hr) {
-      // nothing to do
-      return 0;
+    if (!pMMDevice) {
+      hr = GetDefaultLoopbackDevice(&pMMDevice, deviceDisplayName);
+      if (FAILED(hr)) {
+        MessageBoxA(NULL, "Could not find any suitable audio devices!", "MDropDX12 Error", MB_OK | MB_ICONERROR);
+        return -__LINE__;
+      }
+      bIsRenderDevice = true;
     }
+    ReleaseOnExit releaseDevice(pMMDevice);
 
     // create a "loopback capture has started" event
     HANDLE hStartedEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (NULL == hStartedEvent) {
-      ERR(L"CreateEvent failed: last error is %u", GetLastError());
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateEvent(started) failed");
       return -__LINE__;
     }
     CloseHandleOnExit closeStartedEvent(hStartedEvent);
@@ -2523,12 +2474,12 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     // create a "stop capturing now" event
     HANDLE hStopEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (NULL == hStopEvent) {
-      ERR(L"CreateEvent failed: last error is %u", GetLastError());
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateEvent(stop) failed");
       return -__LINE__;
     }
     CloseHandleOnExit closeStopEvent(hStopEvent);
 
-  g_engine.SetAudioDeviceDisplayName(prefs.m_szAudioDeviceDisplayName.c_str(), prefs.m_bIsRenderDevice);
+    g_engine.SetAudioDeviceDisplayName(deviceDisplayName.c_str(), bIsRenderDevice);
 
     {
       const wchar_t* requestTypeText = L"auto";
@@ -2543,10 +2494,10 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
       swprintf_s(
         configBuf,
         L"StartAudioCaptureThread: device='%ls' requestType=%ls isRender=%ls int16=%ls",
-        prefs.m_szAudioDeviceDisplayName.c_str(),
+        deviceDisplayName.c_str(),
         requestTypeText,
-        prefs.m_bIsRenderDevice ? L"true" : L"false",
-        prefs.m_bInt16 ? L"true" : L"false"
+        bIsRenderDevice ? L"true" : L"false",
+        bInt16 ? L"true" : L"false"
       );
       mdropdx12.LogDebug(configBuf);
     }
@@ -2554,14 +2505,13 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     // create arguments for loopback capture thread
     LoopbackCaptureThreadFunctionArguments threadArgs;
     threadArgs.hr = E_UNEXPECTED; // thread will overwrite this
-    threadArgs.pMMDevice = prefs.m_pMMDevice;
-    threadArgs.bIsRenderDevice = prefs.m_bIsRenderDevice;
-    threadArgs.bInt16 = prefs.m_bInt16;
-    threadArgs.hFile = prefs.m_hFile;
+    threadArgs.pMMDevice = pMMDevice;
+    threadArgs.bIsRenderDevice = bIsRenderDevice;
+    threadArgs.bInt16 = bInt16;
     threadArgs.hStartedEvent = hStartedEvent;
     threadArgs.hStopEvent = hStopEvent;
     threadArgs.nFrames = 0;
-    threadArgs.pMDropDX12 = &mdropdx12; // provide MDropDX12 instance for logging from the capture thread
+    threadArgs.pMDropDX12 = &mdropdx12;
 
     mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateThread LoopbackCaptureThreadFunction");
     hThreadLoopbackCapture = CreateThread(
@@ -2571,7 +2521,6 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     );
     if (NULL == hThreadLoopbackCapture) {
       mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateThread failed");
-      ERR(L"CreateThread failed: last error is %u", GetLastError());
       return -__LINE__;
     }
     CloseHandleOnExit closeThread(hThreadLoopbackCapture);
@@ -2585,105 +2534,70 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     );
 
     if (WAIT_OBJECT_0 + 1 == dwWaitResult) {
-      mdropdx12.LogInfo(L"StartAudioCaptureThread: Thread aborted before starting to loopback capture: hr = 0x%08x");
-      ERR(L"Thread aborted before starting to loopback capture: hr = 0x%08x", threadArgs.hr);
+      wchar_t buf[256];
+      swprintf_s(buf, L"StartAudioCaptureThread: Thread aborted before starting to loopback capture: hr = 0x%08x", threadArgs.hr);
+      mdropdx12.LogInfo(buf);
       return -__LINE__;
     }
 
     if (WAIT_OBJECT_0 != dwWaitResult) {
       mdropdx12.LogInfo(L"StartAudioCaptureThread: Unexpected WaitForMultipleObjects return value");
-      ERR(L"Unexpected WaitForMultipleObjects return value %u", dwWaitResult);
       return -__LINE__;
     }
 
     // at this point capture is running
-    // wait for the user to press a key or for capture to error out
-
-    // /*HANDLE thread =*/ 
-    // StartRenderThread(instance);
-    // WaitForSingleObject(threadRender, INFINITE);
-
-    //NEED TO STOP CAPTURE
-    // at this point capture is running
-    // wait for the user to press a key or for capture to error out
+    // wait for the render thread to stop or audio device change
     {
       WaitForSingleObjectOnExit waitForThread(hThreadLoopbackCapture);
       SetEventOnExit setStopEvent(hStopEvent);
 
-      /*
-      HANDLE hStdIn = GetStdHandle(STD_INPUT_HANDLE);
-
-      if (INVALID_HANDLE_VALUE == hStdIn) {
-          ERR(L"GetStdHandle returned INVALID_HANDLE_VALUE: last error is %u", GetLastError());
-          return -__LINE__;
-      }
-
-      LOG(L"%s", L"Press Enter to quit...");
-
-      HANDLE rhHandles[2] = { hThreadLoopbackCapture, hStdIn };
-      */
       g_engine.m_nAudioLoopState = 0;
       bool bKeepWaiting = true;
       while (bKeepWaiting) {
         if (threadRender == nullptr) {
-          // render thread stopped
           bKeepWaiting = false;
         }
         else if (g_engine.m_nAudioLoopState == 1) {
-          // audio device changed
           bKeepWaiting = false;
           g_engine.m_nAudioLoopState = 2;
         }
         else {
           Sleep(100);
         }
-      } // while
-    } // naked scope
+      }
+    }
 
     // at this point the thread is definitely finished
-
-  // MessageBoxA(NULL, "capture loop finished", "loopback", MB_OK);
 
     DWORD exitCode;
     if (!GetExitCodeThread(hThreadLoopbackCapture, &exitCode)) {
       mdropdx12.LogInfo(L"StartAudioCaptureThread: GetExitCodeThread failed");
-      ERR(L"GetExitCodeThread failed: last error is %u", GetLastError());
       return -__LINE__;
     }
 
     if (0 != exitCode) {
       mdropdx12.LogInfo(L"StartAudioCaptureThread: Loopback capture thread exit code unexpected");
-      ERR(L"Loopback capture thread exit code is %u; expected 0", exitCode);
       return -__LINE__;
     }
 
     if (S_OK != threadArgs.hr) {
-      ERR(L"Thread HRESULT is 0x%08x", threadArgs.hr);
-      // return -__LINE__;
+      wchar_t buf[128];
+      swprintf_s(buf, L"StartAudioCaptureThread: Thread HRESULT is 0x%08x", threadArgs.hr);
+      mdropdx12.LogInfo(buf);
       // probably the device got disconnected, see handling for result > 0 below
-      // if this is the topmost thread, do not return
       if (nestingLevel > 0) {
         return 1;
       }
     }
-    // let prefs' destructor call mmioClose
 
     if (g_engine.m_nAudioLoopState == 2) {
       g_engine.AddNotificationAudioDevice();
 
-      // not the best solution to build a thread tree like this, but too lazy/scared to refactor right now
       int result = StartAudioCaptureThread(instance, ++nestingLevel);
       if (result != 0) {
-        ERR(L"StartAudioCaptureThread failed: %d", result);
+        mdropdx12.LogInfo(L"StartAudioCaptureThread: recursive call failed");
 
-        /*
-        std::wstringstream ss;
-        ss << L"STATUS=Device init \"" << g_engine.m_szAudioDeviceDisplayName << "\" failed, reverting to \"" << g_engine.m_szAudioDevicePrevious << "\"";
-        statusMessage = ss.str();
-        g_engine.SendMessageToMDropDX12Remote(statusMessage.data());
-        */
-
-        // if result > 1, we probably encountered a disconnection error earlier (eg. Bluetooth headphone disconnection), 
+        // if result > 1, we probably encountered a disconnection error earlier (eg. Bluetooth headphone disconnection),
         // and the m_szAudioDevice was already set using Ctrl+D
         if (result < 0) {
           wcscpy_s(g_engine.m_szAudioDevice, g_engine.m_szAudioDevicePrevious);
@@ -2936,10 +2850,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     fs::path exeDir = fs::path(exePath).parent_path();
     fs::path dir = exeDir;
 
-    // Walk up at most 4 levels looking for resources\data\include.fx
+    // Walk up at most 4 levels looking for resources\data\ directory
     bool found = false;
     for (int i = 0; i < 5; i++) {
-      if (fs::exists(dir / L"resources" / L"data" / L"include.fx")) {
+      if (fs::exists(dir / L"resources" / L"data")) {
         found = true;
         break;
       }
@@ -2950,7 +2864,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 
     if (!found) {
       // Self-bootstrap: use exe directory and create the directory structure.
-      // Embedded shaders will be extracted on first use by ReadFileToString().
+      // Shaders are served from embedded memory; disk .fx files are optional overrides.
       dir = exeDir;
       CreateDirectoryW((dir / L"resources").c_str(), NULL);
       CreateDirectoryW((dir / L"resources" / L"data").c_str(), NULL);
