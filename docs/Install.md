@@ -151,4 +151,3 @@ Delete the folder. No registry entries or system files are affected.
 ## Support
 
 - **GitHub Issues**: [github.com/shanevbg/MDropDX12/issues](https://github.com/shanevbg/MDropDX12/issues)
-- **Discord**: [discord.gg/bjnJAuB8yX](https://discord.gg/bjnJAuB8yX)
