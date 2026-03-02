@@ -151,6 +151,24 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 * [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 * [Milkwave](https://github.com/shanevbg/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
+## Installation
+
+Download `MDropDX12-1.1-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
+
+See the [Installation Guide](docs/Install.md) for detailed instructions, directory layout, configuration files, and troubleshooting.
+
+## Building from Source
+
+MDropDX12 builds with MSVC v143 (Visual Studio 2022 Build Tools) and MSBuild. The build script auto-fetches the Spout2 SDK.
+
+```powershell
+git clone https://github.com/shanevbg/MDropDX12.git
+cd MDropDX12
+powershell -ExecutionPolicy Bypass -File build.ps1 Release x64
+```
+
+See the [Development Guide](docs/Development.md) for full setup instructions using VSCodium, debugging, project structure, and troubleshooting.
+
 ## Support
 
 This project incorporates the work of many different authors over the years, as listed below. Naturally, the entirety of this project is Open Source and there will never be a paid version of it.
