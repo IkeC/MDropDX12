@@ -905,4 +905,4 @@ MDropDX12 includes safeguards against GPU overload:
 
 ## Getting Help
 
-If you need further help, [open an issue on GitHub](https://github.com/shanevbg/MDropDX12/issues) or [join the MDropDX12 Discord server](https://bit.ly/Ikes-Discord).
+If you need further help, [open an issue on GitHub](https://github.com/shanevbg/MDropDX12/issues).
