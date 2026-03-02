@@ -28,6 +28,9 @@ enc_temp_folder/
 # Large binary assets (download separately)
 resources/textures/
 
+# Shader cache (regenerated at runtime)
+cache/
+
 # Runtime-generated files
 *.log
 diag_*.txt
