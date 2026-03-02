@@ -275,6 +275,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WTP_HELP            2189  // Button: regex help link
 #define IDC_MW_WTP_OK              2190  // Button: OK
 #define IDC_MW_WTP_CANCEL          2191  // Button: Cancel
+#define IDC_MW_WTP_WINDOWS         2192  // ComboBox: enumerated windows dropdown
 
 // Spout Video Input controls (Displays tab)
 #define IDC_MW_SPINPUT_ENABLE       7020

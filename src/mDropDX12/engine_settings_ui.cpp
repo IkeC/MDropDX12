@@ -3372,8 +3372,8 @@ void Engine::BuildSettingsControls() {
       SendMessageW(hProfileCombo, CB_SETCURSEL, m_nActiveWindowTitleProfile, 0);
     PAGE_CTRL(0, hProfileCombo);
 
-    // "Edit Parser..." button
-    HWND hEditBtn = CreateBtn(hw, L"Edit Parser...", IDC_MW_WT_EDIT_PARSER,
+    // "Edit" button — opens Artist-Title Match Editor popup
+    HWND hEditBtn = CreateBtn(hw, L"Edit", IDC_MW_WT_EDIT_PARSER,
       x + lw + 4 + comboW + 4, y, editBtnW, lineH, hFont, showWT);
     PAGE_CTRL(0, hEditBtn);
     y += lineH + 2;
@@ -6237,7 +6237,7 @@ void Engine::SaveCurrentSpriteProperties() {
 }
 
 //----------------------------------------------------------------------
-// Window Title Parser popup
+// Artist-Title Match Editor popup
 //----------------------------------------------------------------------
 
 static const wchar_t* WTP_WND_CLASS = L"MDropDX12WTParserWnd";
@@ -6298,7 +6298,7 @@ void Engine::OpenWindowTitleParserPopup(HWND hParent) {
   int dpi = 96;
   { HDC hdc = GetDC(NULL); if (hdc) { dpi = GetDeviceCaps(hdc, LOGPIXELSX); ReleaseDC(NULL, hdc); } }
   int w = MulDiv(520, dpi, 96);
-  int h = MulDiv(400, dpi, 96);
+  int h = MulDiv(440, dpi, 96);
   RECT rcParent;
   GetWindowRect(hParent, &rcParent);
   int cx = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
@@ -6306,7 +6306,7 @@ void Engine::OpenWindowTitleParserPopup(HWND hParent) {
 
   g_hWTPWnd = CreateWindowExW(
     WS_EX_DLGMODALFRAME,
-    WTP_WND_CLASS, L"Window Title Parser",
+    WTP_WND_CLASS, L"Artist-Title Match Editor",
     WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
     cx, cy, w, h,
     hParent, NULL, GetModuleHandle(NULL), ctx);
@@ -6496,6 +6496,25 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     CreateEdit(hWnd, L"", IDC_MW_WTP_NAME, x + lw + 4, y, rw - lw - 4, lineH, hFont);
     y += lineH + 4;
 
+    // Enumerated windows dropdown (select a window to help build regex)
+    CreateLabel(hWnd, L"Windows:", x, y, lw, lineH, hFont);
+    {
+      HWND hWinCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+        x + lw + 4, y, rw - lw - 4, lineH + 15 * lineH, hWnd,
+        (HMENU)(INT_PTR)IDC_MW_WTP_WINDOWS, GetModuleHandle(NULL), NULL);
+      if (hWinCombo && hFont) SendMessage(hWinCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+      // Populate with visible windows
+      std::vector<std::wstring> titles;
+      EnumWindows(EnumVisibleWindowTitlesProc, (LPARAM)&titles);
+      std::sort(titles.begin(), titles.end(), [](const std::wstring& a, const std::wstring& b) {
+        return _wcsicmp(a.c_str(), b.c_str()) < 0;
+      });
+      for (const auto& t : titles)
+        SendMessageW(hWinCombo, CB_ADDSTRING, 0, (LPARAM)t.c_str());
+    }
+    y += lineH + 4;
+
     // Window Match regex
     CreateLabel(hWnd, L"Window Match:", x, y, lw, lineH, hFont);
     CreateEdit(hWnd, L"", IDC_MW_WTP_WINDOW_REGEX, x + lw + 4, y, rw - lw - 4, lineH, hFont);
@@ -6644,7 +6663,7 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     // Delete profile
     if (id == IDC_MW_WTP_DELETE && code == BN_CLICKED) {
       if (ctx->profiles.size() <= 1) {
-        MessageBoxW(hWnd, L"Cannot delete the last profile.", L"Window Title Parser", MB_OK | MB_ICONWARNING);
+        MessageBoxW(hWnd, L"Cannot delete the last profile.", L"Artist-Title Match Editor", MB_OK | MB_ICONWARNING);
         return 0;
       }
       if (ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
@@ -6654,6 +6673,40 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
         WTPPopulateProfileCombo(hWnd, ctx);
         WTPLoadProfileFields(hWnd, ctx);
       }
+      return 0;
+    }
+
+    // Windows dropdown: user selected a window — set Window Match to .*escaped_title.*
+    if (id == IDC_MW_WTP_WINDOWS && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0) {
+        wchar_t selText[512] = {};
+        SendMessageW((HWND)lParam, CB_GETLBTEXT, sel, (LPARAM)selText);
+        // Build a regex that matches this window title: .*escaped_title.*
+        std::wstring pattern = L".*";
+        for (const wchar_t* c = selText; *c; ++c) {
+          if (wcschr(L"\\^$.|?*+()[]{}", *c))
+            pattern += L'\\';
+          pattern += *c;
+        }
+        pattern += L".*";
+        SetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, pattern.c_str());
+        // EN_CHANGE will fire and update the matched window preview
+      }
+      return 0;
+    }
+
+    // Repopulate windows dropdown when it opens
+    if (id == IDC_MW_WTP_WINDOWS && code == CBN_DROPDOWN) {
+      HWND hCombo = (HWND)lParam;
+      SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+      std::vector<std::wstring> titles;
+      EnumWindows(EnumVisibleWindowTitlesProc, (LPARAM)&titles);
+      std::sort(titles.begin(), titles.end(), [](const std::wstring& a, const std::wstring& b) {
+        return _wcsicmp(a.c_str(), b.c_str()) < 0;
+      });
+      for (const auto& t : titles)
+        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)t.c_str());
       return 0;
     }
 
