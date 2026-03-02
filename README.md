@@ -26,7 +26,7 @@
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
-* Use independently or with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
+* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
 
 ## Keyboard Shortcuts
 
