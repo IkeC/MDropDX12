@@ -63,6 +63,9 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Spout video input mixing (background/overlay compositing)
 - Idle timer / screensaver mode
 - Drag-and-drop presets, folders, and textures
+- Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via IPC)
+- File association registration for .milk/.milk2 (Settings → About, HKCU, no admin)
+- Preset filter by type (All / .milk / .milk2) in preset browser; random/sequential selection respects filter
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 
 ## DX12 Rendering Pipeline
