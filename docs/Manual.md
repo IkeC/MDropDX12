@@ -751,7 +751,7 @@ Common terms that cannot be converted automatically and need manual editing:
 
 ## Remote Control (Milkwave Remote)
 
-MDropDX12 is compatible with [Milkwave Remote](https://github.com/shanevbg/Milkwave), a separate control application that communicates via the Windows `WM_COPYDATA` IPC protocol.
+MDropDX12 is compatible with [Milkwave Remote](https://github.com/IkeC/Milkwave), a separate control application that communicates via the Windows `WM_COPYDATA` IPC protocol.
 
 The Remote discovers MDropDX12 by matching the window title (configurable in Settings > Remote tab). Once connected, the Remote can control presets, messages, sprites, audio settings, Spout output, color shifting, and more.
 

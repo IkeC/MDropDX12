@@ -1,4 +1,4 @@
-﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/shanevbg/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
+﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
 **Current version: 1.3** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
@@ -26,7 +26,7 @@
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
-* Use independently or with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
+* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
 
 ## Keyboard Shortcuts
 
@@ -151,7 +151,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 * Windows 10 64-bit or higher (Windows 11 recommended)
 * DirectX 12 compatible GPU
 * [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-* [Milkwave](https://github.com/shanevbg/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
+* [Milkwave](https://github.com/IkeC/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
 ## Installation
 
