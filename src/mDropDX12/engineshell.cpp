@@ -2218,7 +2218,9 @@ void EngineShell::RenderPlaylist() {
         wchar_t display[256];
         lstrcpynW(display, name, 240);
         int len = (int)wcslen(display);
-        if (len > 5 && _wcsicmp(display + len - 5, L".milk") == 0)
+        if (len > 6 && _wcsicmp(display + len - 6, L".milk2") == 0)
+          display[len - 6] = 0;
+        else if (len > 5 && _wcsicmp(display + len - 5, L".milk") == 0)
           display[len - 5] = 0;
         swprintf(m_playlist[i], L"%d. %s ", j + 1, display);
 

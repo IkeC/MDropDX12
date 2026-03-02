@@ -151,8 +151,9 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 ### General Tab
 
-- **Preset Directory**: Set the folder containing .milk presets
+- **Preset Directory**: Set the folder containing .milk and .milk2 presets
 - **Preset Browser**: Navigate and load presets from the list with forward/back navigation buttons
+- **Preset Filter**: Click the filter button (right side of nav row) to cycle through All / .milk / .milk2. Random and sequential preset selection respects the active filter
 - **Audio Sensitivity**: -1 for auto-adaptive, or manual value (0.5-256)
 - **Blend Time**: Duration of soft transitions between presets (seconds)
 - **Time Between Presets**: Auto-advance interval (seconds)
@@ -264,7 +265,9 @@ See the Display Outputs section below for details.
 ### About Tab
 
 - Version and build information
+- **Paths**: Base Dir, Settings INI, and Presets directory
 - **Log Level**: Off / Error / Warn / Info / Verbose (writes to debug.log)
+- **Register .milk / .milk2**: Associate .milk and .milk2 files with this exe so double-clicking them in Explorer opens the preset in MDropDX12 (writes to HKCU, no admin required)
 
 ## Audio
 
@@ -278,7 +281,7 @@ MDropDX12 captures audio via **WASAPI loopback**, which mirrors whatever is play
 
 ## Presets
 
-Presets are `.milk` files that define visual behavior through per-frame equations, per-pixel equations, custom shapes, custom waves, and HLSL shaders. MDropDX12 is compatible with the MilkDrop2 preset ecosystem.
+Presets are `.milk` or `.milk2` files that define visual behavior through per-frame equations, per-pixel equations, custom shapes, custom waves, and HLSL shaders. `.milk2` files contain two presets blended together. MDropDX12 is compatible with the MilkDrop2 preset ecosystem.
 
 ### Loading Presets
 
@@ -287,7 +290,9 @@ Presets are `.milk` files that define visual behavior through per-frame equation
 - ENTER or SPACE to load the selected preset
 - Type a letter to jump to presets starting with that letter
 - Navigate into subdirectories; BACKSPACE to go up one level
-- **Drag and drop** a .milk file from Explorer onto the window
+- **Drag and drop** a .milk or .milk2 file from Explorer onto the window
+- **Double-click** a .milk or .milk2 file in Explorer to load it directly (if MDropDX12 is already running, the preset is forwarded to the existing instance via IPC)
+- **File association**: Use Settings → About → "Register .milk / .milk2" to enable double-click loading (no admin required)
 
 ### Preset Transitions
 

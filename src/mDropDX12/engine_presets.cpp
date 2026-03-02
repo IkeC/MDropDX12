@@ -2106,6 +2106,12 @@ retry:
       if (!bIsMilk && !bIsMilk2)
         bSkip = true;
 
+      // Apply preset filter: 0=all, 1=.milk only, 2=.milk2 only
+      if (!bSkip && g_engine.m_nPresetFilter == 1 && !bIsMilk)
+        bSkip = true;
+      if (!bSkip && g_engine.m_nPresetFilter == 2 && !bIsMilk2)
+        bSkip = true;
+
       // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
       // otherwise we don't want to show it in the preset list!
       if (!bSkip) {
@@ -2601,9 +2607,12 @@ void Engine::SetCurrentPresetRating(float fNewRating) {
 // Functions that were interleaved with other modules in engine.cpp
 bool DirHasMilkFilesHelper(const wchar_t* szDir) {
   wchar_t szMask[MAX_PATH];
-  swprintf(szMask, L"%s*.milk", szDir);
   WIN32_FIND_DATAW fd;
+  swprintf(szMask, L"%s*.milk", szDir);
   HANDLE h = FindFirstFileW(szMask, &fd);
+  if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
+  swprintf(szMask, L"%s*.milk2", szDir);
+  h = FindFirstFileW(szMask, &fd);
   if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
   return false;
 }

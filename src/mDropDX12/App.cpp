@@ -145,6 +145,7 @@
 
 using Microsoft::WRL::ComPtr;
 
+#include <shellapi.h>        // for CommandLineToArgvW
 #include <ShellScalingApi.h> // for dpi awareness
 #pragma comment(lib, "shcore.lib") // for dpi awareness
 // older Windows versions: Entry Point Not Found Fix
@@ -182,6 +183,9 @@ MDropDX12 mdropdx12;
 HINSTANCE api_orig_hinstance = nullptr;
 _locale_t g_use_C_locale;
 char keyMappings[8];
+
+// Command-line preset path (set in WinMain, consumed in CreateWindowAndRun)
+wchar_t g_szCmdLinePreset[MAX_PATH] = {};
 
 // SPOUT
 // ===============================================
@@ -2277,6 +2281,19 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   lstrcpyW(g_szIPCWindowTitle, VisualizerWindowTitle);
   StartIPCThread(instance);
 
+  // If a preset was specified on the command line, queue it as an IPC message
+  // for the render thread to pick up after DX12 initialization
+  if (g_szCmdLinePreset[0] != L'\0') {
+    std::wstring msg = L"PRESET=" + std::wstring(g_szCmdLinePreset);
+    size_t cb = (msg.size() + 1) * sizeof(wchar_t);
+    wchar_t* copy = (wchar_t*)malloc(cb);
+    if (copy) {
+      memcpy(copy, msg.c_str(), cb);
+      PostMessage(hwnd, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+    }
+    g_szCmdLinePreset[0] = L'\0';
+  }
+
   if (!icon) {
     icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ENGINE_ICON));
   }
@@ -2839,6 +2856,38 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 
   // Install SEH -> C++ translator so SEH (e.g., access violations) become catchable std::exception
   _set_se_translator(SeTranslatorFunction);
+
+  // Parse command-line for a .milk / .milk2 preset file path (e.g., from Explorer double-click)
+  {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+      for (int i = 1; i < argc; i++) {
+        size_t len = wcslen(argv[i]);
+        if ((len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk2") == 0) ||
+            (len >= 5 && _wcsicmp(argv[i] + len - 5, L".milk") == 0)) {
+          wcscpy_s(g_szCmdLinePreset, MAX_PATH, argv[i]);
+          break;
+        }
+      }
+      LocalFree(argv);
+    }
+  }
+
+  // If a preset was specified and an instance is already running, forward via IPC and exit
+  if (g_szCmdLinePreset[0] != L'\0') {
+    HWND hExisting = FindWindowW(L"MDropDX12_IPC", NULL);
+    if (hExisting) {
+      std::wstring msg = L"PRESET=";
+      msg += g_szCmdLinePreset;
+      COPYDATASTRUCT cds = {};
+      cds.dwData = 1;
+      cds.cbData = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
+      cds.lpData = (void*)msg.c_str();
+      SendMessageW(hExisting, WM_COPYDATA, 0, (LPARAM)&cds);
+      return 0;
+    }
+  }
 
   // Determine m_szBaseDir: the directory that contains the "resources" folder.
   // Walk upward from the exe location (handles Debug/, Release/, and install layouts).

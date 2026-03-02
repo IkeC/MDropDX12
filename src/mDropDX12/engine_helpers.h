@@ -472,6 +472,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_MIRROR_ALTS 7014   // Checkbox: use mirrors for ALT-S
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
 
+// About tab
+#define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
+#define IDC_MW_PRESET_FILTER    2201   // Button: Preset extension filter (General tab)
+
 // Settings page count
 #define SETTINGS_NUM_PAGES      11
 

@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <strsafe.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <Windows.h>
 #include <cstdint>
@@ -1047,7 +1048,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       OPENFILENAMEW ofn = {};
       ofn.lStructSize = sizeof(ofn);
       ofn.hwndOwner = hWnd;
-      ofn.lpstrFilter = L"Preset Files (*.milk)\0*.milk\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFilter = L"Preset Files (*.milk;*.milk2)\0*.milk;*.milk2\0All Files (*.*)\0*.*\0";
       ofn.lpstrFile = szFile;
       ofn.nMaxFile = MAX_PATH;
       ofn.lpstrInitialDir = p->m_szPresetDir;
@@ -1162,6 +1163,27 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
       int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
       p->NavigatePresetDirInto(hWnd, sel);
+      return 0;
+    }
+
+    // Preset filter: cycle All → .milk → .milk2
+    if (id == IDC_MW_PRESET_FILTER && code == BN_CLICKED) {
+      p->m_nPresetFilter = (p->m_nPresetFilter + 1) % 3;
+      const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
+      SetWindowTextW((HWND)lParam, filterLabels[p->m_nPresetFilter]);
+      // Rescan directory with new filter
+      p->UpdatePresetList(false, true);
+      // Repopulate listbox
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList) {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < p->m_nPresets; i++) {
+          if (p->m_presets[i].szFilename.empty()) continue;
+          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+        }
+        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
+          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+      }
       return 0;
     }
 
@@ -2168,6 +2190,65 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         wcsncpy_s(p->m_screenshotPath, filePath, _TRUNCATE);
         p->m_bScreenshotRequested = true;
       }
+      return 0;
+    }
+
+    // About tab: Register File Association
+    if (id == IDC_MW_FILE_ASSOC && code == BN_CLICKED) {
+      wchar_t exePath[MAX_PATH];
+      GetModuleFileNameW(NULL, exePath, MAX_PATH);
+
+      wchar_t cmdLine[MAX_PATH + 8];
+      swprintf_s(cmdLine, L"\"%s\" \"%%1\"", exePath);
+
+      const wchar_t* extensions[] = { L".milk", L".milk2" };
+      bool ok = true;
+
+      for (const wchar_t* ext : extensions) {
+        HKEY hKey;
+        std::wstring keyPath = std::wstring(L"Software\\Classes\\") + ext;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, keyPath.c_str(),
+            0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+          RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE*)L"MDropDX12.preset",
+                         (DWORD)(wcslen(L"MDropDX12.preset") + 1) * sizeof(wchar_t));
+          RegCloseKey(hKey);
+        } else { ok = false; }
+      }
+
+      // ProgId description
+      HKEY hKey;
+      if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\MDropDX12.preset",
+          0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE*)L"MilkDrop Preset",
+                       (DWORD)(wcslen(L"MilkDrop Preset") + 1) * sizeof(wchar_t));
+        RegCloseKey(hKey);
+      }
+
+      // DefaultIcon
+      if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\MDropDX12.preset\\DefaultIcon",
+          0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        wchar_t iconPath[MAX_PATH + 4];
+        swprintf_s(iconPath, L"%s,0", exePath);
+        RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE*)iconPath,
+                       (DWORD)(wcslen(iconPath) + 1) * sizeof(wchar_t));
+        RegCloseKey(hKey);
+      }
+
+      // shell\open\command
+      if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\MDropDX12.preset\\shell\\open\\command",
+          0, NULL, 0, KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE*)cmdLine,
+                       (DWORD)(wcslen(cmdLine) + 1) * sizeof(wchar_t));
+        RegCloseKey(hKey);
+      } else { ok = false; }
+
+      // Notify Explorer of association change
+      SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+
+      if (ok)
+        p->AddNotification(L"File association registered for .milk and .milk2");
+      else
+        p->AddError((wchar_t*)L"Failed to register file association", 3.5f, ERR_NOTIFY, true);
       return 0;
     }
 
@@ -3350,6 +3431,12 @@ void Engine::BuildSettingsControls() {
     int dirBtnW = MulDiv(55, lineH, 26);
     PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont));
+    // Preset filter button (right-aligned): cycles All → .milk → .milk2
+    {
+      const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
+      int filterW = MulDiv(50, lineH, 26);
+      PAGE_CTRL(0, CreateBtn(hw, filterLabels[m_nPresetFilter], IDC_MW_PRESET_FILTER, x + rw - filterW, y, filterW, lineH + 4, hFont));
+    }
     y += lineH + 4 + gap + 4;
   }
 
@@ -4568,6 +4655,16 @@ void Engine::BuildSettingsControls() {
     rx += rbw;
     PAGE_CTRL(10, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
+  y += lineH + 8;
+
+  // File Association button
+  PAGE_CTRL(10, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
+  {
+    int btnW = MulDiv(200, lineH, 26);
+    PAGE_CTRL(10, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
+  }
+  y += lineH + 2;
+  PAGE_CTRL(10, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
   // ===== Remote tab (page 7) =====
   y = tabTop + 10;

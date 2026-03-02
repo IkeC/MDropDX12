@@ -653,6 +653,7 @@ public:
 
   int			m_nPresets;			// the # of entries in the file listing.  Includes directories and then files, sorted alphabetically.
   int			m_nDirs;			// the # of presets that are actually directories.  Always between 0 and m_nPresets.
+  int			m_nPresetFilter = 0;	// 0=all (.milk+.milk2), 1=.milk only, 2=.milk2 only
   int			m_nPresetListCurPos;// Index of the currently-HIGHLIGHTED preset (the user must press Enter on it to select it).
   int			m_nCurrentPreset;	// Index of the currently-RUNNING preset.
   //   Note that this is NOT the same as the currently-highlighted preset! (that's m_nPresetListCurPos)

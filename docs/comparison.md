@@ -57,6 +57,8 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Preset auto-change timer | ✅ | ✅ | ✅ | ✅ |
 | Preset change on track change | ✅ | ✅ | ❌ | ❌ |
 | Drag-and-drop preset loading | ✅ | ❌ | ❌ | ❌ |
+| Command-line / Explorer double-click loading | ✅ | ❌ | ❌ | ❌ |
+| Preset filter by type (.milk / .milk2) | ✅ | ❌ | ❌ | ❌ |
 | Preset mode buttons (assign/recall) | ❌ | ✅ | ❌ | ❌ |
 | Deep mashup (multi-layer) | ❌ | ❌ | ✅ | ❌ |
 | Preset lock | ✅ | ✅ | ✅ | ✅ (Space) |
@@ -225,6 +227,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Idle timer / screensaver mode | ✅ | ❌ | ❌ | ❌ |
 | Settings tab memory | ✅ | ❌ | ❌ | ❌ |
 | Game controller config UI | ✅ | ❌ (Remote-side) | ❌ | ❌ |
+| File association registration (.milk/.milk2) | ✅ | ❌ | ❌ | ❌ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ | ❌ |
 
 ## Expression Evaluation

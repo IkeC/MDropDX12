@@ -8,7 +8,9 @@
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
 * In-app Settings window (F8) with dark theme, 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
-* Preset browser with filtering, tagging, and subdirectory navigation
+* Preset browser with type filtering (.milk/.milk2), tagging, and subdirectory navigation
+* Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via IPC)
+* One-click file association registration for .milk and .milk2 (Settings → About, no admin required)
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
 * Configurable window titles for Remote discovery (Settings → Remote tab)
 * Save Screenshot from Settings UI with file dialog, or via IPC `CAPTURE` command
