@@ -270,6 +270,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CONTENT_BASE_CLEAR  2138  // Button: Clear Content Base Path
 #define IDC_MW_FALLBACK_TEX_LABEL  2139  // Label: Fallback Texture Style (Files tab)
 #define IDC_MW_FALLBACK_TEX        2140  // ComboBox: Fallback Texture Style (Files tab)
+#define IDC_MW_FALLBACK_FILE_EDIT  2141  // Edit: Custom fallback texture file path (Files tab)
+#define IDC_MW_FALLBACK_FILE_BROWSE 2142 // Button: Browse for custom fallback texture
+#define IDC_MW_FALLBACK_FILE_CLEAR 2143  // Button: Clear custom fallback texture
 
 // Idle Timer controls (System tab)
 #define IDC_MW_IDLE_ENABLE         2150  // Checkbox: enable idle timer

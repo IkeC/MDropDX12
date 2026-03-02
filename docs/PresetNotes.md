@@ -250,7 +250,7 @@ Blend states: SrcAlpha/InvSrcAlpha for alpha blend; One/One for additive.
 
 2. **Check include.fx extensions.** MDropDX12's extra constants (`_c14`-`_c18`) should have safe defaults, but if a preset references `gamma_adj` or `vis_intensity`, the behavior will differ from MilkDrop3 which doesn't define them.
 
-3. **Verify sampler bindings.** MDropDX12 uses explicit `register(sN)` annotations. If a preset declares custom samplers, check for register conflicts with the built-in samplers (s0-s10, s13-s15; s11-s12 reserved).
+3. **Verify sampler bindings.** MDropDX12 uses explicit `register(sN)` annotations. If a preset declares custom samplers, check for register conflicts with the built-in samplers (s0-s4 explicit, s5-s10 compiler-assigned noise, s11-s13 blur).
 
 4. **Check for HLSL variable shadowing.** MDropDX12 has `FixShadowedBuiltins()` which renames variables that shadow HLSL built-in functions. If this changes a variable the preset depends on, the output will differ.
 
@@ -262,7 +262,7 @@ Blend states: SrcAlpha/InvSrcAlpha for alpha blend; One/One for additive.
 
 ```
 _c0     = aspect ratio
-_c1     = (unused in defines, but set by ApplyShaderParams)
+_c1     = (0,0,0,0) — always zeroed, unused
 _c2     = (time, fps, frame, progress)
 _c3     = (bass, mid, treb, vol)
 _c4     = (bass_att, mid_att, treb_att, vol_att)
@@ -292,15 +292,15 @@ s1  = sampler_fc_main      (VS[1]/VS[0] — CLAMP filter)
 s2  = sampler_pc_main      (VS[1]/VS[0] — CLAMP, POINT filter)
 s3  = sampler_fw_main      (VS[1]/VS[0] — WRAP filter)
 s4  = sampler_pw_main      (VS[1]/VS[0] — WRAP, POINT filter)
-s5  = sampler_noise_lq     (256x256 noise, bilinear)
-s6  = sampler_noise_lq_lite (32x32 noise, bilinear)
-s7  = sampler_noise_mq     (256x256 noise, bilinear)
-s8  = sampler_noise_hq     (256x256 noise, bilinear)
-s9  = sampler_noisevol_lq  (32x32x32 3D noise)
-s10 = sampler_noisevol_hq  (32x32x32 3D noise)
-s11 = (reserved)
-s12 = (reserved)
-s13 = sampler_blur1        (blur level 1)
-s14 = sampler_blur2        (blur level 2)
-s15 = sampler_blur3        (blur level 3)
+s5  = sampler_noise_lq     (256x256 noise, bilinear)       [no explicit register]
+s6  = sampler_noise_lq_lite (32x32 noise, bilinear)        [no explicit register]
+s7  = sampler_noise_mq     (256x256 noise, bilinear)       [no explicit register]
+s8  = sampler_noise_hq     (256x256 noise, bilinear)       [no explicit register]
+s9  = sampler_noisevol_lq  (32x32x32 3D noise)             [no explicit register]
+s10 = sampler_noisevol_hq  (32x32x32 3D noise)             [no explicit register]
+s11 = sampler_blur1        (blur level 1)
+s12 = sampler_blur2        (blur level 2)
+s13 = sampler_blur3        (blur level 3)
+s14 = (unassigned)
+s15 = (unassigned)
 ```

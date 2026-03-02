@@ -223,7 +223,10 @@ public:
   DX12Texture m_nullTexture;
   // Fallback texture for missing disk textures (style set in settings)
   DX12Texture m_fallbackTexture;
-  int m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black
+  int m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black, 3=Random(RandTexDir), 4=Random(TexDir), 5=Custom File
+  wchar_t m_szFallbackRandomTexDir[MAX_PATH] = {};
+  wchar_t m_szFallbackTexturesDir[MAX_PATH] = {};
+  wchar_t m_szFallbackCustomFile[MAX_PATH] = {};
   bool CreateNullTexture(int fallbackStyle = 0);
 
   // Create a 16-entry binding block for a texture (all slots = tex for simple passthrough)

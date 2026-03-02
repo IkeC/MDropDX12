@@ -72,6 +72,20 @@ DXContext::DXContext(
 
     StringCbCopyW(m_szIniFile, sizeof(m_szIniFile), szIniFile);
 
+    // Read fallback texture paths from INI for styles 3-5
+    GetPrivateProfileStringW(L"FallbackPaths", L"RandomTexDir", L"",
+        m_szFallbackRandomTexDir, MAX_PATH, m_szIniFile);
+    GetPrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile", L"",
+        m_szFallbackCustomFile, MAX_PATH, m_szIniFile);
+    // Construct textures dir from exe path (m_szIniFile is in the base dir)
+    {
+        wchar_t szDir[MAX_PATH];
+        wcscpy_s(szDir, MAX_PATH, m_szIniFile);
+        wchar_t* lastSlash = wcsrchr(szDir, L'\\');
+        if (lastSlash) lastSlash[1] = L'\0';
+        swprintf(m_szFallbackTexturesDir, MAX_PATH, L"%sresources\\textures\\", szDir);
+    }
+
     // Store device references passed from the initializer
     m_device       = device;
     m_commandQueue = commandQueue;
@@ -977,6 +991,33 @@ D3D12_GPU_VIRTUAL_ADDRESS DXContext::UploadConstantBuffer(const void* data, UINT
 // Null texture + binding block (Phase 5)
 // ---------------------------------------------------------------------------
 
+// Pick a random image file from a directory (jpg/png/bmp/tga/dds)
+static bool PickRandomTextureFile(const wchar_t* szDir, wchar_t* szOut, size_t cchOut)
+{
+    if (!szDir || !szDir[0]) return false;
+    std::vector<std::wstring> files;
+    const wchar_t* exts[] = { L"*.jpg", L"*.jpeg", L"*.png", L"*.bmp", L"*.tga", L"*.dds" };
+    for (auto ext : exts) {
+        wchar_t mask[MAX_PATH];
+        swprintf(mask, MAX_PATH, L"%s%s", szDir, ext);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW(mask, &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring full = szDir;
+                    full += fd.cFileName;
+                    files.push_back(full);
+                }
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    if (files.empty()) return false;
+    wcscpy_s(szOut, cchOut, files[rand() % files.size()].c_str());
+    return true;
+}
+
 bool DXContext::CreateNullTexture(int fallbackStyle)
 {
     // Create a 1x1 black RGBA texture for filling unused SRV slots
@@ -1086,6 +1127,28 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     m_nullTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     // --- Fallback texture for missing disk textures ---
+    // For styles 3-5, try to load an image file. Fall back to Hue Gradient on failure.
+    if (fallbackStyle >= 3 && fallbackStyle <= 5) {
+        wchar_t szPath[MAX_PATH] = {};
+        bool gotFile = false;
+        if (fallbackStyle == 3)
+            gotFile = PickRandomTextureFile(m_szFallbackRandomTexDir, szPath, MAX_PATH);
+        else if (fallbackStyle == 4)
+            gotFile = PickRandomTextureFile(m_szFallbackTexturesDir, szPath, MAX_PATH);
+        else if (fallbackStyle == 5 && m_szFallbackCustomFile[0])
+            gotFile = (wcscpy_s(szPath, MAX_PATH, m_szFallbackCustomFile) == 0);
+
+        if (gotFile) {
+            DX12Texture loaded = LoadTextureFromFile(szPath);
+            if (loaded.resource) {
+                m_fallbackTexture = loaded;
+                return true;
+            }
+        }
+        // File load failed — fall through to Hue Gradient (style 0)
+        fallbackStyle = 0;
+    }
+
     // Generate pixel data based on style
     UINT fbW = 1, fbH = 1;
     std::vector<UINT8> fbPixels;

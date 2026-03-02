@@ -1502,10 +1502,72 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     // Fallback texture style combo box
     if (id == IDC_MW_FALLBACK_TEX && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel <= 2) {
+      if (sel >= 0 && sel <= 5) {
         p->m_nFallbackTexStyle = sel;
         WritePrivateProfileIntW(sel, L"FallbackTexStyle", p->GetConfigIniFile(), L"Milkwave");
+        // Show/hide custom file controls
+        HWND hFileEdit = GetDlgItem(hWnd, IDC_MW_FALLBACK_FILE_EDIT);
+        HWND hFileBrowse = GetDlgItem(hWnd, IDC_MW_FALLBACK_FILE_BROWSE);
+        HWND hFileClear = GetDlgItem(hWnd, IDC_MW_FALLBACK_FILE_CLEAR);
+        int show = (sel == 5) ? SW_SHOW : SW_HIDE;
+        if (hFileEdit) ShowWindow(hFileEdit, show);
+        if (hFileBrowse) ShowWindow(hFileBrowse, show);
+        if (hFileClear) ShowWindow(hFileClear, show);
       }
+      return 0;
+    }
+
+    // Fallback texture custom file browse
+    if (id == IDC_MW_FALLBACK_FILE_BROWSE && code == BN_CLICKED) {
+      IFileOpenDialog* pFileOpen = NULL;
+      HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+        IID_IFileOpenDialog, (void**)&pFileOpen);
+      if (SUCCEEDED(hr)) {
+        COMDLG_FILTERSPEC filters[] = {
+          { L"Image Files", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds" },
+          { L"All Files", L"*.*" }
+        };
+        pFileOpen->SetFileTypes(2, filters);
+        pFileOpen->SetTitle(L"Select Fallback Texture");
+        if (p->m_szFallbackTexFile[0]) {
+          wchar_t szDir[MAX_PATH];
+          wcscpy_s(szDir, MAX_PATH, p->m_szFallbackTexFile);
+          wchar_t* sl = wcsrchr(szDir, L'\\');
+          if (sl) { sl[1] = L'\0'; }
+          IShellItem* pFolder = NULL;
+          if (SUCCEEDED(SHCreateItemFromParsingName(szDir, NULL, IID_PPV_ARGS(&pFolder)))) {
+            pFileOpen->SetFolder(pFolder);
+            pFolder->Release();
+          }
+        }
+        hr = pFileOpen->Show(hWnd);
+        if (SUCCEEDED(hr)) {
+          IShellItem* pItem = NULL;
+          hr = pFileOpen->GetResult(&pItem);
+          if (SUCCEEDED(hr)) {
+            PWSTR pPath = NULL;
+            hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath);
+            if (SUCCEEDED(hr)) {
+              wcscpy_s(p->m_szFallbackTexFile, MAX_PATH, pPath);
+              HWND hEdit = GetDlgItem(hWnd, IDC_MW_FALLBACK_FILE_EDIT);
+              if (hEdit) SetWindowTextW(hEdit, pPath);
+              p->SaveFallbackPaths();
+              CoTaskMemFree(pPath);
+            }
+            pItem->Release();
+          }
+        }
+        pFileOpen->Release();
+      }
+      return 0;
+    }
+
+    // Fallback texture custom file clear
+    if (id == IDC_MW_FALLBACK_FILE_CLEAR && code == BN_CLICKED) {
+      p->m_szFallbackTexFile[0] = 0;
+      HWND hEdit = GetDlgItem(hWnd, IDC_MW_FALLBACK_FILE_EDIT);
+      if (hEdit) SetWindowTextW(hEdit, L"");
+      p->SaveFallbackPaths();
       return 0;
     }
 
@@ -3995,7 +4057,7 @@ void Engine::BuildSettingsControls() {
   {
     HWND hList = CreateWindowExW(0, L"LISTBOX", L"",
       WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
-      x, y, rw, 120, hw, (HMENU)(INT_PTR)IDC_MW_FILE_LIST,
+      x, y, rw, 80, hw, (HMENU)(INT_PTR)IDC_MW_FILE_LIST,
       GetModuleHandle(NULL), NULL);
     if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
     // Populate from m_fallbackPaths
@@ -4003,7 +4065,7 @@ void Engine::BuildSettingsControls() {
       SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.c_str());
     PAGE_CTRL(4, hList);
   }
-  y += 124;
+  y += 84;
   {
     int bx = x, bg = 4;
     int fbw = MulDiv(70, lineH, 26);
@@ -4057,17 +4119,45 @@ void Engine::BuildSettingsControls() {
   }
   y += lineH + 2;
   {
-    int comboW = MulDiv(200, lineH, 26);
+    int comboW = MulDiv(260, lineH, 26);
     HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
       WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-      x, y, comboW, lineH + 4 * lineH, hw,
+      x, y, comboW, lineH + 8 * lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_FALLBACK_TEX, GetModuleHandle(NULL), NULL);
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Hue Gradient");
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"White");
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Black");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Random (Random Tex Dir)");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Random (Textures Dir)");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Custom File...");
     SendMessageW(hCombo, CB_SETCURSEL, m_nFallbackTexStyle, 0);
     PAGE_CTRL(4, hCombo);
+  }
+  y += lineH + 6;
+  // Custom fallback texture file controls (visible only when style == 5)
+  {
+    DWORD showStyle = (m_nFallbackTexStyle == 5) ? WS_CHILD : (WS_CHILD & ~WS_VISIBLE);
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", m_szFallbackTexFile,
+      showStyle | ES_AUTOHSCROLL | ES_READONLY,
+      x, y, rw, lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_FALLBACK_FILE_EDIT,
+      GetModuleHandle(NULL), NULL);
+    if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    if (m_nFallbackTexStyle == 5) ShowWindow(hEdit, SW_SHOW);
+    PAGE_CTRL(4, hEdit);
+  }
+  y += lineH + 6;
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
+    HWND hBrowse = CreateBtn(hw, L"Browse...", IDC_MW_FALLBACK_FILE_BROWSE, bx, y, bw1, lineH, hFont);
+    PAGE_CTRL(4, hBrowse); bx += bw1 + bg;
+    HWND hClear = CreateBtn(hw, L"Clear", IDC_MW_FALLBACK_FILE_CLEAR, bx, y, bw2, lineH, hFont);
+    PAGE_CTRL(4, hClear);
+    if (m_nFallbackTexStyle != 5) {
+      ShowWindow(hBrowse, SW_HIDE);
+      ShowWindow(hClear, SW_HIDE);
+    }
   }
 
   // ===== Messages tab (page 5) =====
@@ -4906,7 +4996,8 @@ void Engine::LayoutSettingsControls() {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
     int gap = 6;
-    int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH + gap + 4 + lineH + 2 + lineH;  // buttons + desc + randtex + fallback tex
+    // buttons + desc + randtex + fallback tex combo + custom file edit + custom file buttons
+    int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH + gap + 4 + lineH + 2 + lineH + 6 + (lineH + 4) + 6 + lineH;
     int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
     MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
@@ -4938,8 +5029,18 @@ void Engine::LayoutSettingsControls() {
     HWND hFbLabel = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX_LABEL);
     HWND hFbCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX);
     if (hFbLabel) MoveWindow(hFbLabel, r.left, fbTexY, rw, lineH, TRUE);
-    int comboW = MulDiv(200, lineH, 26);
-    if (hFbCombo) MoveWindow(hFbCombo, r.left, fbTexY + lineH + 2, comboW, lineH + 4 * lineH, TRUE);
+    int comboW = MulDiv(260, lineH, 26);
+    if (hFbCombo) MoveWindow(hFbCombo, r.left, fbTexY + lineH + 2, comboW, lineH + 8 * lineH, TRUE);
+
+    // Custom fallback file controls (below combo)
+    int cfY = fbTexY + lineH + 2 + lineH + 6;
+    HWND hCfEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_EDIT);
+    if (hCfEdit) MoveWindow(hCfEdit, r.left, cfY, rw, lineH + 4, TRUE);
+    int cfBtnY = cfY + lineH + 6;
+    HWND hCfBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_BROWSE);
+    HWND hCfClear = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_CLEAR);
+    if (hCfBrowse) MoveWindow(hCfBrowse, r.left, cfBtnY, rbw1, lineH, TRUE);
+    if (hCfClear) MoveWindow(hCfClear, r.left + rbw1 + 4, cfBtnY, rbw2, lineH, TRUE);
   }
 
   // Stretch Messages tab ListBox and reposition all controls below it
@@ -5289,6 +5390,9 @@ void Engine::SaveFallbackPaths() {
   // Content base path
   WritePrivateProfileStringW(L"FallbackPaths", L"ContentBasePath",
     m_szContentBasePath[0] ? m_szContentBasePath : NULL, pIni);
+  // Fallback texture file (custom file mode)
+  WritePrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile",
+    m_szFallbackTexFile[0] ? m_szFallbackTexFile : NULL, pIni);
 }
 
 void Engine::LoadFallbackPaths() {
@@ -5306,6 +5410,8 @@ void Engine::LoadFallbackPaths() {
   GetPrivateProfileStringW(L"FallbackPaths", L"RandomTexDir", L"", m_szRandomTexDir, MAX_PATH, pIni);
   // Content base path
   GetPrivateProfileStringW(L"FallbackPaths", L"ContentBasePath", L"", m_szContentBasePath, MAX_PATH, pIni);
+  // Fallback texture file (custom file mode)
+  GetPrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile", L"", m_szFallbackTexFile, MAX_PATH, pIni);
 }
 
 // ====== Settings Fullscreen Awareness ======

@@ -845,7 +845,8 @@ int EngineShell::InitDirectX(
 
   // Read fallback texture style early (before MyReadConfig runs)
   m_nFallbackTexStyle = GetPrivateProfileIntW(L"Milkwave", L"FallbackTexStyle", 0, m_szConfigIniFile);
-  if (m_nFallbackTexStyle < 0 || m_nFallbackTexStyle > 2) m_nFallbackTexStyle = 0;
+  if (m_nFallbackTexStyle < 0 || m_nFallbackTexStyle > 5) m_nFallbackTexStyle = 0;
+  GetPrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile", L"", m_szFallbackTexFile, MAX_PATH, m_szConfigIniFile);
 
   m_lpDX = new DXContext(device, commandQueue, factory, hwnd, width, height, m_szConfigIniFile, m_nFallbackTexStyle);
 
