@@ -1,7 +1,7 @@
 # Script file used for the MDropDX12
 # 
 # Lines starting with # are ignored when parsing this file.
-# You can load other files by right-clicking "From File" in the MDropDX12 Remote window.
+# 
 #
 # You can add 0..n commands per line separated by | 
 # If it's not a known command, the text is treated as message
