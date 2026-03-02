@@ -1923,7 +1923,7 @@ static void PollWindowTitle() {
 // Helper: display song info overlay messages using the current track info.
 // Called on track change, explicit poll, and to refresh "Always Show" after device recovery.
 static void ShowSongInfoOverlay() {
-  if (!g_engine.m_bSongInfoOverlay) return;
+  if (!g_engine.m_bSongInfoOverlay && !g_engine.m_bSongInfoAlwaysShow) return;
   if (mdropdx12.currentTitle.empty() && mdropdx12.currentArtist.empty()) return;
 
   float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
