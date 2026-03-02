@@ -57,6 +57,35 @@ static void FormatSpriteSectionA(char* buf, int bufSize, int index) {
     sprintf_s(buf, bufSize, "img%d", index);
 }
 
+// Shorten a directory path to "...\parent\leaf\" for compact display.
+// If the path has fewer than 3 components, it's returned as-is.
+static void ShortenDirectoryPath(const wchar_t* szFullPath, wchar_t* szOut, int nMaxChars) {
+  if (!szFullPath || !szFullPath[0]) {
+    szOut[0] = 0;
+    return;
+  }
+  // Find the last two backslash-delimited segments
+  int len = (int)wcslen(szFullPath);
+  // Strip trailing backslash for scanning
+  int end = len;
+  if (end > 0 && szFullPath[end - 1] == L'\\') end--;
+  // Find second-to-last backslash
+  int slash1 = -1, slash2 = -1;
+  for (int i = end - 1; i >= 0; i--) {
+    if (szFullPath[i] == L'\\') {
+      if (slash1 < 0) slash1 = i;
+      else { slash2 = i; break; }
+    }
+  }
+  // If path is short enough or has <3 segments, show as-is
+  if (slash2 < 0 || len < 35) {
+    lstrcpynW(szOut, szFullPath, nMaxChars);
+    return;
+  }
+  // Format as "...\parent\leaf\"
+  swprintf(szOut, nMaxChars, L"...%s", szFullPath + slash2);
+}
+
 // EnumWindows callback: collects visible window titles for the Window Title combo
 static BOOL CALLBACK EnumVisibleWindowTitlesProc(HWND hwnd, LPARAM lParam) {
   if (!IsWindowVisible(hwnd)) return TRUE;
@@ -351,8 +380,8 @@ void Engine::OpenFolderPickerForPresetDir() {
       DebugLogW(L"OpenFolderPicker: initial folder set", LOG_VERBOSE);
     }
 
-    DebugLogW(L"OpenFolderPicker: about to call Show(NULL)...", LOG_VERBOSE);
-    hr = pfd->Show(NULL);  // NULL parent to avoid DX12 window interaction issues
+    DebugLogW(L"OpenFolderPicker: about to call Show()...", LOG_VERBOSE);
+    hr = pfd->Show(m_hSettingsWnd ? m_hSettingsWnd : NULL);
     {
       wchar_t dbg[128];
       swprintf(dbg, 128, L"OpenFolderPicker: Show returned hr=0x%08X", (unsigned)hr);
@@ -996,7 +1025,9 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     // Browse button
     if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
       p->OpenFolderPickerForPresetDir();
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), p->m_szPresetDir);
+      wchar_t szShort[MAX_PATH];
+      ShortenDirectoryPath(p->m_szPresetDir, szShort, MAX_PATH);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), szShort);
       // Repopulate preset listbox after directory change
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
       if (hList) {
@@ -1443,6 +1474,16 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (sel >= 0 && sel <= 1) {
         p->m_nIdleAction = sel;
         p->SaveIdleTimerSettings();
+      }
+      return 0;
+    }
+
+    // Fallback texture style combo box
+    if (id == IDC_MW_FALLBACK_TEX && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 2) {
+        p->m_nFallbackTexStyle = sel;
+        WritePrivateProfileIntW(sel, L"FallbackTexStyle", p->GetConfigIniFile(), L"Milkwave");
       }
       return 0;
     }
@@ -3272,9 +3313,14 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap;
 
   // Preset directory + browse
-  PAGE_CTRL(0, CreateLabel(hw, L"Preset Directory:", x, y, lw, lineH, hFont));
-  PAGE_CTRL(0, CreateEdit(hw, m_szPresetDir, IDC_MW_PRESET_DIR, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
-  PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_DIR, x + rw - 65, y, 65, lineH, hFont));
+  PAGE_CTRL(0, CreateLabel(hw, L"Preset Dir:", x, y, lw, lineH, hFont));
+  {
+    // Show shortened path: just the last 2 directory components
+    wchar_t szShort[MAX_PATH];
+    ShortenDirectoryPath(m_szPresetDir, szShort, MAX_PATH);
+    PAGE_CTRL(0, CreateEdit(hw, szShort, IDC_MW_PRESET_DIR, x + lw + 4, y, rw - lw - 84, lineH, hFont, ES_READONLY));
+  }
+  PAGE_CTRL(0, CreateBtn(hw, L"Browse...", IDC_MW_BROWSE_DIR, x + rw - 75, y, 75, lineH, hFont));
   y += lineH + gap;
 
   // Preset listbox
@@ -3912,6 +3958,30 @@ void Engine::BuildSettingsControls() {
     int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
     PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
     PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, bx, y, bw2, lineH, hFont));
+  }
+  y += lineH + gap + 4;
+
+  // Fallback Texture Style
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", L"Fallback Texture (for missing textures):",
+      WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_FALLBACK_TEX_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hLbl);
+  }
+  y += lineH + 2;
+  {
+    int comboW = MulDiv(200, lineH, 26);
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x, y, comboW, lineH + 4 * lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_FALLBACK_TEX, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Hue Gradient");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"White");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Black");
+    SendMessageW(hCombo, CB_SETCURSEL, m_nFallbackTexStyle, 0);
+    PAGE_CTRL(4, hCombo);
   }
 
   // ===== Messages tab (page 5) =====
@@ -4639,14 +4709,25 @@ void Engine::LayoutSettingsControls() {
   int newSliderW = rw - lw - 60;
   if (newSliderW < 80) newSliderW = 80;
 
-  // Stretch preset dir edit + reposition Browse button
+  // Stretch edit + reposition Browse buttons for Current Preset and Preset Dir rows.
+  // Note: r.left is the edit's x, not the window margin. Button must be positioned
+  // relative to the content area (xMargin + rw), not relative to the edit.
+  int xMargin = 16;
+  HWND hCur = GetDlgItem(m_hSettingsWnd, IDC_MW_CURRENT_PRESET);
+  if (hCur) {
+    RECT r; GetWindowRect(hCur, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(hCur, r.left, r.top, xMargin + rw - 70 - r.left, r.bottom - r.top, TRUE);
+    HWND hBrw = GetDlgItem(m_hSettingsWnd, IDC_MW_BROWSE_PRESET);
+    if (hBrw) MoveWindow(hBrw, xMargin + rw - 65, r.top, 65, r.bottom - r.top, TRUE);
+  }
   HWND hDir = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR);
   if (hDir) {
     RECT r; GetWindowRect(hDir, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    MoveWindow(hDir, r.left, r.top, rw - 70, r.bottom - r.top, TRUE);
+    MoveWindow(hDir, r.left, r.top, xMargin + rw - 80 - r.left, r.bottom - r.top, TRUE);
     HWND hBrw = GetDlgItem(m_hSettingsWnd, IDC_MW_BROWSE_DIR);
-    if (hBrw) MoveWindow(hBrw, r.left + rw - 65, r.top, 65, r.bottom - r.top, TRUE);
+    if (hBrw) MoveWindow(hBrw, xMargin + rw - 75, r.top, 75, r.bottom - r.top, TRUE);
   }
 
   // Stretch preset listbox
@@ -4712,7 +4793,7 @@ void Engine::LayoutSettingsControls() {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
     int gap = 6;
-    int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH;  // buttons + desc + randtex label + edit + browse/clear
+    int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH + gap + 4 + lineH + 2 + lineH;  // buttons + desc + randtex + fallback tex
     int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
     MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
@@ -4738,6 +4819,14 @@ void Engine::LayoutSettingsControls() {
     int rbw1 = MulDiv(80, lineH, 26), rbw2 = MulDiv(60, lineH, 26);
     if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, rbw1, lineH, TRUE);
     if (hRandClear) MoveWindow(hRandClear, r.left + rbw1 + 4, randY + lineH + 2 + lineH + 6, rbw2, lineH, TRUE);
+
+    // Fallback texture style controls
+    int fbTexY = randY + lineH + 2 + lineH + 6 + lineH + gap + 4;
+    HWND hFbLabel = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX_LABEL);
+    HWND hFbCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX);
+    if (hFbLabel) MoveWindow(hFbLabel, r.left, fbTexY, rw, lineH, TRUE);
+    int comboW = MulDiv(200, lineH, 26);
+    if (hFbCombo) MoveWindow(hFbCombo, r.left, fbTexY + lineH + 2, comboW, lineH + 4 * lineH, TRUE);
   }
 
   // Stretch Messages tab ListBox and reposition all controls below it
@@ -5130,7 +5219,7 @@ void Engine::ResetSettingsWindow() {
   if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
 
   m_nSettingsWndW = 620;
-  m_nSettingsWndH = 700;
+  m_nSettingsWndH = 850;
 
   // Center on the monitor the settings window is currently on
   HMONITOR hMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);

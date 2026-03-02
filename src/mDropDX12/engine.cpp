@@ -611,6 +611,7 @@ SPOUT :
 #include <strsafe.h>
 #include <Windows.h>
 #include "AutoCharFn.h"
+#include "embedded_shaders.h"
 #include <sstream>
 
 #include <dwmapi.h>  // Link with Dwmapi.lib
@@ -742,6 +743,81 @@ const unsigned char LC2UC[256] = {
   241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,
 };
 
+// Helper: look up a filename in the embedded shader table.
+// Returns the embedded source string, or nullptr if not found.
+static const char* FindEmbeddedShader(const wchar_t* szBaseFilename) {
+  for (int i = 0; i < k_num_embedded_shaders; i++) {
+    if (_wcsicmp(szBaseFilename, k_embedded_shaders[i].filename) == 0)
+      return k_embedded_shaders[i].data;
+  }
+  return nullptr;
+}
+
+// Helper: copy embedded shader source into szDestText with optional LF conversion.
+static void CopyEmbeddedToBuffer(const char* src, char* szDestText, int nMaxBytes, bool bConvertLFsToSpecialChar) {
+  int len = 0;
+  char prev_ch = 0;
+  while (*src && len < nMaxBytes - 4) {
+    char orig_ch = *src++;
+    char ch = orig_ch;
+    bool bSkipChar = false;
+    if (bConvertLFsToSpecialChar) {
+      if (ch == 10) {
+        if (prev_ch == 13)
+          bSkipChar = true;
+        else
+          ch = LINEFEED_CONTROL_CHAR;
+      }
+      else if (ch == 13)
+        ch = LINEFEED_CONTROL_CHAR;
+    }
+    if (!bSkipChar)
+      szDestText[len++] = ch;
+    prev_ch = orig_ch;
+  }
+  szDestText[len] = 0;
+  szDestText[len++] = ' ';  // trailing whitespace (matches original behavior)
+}
+
+// Helper: auto-extract embedded shader to disk so it exists for future runs.
+static void ExtractEmbeddedShaderToDisk(const wchar_t* szFile, const char* embeddedData) {
+  // Ensure parent directories exist
+  wchar_t szDir[MAX_PATH];
+  wcscpy(szDir, szFile);
+  // Walk backwards to find last backslash and create directory chain
+  for (int pass = 0; pass < 2; pass++) {
+    wchar_t* p = wcsrchr(szDir, L'\\');
+    if (p) {
+      *p = 0;
+      if (pass == 0) {
+        // szDir is now "...\resources\data" — create it
+        // But first try creating parent "...\resources"
+        wchar_t szParent[MAX_PATH];
+        wcscpy(szParent, szDir);
+        wchar_t* pp = wcsrchr(szParent, L'\\');
+        if (pp) {
+          *pp = 0;
+          // szParent = "...\resources" parent, szDir after *pp = "...\resources"
+          // Actually we need "...\resources" itself
+        }
+        CreateDirectoryW(szParent, NULL);  // e.g. "C:\path\resources" (may already exist)
+        CreateDirectoryW(szDir, NULL);     // e.g. "C:\path\resources\data"
+        break;
+      }
+    }
+  }
+
+  FILE* f = _wfopen(szFile, L"wb");
+  if (f) {
+    size_t dataLen = strlen(embeddedData);
+    fwrite(embeddedData, 1, dataLen, f);
+    fclose(f);
+    wchar_t dbg[512];
+    swprintf(dbg, L"Extracted embedded shader: %s", szFile);
+    g_engine.dumpmsg(dbg);
+  }
+}
+
 bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertLFsToSpecialChar) {
   wchar_t szFile[MAX_PATH];
   swprintf(szFile, L"%s%s", g_engine.m_szMilkdrop2Path, szBaseFilename);
@@ -749,6 +825,18 @@ bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxB
   // read in all chars.  Replace char combos:  { 13;  13+10;  10 } with LINEFEED_CONTROL_CHAR, if bConvertLFsToSpecialChar is true.
   FILE* f = _wfopen(szFile, L"rb");
   if (!f) {
+    // Fallback: try embedded shader data
+    const char* embedded = FindEmbeddedShader(szBaseFilename);
+    if (embedded) {
+      wchar_t dbg[512];
+      swprintf(dbg, L"Using embedded fallback for: %s", szBaseFilename);
+      g_engine.dumpmsg(dbg);
+
+      CopyEmbeddedToBuffer(embedded, szDestText, nMaxBytes, bConvertLFsToSpecialChar);
+      ExtractEmbeddedShaderToDisk(szFile, embedded);
+      return true;
+    }
+
     wchar_t buf[1024], title[64];
     swprintf(buf, wasabiApiLangString(IDS_UNABLE_TO_READ_DATA_FILE_X), szFile);
     g_engine.dumpmsg(buf);
@@ -1299,7 +1387,7 @@ void Engine::MyReadConfig() {
 
   GetPrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, m_szPresetDir, sizeof(m_szPresetDir), pIni);
 
-  // Validate preset directory — if it doesn't exist, flag for settings screen
+  // Validate preset directory — if it doesn't exist, try default or create it
   if (GetFileAttributesW(m_szPresetDir) == INVALID_FILE_ATTRIBUTES) {
     // Try the default presets dir before flagging
     wchar_t szDefault[MAX_PATH];
@@ -1310,7 +1398,10 @@ void Engine::MyReadConfig() {
       WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, pIni);
     }
     else {
-      m_bSettingsNeedAttention = true;
+      // Self-bootstrap: create the default preset directory
+      CreateDirectoryW(szDefault, NULL);
+      lstrcpyW(m_szPresetDir, szDefault);
+      DebugLogA("Created default preset directory (self-bootstrap)");
     }
   }
 
@@ -1383,6 +1474,8 @@ void Engine::MyReadConfig() {
   m_ShaderPrecompileOnStartup = GetPrivateProfileBoolW(L"Milkwave", L"ShaderPrecompileOnStartup", m_ShaderPrecompileOnStartup, pIni);
   m_CheckDirectXOnStartup = GetPrivateProfileBoolW(L"Milkwave", L"CheckDirectXOnStartup", m_CheckDirectXOnStartup, pIni);
   m_LogLevel = GetPrivateProfileIntW(L"Milkwave", L"LogLevel", m_LogLevel, pIni);
+  if (m_bSelfBootstrapped && m_LogLevel < 4)
+    m_LogLevel = 4; // verbose logging for first-run diagnostics
   DebugLogSetLevel(m_LogLevel); // apply log level to DebugLog system
   GetPrivateProfileStringW(L"Milkwave", L"WindowTitle", L"", m_szWindowTitle, 256, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
@@ -1426,7 +1519,7 @@ void Engine::MyReadConfig() {
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
   m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 620, pIni);
-  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 700, pIni);
+  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 850, pIni);
   m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
   if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
   if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
@@ -3196,6 +3289,15 @@ void Engine::MyRenderFn(int redraw) {
       m_bSettingsNeedAttention = false; // only force once
       OpenSettingsWindow();
       AddError(L"Preset directory not found. Press F8 to open Settings.", 8.0f, ERR_MISC, true);
+    }
+
+    // Self-bootstrap: open settings to About tab, notify user about verbose logging
+    if (m_bSelfBootstrapped && m_UI_mode == UI_REGULAR) {
+      m_bSelfBootstrapped = false; // only once
+      // Set ActiveTab to About (page 10) so settings opens there
+      WritePrivateProfileStringW(L"Settings", L"ActiveTab", L"10", GetConfigIniFile());
+      OpenSettingsWindow();
+      AddError(L"First run: debug logging set to max (verbose). Add presets to resources\\presets\\.", 10.0f, ERR_MISC, true);
     }
 
     float dt = GetTime() - m_prev_time;

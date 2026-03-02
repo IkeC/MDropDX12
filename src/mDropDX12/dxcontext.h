@@ -80,7 +80,8 @@ public:
     HWND                 hwnd,
     int                  width,
     int                  height,
-    wchar_t*             szIniFile);
+    wchar_t*             szIniFile,
+    int                  fallbackTexStyle = 0);
 
   ~DXContext();
 
@@ -220,9 +221,10 @@ public:
 
   // Null texture (1x1 black) for filling unused SRV slots
   DX12Texture m_nullTexture;
-  // White texture (1x1 white) for missing disk textures (multiplicative identity)
-  DX12Texture m_whiteTexture;
-  bool CreateNullTexture();
+  // Fallback texture for missing disk textures (style set in settings)
+  DX12Texture m_fallbackTexture;
+  int m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black
+  bool CreateNullTexture(int fallbackStyle = 0);
 
   // Create a 16-entry binding block for a texture (all slots = tex for simple passthrough)
   // Writes to tex.bindingBlockStart. Call after CreateNullTexture().

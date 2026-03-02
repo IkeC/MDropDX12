@@ -46,8 +46,10 @@ DXContext::DXContext(
     HWND                 hwnd,
     int                  width,
     int                  height,
-    wchar_t*             szIniFile)
+    wchar_t*             szIniFile,
+    int                  fallbackTexStyle)
 {
+    m_nFallbackTexStyle = fallbackTexStyle;
     m_szWindowCaption[0] = 0;
     m_hwnd               = hwnd;
     m_truly_exiting      = 0;
@@ -247,7 +249,7 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
     if (!CreatePipelines()) return false;
 
     // 10. Null texture for filling unused SRV slots (Phase 5)
-    if (!CreateNullTexture()) return false;
+    if (!CreateNullTexture(m_nFallbackTexStyle)) return false;
 
     // 11. Per-frame binding block ranges (Phase 5)
     if (!AllocatePerFrameBindings()) return false;
@@ -975,7 +977,7 @@ D3D12_GPU_VIRTUAL_ADDRESS DXContext::UploadConstantBuffer(const void* data, UINT
 // Null texture + binding block (Phase 5)
 // ---------------------------------------------------------------------------
 
-bool DXContext::CreateNullTexture()
+bool DXContext::CreateNullTexture(int fallbackStyle)
 {
     // Create a 1x1 black RGBA texture for filling unused SRV slots
     D3D12_RESOURCE_DESC texDesc = {};
@@ -1083,74 +1085,136 @@ bool DXContext::CreateNullTexture()
     m_nullTexture.depth = 1;
     m_nullTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-    // --- White texture (1x1 white) for missing disk textures ---
+    // --- Fallback texture for missing disk textures ---
+    // Generate pixel data based on style
+    UINT fbW = 1, fbH = 1;
+    std::vector<UINT8> fbPixels;
+
+    if (fallbackStyle == 0) {
+        // Hue Gradient: 256x256 horizontal HSV sweep (S=1, V=1)
+        fbW = 256; fbH = 256;
+        fbPixels.resize(fbW * fbH * 4);
+        for (UINT y = 0; y < fbH; y++) {
+            for (UINT xx = 0; xx < fbW; xx++) {
+                float h = (float)xx / (float)fbW * 360.0f;  // 0..360
+                // HSV to RGB (S=1, V=1)
+                float c = 1.0f;
+                float x2 = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+                float r = 0, g = 0, b = 0;
+                if (h < 60)       { r = c; g = x2; }
+                else if (h < 120) { r = x2; g = c; }
+                else if (h < 180) { g = c; b = x2; }
+                else if (h < 240) { g = x2; b = c; }
+                else if (h < 300) { r = x2; b = c; }
+                else              { r = c; b = x2; }
+                UINT idx = (y * fbW + xx) * 4;
+                fbPixels[idx + 0] = (UINT8)(r * 255.0f);
+                fbPixels[idx + 1] = (UINT8)(g * 255.0f);
+                fbPixels[idx + 2] = (UINT8)(b * 255.0f);
+                fbPixels[idx + 3] = 255;
+            }
+        }
+    } else if (fallbackStyle == 1) {
+        // White: 1x1 (multiplicative identity)
+        fbPixels = { 255, 255, 255, 255 };
+    } else {
+        // Black: 1x1
+        fbPixels = { 0, 0, 0, 255 };
+    }
+
+    // Create GPU texture resource
+    D3D12_RESOURCE_DESC fbTexDesc = {};
+    fbTexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    fbTexDesc.Width = fbW;
+    fbTexDesc.Height = fbH;
+    fbTexDesc.DepthOrArraySize = 1;
+    fbTexDesc.MipLevels = 1;
+    fbTexDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    fbTexDesc.SampleDesc.Count = 1;
+    fbTexDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
     hr = m_device->CreateCommittedResource(
-        &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+        &heapProps, D3D12_HEAP_FLAG_NONE, &fbTexDesc,
         D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-        IID_PPV_ARGS(&m_whiteTexture.resource));
+        IID_PPV_ARGS(&m_fallbackTexture.resource));
     if (FAILED(hr)) return false;
 
-    UINT8 whitePixel[4] = { 255, 255, 255, 255 };
+    // Upload pixel data
+    UINT rowPitch = ((fbW * 4 + 255) & ~255u);  // align to 256 bytes
+    UINT64 uploadSize = (UINT64)rowPitch * fbH;
+    if (uploadSize < 256) uploadSize = 256;
 
-    ComPtr<ID3D12Resource> uploadBufW;
+    D3D12_RESOURCE_DESC fbUploadDesc = {};
+    fbUploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    fbUploadDesc.Width = uploadSize;
+    fbUploadDesc.Height = 1;
+    fbUploadDesc.DepthOrArraySize = 1;
+    fbUploadDesc.MipLevels = 1;
+    fbUploadDesc.Format = DXGI_FORMAT_UNKNOWN;
+    fbUploadDesc.SampleDesc.Count = 1;
+    fbUploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> uploadBufFb;
     hr = m_device->CreateCommittedResource(
-        &uploadHeapProps, D3D12_HEAP_FLAG_NONE, &uploadDesc,
+        &uploadHeapProps, D3D12_HEAP_FLAG_NONE, &fbUploadDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-        IID_PPV_ARGS(&uploadBufW));
+        IID_PPV_ARGS(&uploadBufFb));
     if (FAILED(hr)) return false;
 
-    UINT8* mappedW = nullptr;
-    uploadBufW->Map(0, nullptr, (void**)&mappedW);
-    memcpy(mappedW, whitePixel, 4);
-    uploadBufW->Unmap(0, nullptr);
+    UINT8* mappedFb = nullptr;
+    uploadBufFb->Map(0, nullptr, (void**)&mappedFb);
+    // Copy row by row (source stride = fbW*4, dest stride = rowPitch)
+    for (UINT row = 0; row < fbH; row++)
+        memcpy(mappedFb + row * rowPitch, fbPixels.data() + row * fbW * 4, fbW * 4);
+    uploadBufFb->Unmap(0, nullptr);
 
     m_commandAllocators[0]->Reset();
     m_commandList->Reset(m_commandAllocators[0].Get(), nullptr);
 
-    D3D12_TEXTURE_COPY_LOCATION srcW = {};
-    srcW.pResource = uploadBufW.Get();
-    srcW.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    srcW.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srcW.PlacedFootprint.Footprint.Width = 1;
-    srcW.PlacedFootprint.Footprint.Height = 1;
-    srcW.PlacedFootprint.Footprint.Depth = 1;
-    srcW.PlacedFootprint.Footprint.RowPitch = 256;
+    D3D12_TEXTURE_COPY_LOCATION srcFb = {};
+    srcFb.pResource = uploadBufFb.Get();
+    srcFb.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcFb.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srcFb.PlacedFootprint.Footprint.Width = fbW;
+    srcFb.PlacedFootprint.Footprint.Height = fbH;
+    srcFb.PlacedFootprint.Footprint.Depth = 1;
+    srcFb.PlacedFootprint.Footprint.RowPitch = rowPitch;
 
-    D3D12_TEXTURE_COPY_LOCATION dstW = {};
-    dstW.pResource = m_whiteTexture.resource.Get();
-    dstW.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstW.SubresourceIndex = 0;
+    D3D12_TEXTURE_COPY_LOCATION dstFb = {};
+    dstFb.pResource = m_fallbackTexture.resource.Get();
+    dstFb.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstFb.SubresourceIndex = 0;
 
-    m_commandList->CopyTextureRegion(&dstW, 0, 0, 0, &srcW, nullptr);
+    m_commandList->CopyTextureRegion(&dstFb, 0, 0, 0, &srcFb, nullptr);
 
-    D3D12_RESOURCE_BARRIER barrierW = {};
-    barrierW.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrierW.Transition.pResource = m_whiteTexture.resource.Get();
-    barrierW.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-    barrierW.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-    barrierW.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    m_commandList->ResourceBarrier(1, &barrierW);
+    D3D12_RESOURCE_BARRIER barrierFb = {};
+    barrierFb.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrierFb.Transition.pResource = m_fallbackTexture.resource.Get();
+    barrierFb.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barrierFb.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrierFb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1, &barrierFb);
 
     m_commandList->Close();
-    ID3D12CommandList* listsW[] = { m_commandList.Get() };
-    m_commandQueue->ExecuteCommandLists(1, listsW);
+    ID3D12CommandList* listsFb[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(1, listsFb);
 
     m_fenceValues[0]++;
     m_commandQueue->Signal(m_fence.Get(), m_fenceValues[0]);
     m_fence->SetEventOnCompletion(m_fenceValues[0], m_fenceEvent);
     WaitForSingleObject(m_fenceEvent, INFINITE);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE whiteSrvCpu = AllocateSrvCpu();
-    m_whiteTexture.srvIndex = m_nextFreeSrvSlot;
+    D3D12_CPU_DESCRIPTOR_HANDLE fbSrvCpu = AllocateSrvCpu();
+    m_fallbackTexture.srvIndex = m_nextFreeSrvSlot;
 
-    m_device->CreateShaderResourceView(m_whiteTexture.resource.Get(), &srvDesc, whiteSrvCpu);
+    m_device->CreateShaderResourceView(m_fallbackTexture.resource.Get(), &srvDesc, fbSrvCpu);
     AllocateSrvGpu();
 
-    m_whiteTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-    m_whiteTexture.width = 1;
-    m_whiteTexture.height = 1;
-    m_whiteTexture.depth = 1;
-    m_whiteTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    m_fallbackTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    m_fallbackTexture.width = fbW;
+    m_fallbackTexture.height = fbH;
+    m_fallbackTexture.depth = 1;
+    m_fallbackTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     return true;
 }

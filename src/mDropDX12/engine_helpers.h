@@ -268,6 +268,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CONTENT_BASE_EDIT   2136  // Edit: Content Base Path display (Files tab)
 #define IDC_MW_CONTENT_BASE_BROWSE 2137  // Button: Browse for Content Base Path
 #define IDC_MW_CONTENT_BASE_CLEAR  2138  // Button: Clear Content Base Path
+#define IDC_MW_FALLBACK_TEX_LABEL  2139  // Label: Fallback Texture Style (Files tab)
+#define IDC_MW_FALLBACK_TEX        2140  // ComboBox: Fallback Texture Style (Files tab)
 
 // Idle Timer controls (System tab)
 #define IDC_MW_IDLE_ENABLE         2150  // Checkbox: enable idle timer

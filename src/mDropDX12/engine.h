@@ -428,6 +428,7 @@ public:
 
   /// CONFIG PANEL SETTINGS THAT WE'VE ADDED (TAB #2)
   bool		m_bFirstRun;
+  bool    m_bSelfBootstrapped = false; // true when exe ran from empty directory (no resources found)
   float		m_fBlendTimeAuto;		// blend time when preset auto-switches
   float		m_fBlendTimeUser;		// blend time when user loads a new preset
   float		m_fTimeBetweenPresets;		// <- this is in addition to m_fBlendTimeAuto
@@ -993,7 +994,7 @@ public:
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
   int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
   int         m_nSettingsWndW = 620;
-  int         m_nSettingsWndH = 700;
+  int         m_nSettingsWndH = 850;
   std::thread m_settingsThread;
   std::atomic<bool> m_bSettingsThreadRunning{false};
   void        OpenSettingsWindow();

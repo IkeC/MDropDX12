@@ -2928,11 +2928,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 
   // Determine m_szBaseDir: the directory that contains the "resources" folder.
   // Walk upward from the exe location (handles Debug/, Release/, and install layouts).
+  // If not found, use the exe directory and auto-create the directory structure.
   {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
 
-    fs::path dir = fs::path(exePath).parent_path();
+    fs::path exeDir = fs::path(exePath).parent_path();
+    fs::path dir = exeDir;
 
     // Walk up at most 4 levels looking for resources\data\include.fx
     bool found = false;
@@ -2946,6 +2948,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
       dir = parent;
     }
 
+    if (!found) {
+      // Self-bootstrap: use exe directory and create the directory structure.
+      // Embedded shaders will be extracted on first use by ReadFileToString().
+      dir = exeDir;
+      CreateDirectoryW((dir / L"resources").c_str(), NULL);
+      CreateDirectoryW((dir / L"resources" / L"data").c_str(), NULL);
+      CreateDirectoryW((dir / L"resources" / L"presets").c_str(), NULL);
+      CreateDirectoryW((dir / L"resources" / L"textures").c_str(), NULL);
+      CreateDirectoryW((dir / L"resources" / L"sprites").c_str(), NULL);
+      g_engine.m_bSelfBootstrapped = true;
+      g_engine.m_LogLevel = 4; // verbose logging for first-run diagnostics
+    }
+
     std::wstring baseDir = dir.wstring();
     if (!baseDir.empty() && baseDir.back() != L'\\') {
       baseDir += L'\\';
@@ -2956,7 +2971,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     DebugLogInit(g_engine.m_szBaseDir);
     DebugLogSetLevel(g_engine.m_LogLevel); // apply INI log level immediately
 
-    DebugLogW(found ? L"BaseDir resolved (resources found)" : L"BaseDir resolved (resources NOT found)");
+    if (found) {
+      DebugLogW(L"BaseDir resolved (resources found)");
+    } else {
+      DebugLogW(L"BaseDir: resources not found, created directory structure (self-bootstrap)");
+    }
     DebugLogW(g_engine.m_szBaseDir);
   }
   int res = 0;

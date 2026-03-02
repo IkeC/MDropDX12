@@ -6322,8 +6322,8 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
         outSlots[i] = params->m_texture_bindings[i].dx12SrvIndex;
       else if (i == 0)
         outSlots[i] = vsTex.srvIndex;  // MD1 fallback: slot 0 = VS texture
-      else if (m_lpDX->m_whiteTexture.srvIndex != UINT_MAX)
-        outSlots[i] = m_lpDX->m_whiteTexture.srvIndex;  // missing tex: white = multiplicative identity
+      else if (m_lpDX->m_fallbackTexture.srvIndex != UINT_MAX)
+        outSlots[i] = m_lpDX->m_fallbackTexture.srvIndex;  // missing tex: fallback (hue gradient/white/black)
       break;
     default:
       break;
