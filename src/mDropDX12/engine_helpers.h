@@ -355,6 +355,11 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_FONT_PLUS   7062
 #define IDC_MW_DISP_FONT_MINUS  7063
 #define IDC_MW_OPEN_DISPLAYS    7064  // Button on General tab to open Displays window
+#define IDC_MW_DISP_TAB         7065  // Tab control in Displays window
+
+#define DISPLAYS_NUM_PAGES      2
+#define DISPLAYS_PAGE_OUTPUTS   0
+#define DISPLAYS_PAGE_VIDINPUT  1
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)

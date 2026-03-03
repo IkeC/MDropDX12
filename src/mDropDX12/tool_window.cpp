@@ -100,7 +100,7 @@ void ToolWindow::CreateOnThread() {
   RegisterClassExW(&wc);
 
   // Init common controls
-  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_UPDOWN_CLASS };
+  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_UPDOWN_CLASS | ICC_TAB_CLASSES };
   InitCommonControlsEx(&icex);
 
   // Ensure theme brushes are ready
@@ -172,8 +172,15 @@ void ToolWindow::ApplyDarkTheme() {
   }
 
   for (HWND hChild : m_childCtrls) {
-    if (hChild && IsWindow(hChild))
-      SetWindowTheme(hChild, m_pEngine->m_bSettingsDarkTheme ? L"DarkMode_Explorer" : NULL, NULL);
+    if (hChild && IsWindow(hChild)) {
+      wchar_t szClass[32];
+      GetClassNameW(hChild, szClass, 32);
+      if (_wcsicmp(szClass, WC_TABCONTROLW) == 0)
+        SetWindowTheme(hChild, m_pEngine->m_bSettingsDarkTheme ? L"" : NULL,
+                                m_pEngine->m_bSettingsDarkTheme ? L"" : NULL);
+      else
+        SetWindowTheme(hChild, m_pEngine->m_bSettingsDarkTheme ? L"DarkMode_Explorer" : NULL, NULL);
+    }
   }
 
   RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
@@ -400,6 +407,53 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
   case WM_DRAWITEM:
   {
     DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    if (pDIS && pDIS->CtlType == ODT_TAB) {
+      bool bSelected = (pDIS->itemState & ODS_SELECTED) != 0;
+      HDC hdc = pDIS->hDC;
+      RECT rc = pDIS->rcItem;
+      if (p->m_bSettingsDarkTheme) {
+        COLORREF bg = bSelected ? p->m_colSettingsCtrlBg : p->m_colSettingsBtnFace;
+        HBRUSH hBr = CreateSolidBrush(bg);
+        FillRect(hdc, &rc, hBr);
+        DeleteObject(hBr);
+        if (bSelected) {
+          HPEN hiPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnHi);
+          HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+          HPEN oldPen = (HPEN)SelectObject(hdc, hiPen);
+          MoveToEx(hdc, rc.left, rc.top, NULL);
+          LineTo(hdc, rc.right - 1, rc.top);
+          MoveToEx(hdc, rc.left, rc.top, NULL);
+          LineTo(hdc, rc.left, rc.bottom);
+          SelectObject(hdc, shPen);
+          MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+          LineTo(hdc, rc.right - 1, rc.bottom);
+          SelectObject(hdc, oldPen);
+          DeleteObject(hiPen);
+          DeleteObject(shPen);
+        } else {
+          HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+          HPEN oldPen = (HPEN)SelectObject(hdc, shPen);
+          MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+          LineTo(hdc, rc.right, rc.bottom - 1);
+          SelectObject(hdc, oldPen);
+          DeleteObject(shPen);
+        }
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, bSelected ? p->m_colSettingsHighlightText : p->m_colSettingsText);
+      } else {
+        FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+      }
+      wchar_t szText[64] = {};
+      TCITEMW tci = {};
+      tci.mask = TCIF_TEXT;
+      tci.pszText = szText;
+      tci.cchTextMax = 64;
+      SendMessageW(pDIS->hwndItem, TCM_GETITEMW, pDIS->itemID, (LPARAM)&tci);
+      DrawTextW(hdc, szText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      return TRUE;
+    }
     if (pDIS && pDIS->CtlType == ODT_BUTTON) {
       // Pin button
       bool bIsPinBtn = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn");

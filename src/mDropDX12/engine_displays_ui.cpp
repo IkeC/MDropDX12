@@ -1,6 +1,6 @@
 /*
   DisplaysWindow — Spout / Displays window (ToolWindow subclass).
-  Contains: Display Outputs list, Spout sender management, Video Input controls.
+  Two tabs: Display Outputs (Spout sender management, mirrors) and Video Input.
   Launched from "Spout / Displays..." button on the Settings General tab.
 */
 
@@ -39,12 +39,62 @@ void Engine::CloseDisplaysWindow() {
 }
 
 //----------------------------------------------------------------------
-// Build Controls
+// Tab subclass proc — paints dark background via WM_ERASEBKGND
+//----------------------------------------------------------------------
+
+static LRESULT CALLBACK DisplaysTabSubclassProc(
+  HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+  UINT_PTR /*subclassId*/, DWORD_PTR refData)
+{
+  switch (msg) {
+  case WM_ERASEBKGND: {
+    Engine* p = (Engine*)refData;
+    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+      HDC hdc = (HDC)wParam;
+      RECT rc;
+      GetClientRect(hwnd, &rc);
+      FillRect(hdc, &rc, p->m_hBrSettingsBg);
+      return 1;
+    }
+    break;
+  }
+  case WM_NCDESTROY:
+    RemoveWindowSubclass(hwnd, DisplaysTabSubclassProc, 1);
+    break;
+  }
+  return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+//----------------------------------------------------------------------
+// Show/hide page controls
+//----------------------------------------------------------------------
+
+void DisplaysWindow::ShowPage(int page) {
+  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) {
+    if (i == page) {
+      for (HWND h : m_pageCtrls[i])
+        SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    } else {
+      for (HWND h : m_pageCtrls[i])
+        ShowWindow(h, SW_HIDE);
+    }
+  }
+  m_nActivePage = page;
+  wchar_t buf[8]; swprintf(buf, 8, L"%d", page);
+  WritePrivateProfileStringW(L"Displays", L"ActiveTab", buf, m_pEngine->GetConfigIniFile());
+}
+
+//----------------------------------------------------------------------
+// Build Controls — creates tab control, then delegates to page builders
 //----------------------------------------------------------------------
 
 void DisplaysWindow::DoBuildControls() {
   HWND hw = m_hWnd;
   if (!hw) return;
+
+  // Reset page tracking
+  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) m_pageCtrls[i].clear();
+  m_hTab = NULL;
 
   // Create fonts from shared font size
   if (m_hFont) DeleteObject(m_hFont);
@@ -58,28 +108,25 @@ void DisplaysWindow::DoBuildControls() {
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
   HFONT hFont = m_hFont;
-  HFONT hFontBold = m_hFontBold;
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
   int clientW = rcWnd.right;
+  int clientH = rcWnd.bottom;
 
   int lineH = GetLineHeight();
   int gap = 6, x = 16;
   int rw = clientW - x * 2;
   int y = 8;
 
-  // Shorthand macro
-  #define TC(expr) TrackControl(expr)
-
-  // Font +/- buttons (top-left)
+  // Font +/- buttons (top-left) — always visible, not page-tracked
   {
     int btnW = lineH;
-    TC(CreateBtn(hw, L"\u2212", IDC_MW_DISP_FONT_MINUS, x, y, btnW, lineH, hFont));
-    TC(CreateBtn(hw, L"+", IDC_MW_DISP_FONT_PLUS, x + btnW + 4, y, btnW, lineH, hFont));
+    TrackControl(CreateBtn(hw, L"\u2212", IDC_MW_DISP_FONT_MINUS, x, y, btnW, lineH, hFont));
+    TrackControl(CreateBtn(hw, L"+", IDC_MW_DISP_FONT_PLUS, x + btnW + 4, y, btnW, lineH, hFont));
   }
 
-  // Pin button (top-right)
+  // Pin button (top-right) — always visible, not page-tracked
   {
     if (m_hPinFont) DeleteObject(m_hPinFont);
     int pinSize = lineH;
@@ -108,15 +155,62 @@ void DisplaysWindow::DoBuildControls() {
         SendMessageW(hTip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
       }
     }
-    TC(hPin);
+    TrackControl(hPin);
   }
 
   y += lineH + gap + 4;
 
+  // ── Tab control ──
+  m_hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
+    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_OWNERDRAWFIXED,
+    0, y, clientW, clientH - y, hw, (HMENU)(INT_PTR)IDC_MW_DISP_TAB,
+    GetModuleHandle(NULL), NULL);
+  SendMessage(m_hTab, WM_SETFONT, (WPARAM)hFont, TRUE);
+  SetWindowSubclass(m_hTab, DisplaysTabSubclassProc, 1, (DWORD_PTR)m_pEngine);
+  TrackControl(m_hTab);
+
+  const wchar_t* tabNames[] = { L"Display Outputs", L"Video Input" };
+  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) {
+    TCITEMW ti = {};
+    ti.mask = TCIF_TEXT;
+    ti.pszText = (LPWSTR)tabNames[i];
+    SendMessageW(m_hTab, TCM_INSERTITEMW, i, (LPARAM)&ti);
+  }
+
+  // Compute tab content area
+  RECT rcTab = { 0, y, clientW, clientH };
+  TabCtrl_AdjustRect(m_hTab, FALSE, &rcTab);
+  int tabTop = rcTab.top + 4;
+  int tabRW = rcTab.right - rcTab.left - x;
+
+  // Build both pages (controls created hidden by ShowPage)
+  BuildOutputsPage(rcTab.left + x, tabTop, tabRW, lineH, gap);
+  BuildVideoInputPage(rcTab.left + x, tabTop, tabRW, lineH, gap);
+
+  // Restore last active tab
+  int startTab = GetPrivateProfileIntW(L"Displays", L"ActiveTab", 0, m_pEngine->GetConfigIniFile());
+  if (startTab < 0 || startTab >= DISPLAYS_NUM_PAGES) startTab = 0;
+  TabCtrl_SetCurSel(m_hTab, startTab);
+  ShowPage(startTab);
+
+  // Populate display list
+  m_pEngine->RefreshDisplaysTab();
+}
+
+//----------------------------------------------------------------------
+// Page 0: Display Outputs
+//----------------------------------------------------------------------
+
+void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) {
+  HWND hw = m_hWnd;
+  HFONT hFont = m_hFont;
+  HFONT hFontBold = m_hFontBold;
   Engine* p = m_pEngine;
 
-  // ===== Display Outputs =====
-  TC(CreateLabel(hw, L"Display Outputs", x, y, rw, lineH, hFontBold));
+  // Track in both base (for dark theme + destroy) and page (for show/hide)
+  #define PAGE_TC(page, expr) do { HWND _h = (expr); if (_h) { TrackControl(_h); m_pageCtrls[page].push_back(_h); } } while(0)
+
+  PAGE_TC(0, CreateLabel(hw, L"Display Outputs", x, y, rw, lineH, hFontBold));
   y += lineH + gap;
 
   // ListBox
@@ -126,54 +220,54 @@ void DisplaysWindow::DoBuildControls() {
       WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_DISP_LIST, GetModuleHandle(NULL), NULL);
     if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    TC(hList);
+    PAGE_TC(0, hList);
     y += listH + gap;
   }
 
   // Enable + Fullscreen checkboxes
-  TC(CreateCheck(hw, L"Enabled", IDC_MW_DISP_ENABLE, x, y, rw / 2 - 4, lineH, hFont, false));
-  TC(CreateCheck(hw, L"Fullscreen", IDC_MW_DISP_FULLSCREEN, x + rw / 2, y, rw / 2, lineH, hFont, false));
+  PAGE_TC(0, CreateCheck(hw, L"Enabled", IDC_MW_DISP_ENABLE, x, y, rw / 2 - 4, lineH, hFont, false));
+  PAGE_TC(0, CreateCheck(hw, L"Fullscreen", IDC_MW_DISP_FULLSCREEN, x + rw / 2, y, rw / 2, lineH, hFont, false));
   y += lineH + gap;
 
   // Spout settings
-  TC(CreateLabel(hw, L"Sender Name:", x, y, 100, lineH, hFont));
-  TC(CreateEdit(hw, L"MDropDX12", IDC_MW_DISP_SPOUT_NAME, x + 104, y, rw - 104, lineH, hFont));
+  PAGE_TC(0, CreateLabel(hw, L"Sender Name:", x, y, 100, lineH, hFont));
+  PAGE_TC(0, CreateEdit(hw, L"MDropDX12", IDC_MW_DISP_SPOUT_NAME, x + 104, y, rw - 104, lineH, hFont));
   y += lineH + 2;
-  TC(CreateCheck(hw, L"Fixed Size", IDC_MW_DISP_SPOUT_FIXED, x, y, rw / 2 - 4, lineH, hFont, false));
+  PAGE_TC(0, CreateCheck(hw, L"Fixed Size", IDC_MW_DISP_SPOUT_FIXED, x, y, rw / 2 - 4, lineH, hFont, false));
   y += lineH + 2;
-  TC(CreateLabel(hw, L"Width:", x, y, 50, lineH, hFont));
-  TC(CreateEdit(hw, L"1920", IDC_MW_DISP_SPOUT_W, x + 54, y, 70, lineH, hFont));
-  TC(CreateLabel(hw, L"Height:", x + 140, y, 50, lineH, hFont));
-  TC(CreateEdit(hw, L"1080", IDC_MW_DISP_SPOUT_H, x + 194, y, 70, lineH, hFont));
+  PAGE_TC(0, CreateLabel(hw, L"Width:", x, y, 50, lineH, hFont));
+  PAGE_TC(0, CreateEdit(hw, L"1920", IDC_MW_DISP_SPOUT_W, x + 54, y, 70, lineH, hFont));
+  PAGE_TC(0, CreateLabel(hw, L"Height:", x + 140, y, 50, lineH, hFont));
+  PAGE_TC(0, CreateEdit(hw, L"1080", IDC_MW_DISP_SPOUT_H, x + 194, y, 70, lineH, hFont));
   y += lineH + gap + 4;
 
   // Buttons: Add Spout, Remove, Refresh
   {
     int btnW = MulDiv(100, lineH, 26);
     int btnGap = 8;
-    TC(CreateBtn(hw, L"Add Spout", IDC_MW_DISP_ADD_SPOUT, x, y, btnW, lineH, hFont));
-    TC(CreateBtn(hw, L"Remove", IDC_MW_DISP_REMOVE, x + btnW + btnGap, y, btnW, lineH, hFont));
-    TC(CreateBtn(hw, L"Refresh", IDC_MW_DISP_REFRESH, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
+    PAGE_TC(0, CreateBtn(hw, L"Add Spout", IDC_MW_DISP_ADD_SPOUT, x, y, btnW, lineH, hFont));
+    PAGE_TC(0, CreateBtn(hw, L"Remove", IDC_MW_DISP_REMOVE, x + btnW + btnGap, y, btnW, lineH, hFont));
+    PAGE_TC(0, CreateBtn(hw, L"Refresh", IDC_MW_DISP_REFRESH, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
     y += lineH + gap + 4;
 
-    TC(CreateBtn(hw, p->m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors",
+    PAGE_TC(0, CreateBtn(hw, p->m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors",
       IDC_MW_DISP_ACTIVATE, x, y, rw, lineH, hFont));
     y += lineH + gap;
 
     // Click-through + opacity
-    TC(CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false));
+    PAGE_TC(0, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false));
     {
       int opLblW = MulDiv(60, lineH, 26);
       int opEditW = MulDiv(50, lineH, 26);
       int opPctW = MulDiv(20, lineH, 26);
       int opX = x + rw / 2;
-      TC(CreateLabel(hw, L"Opacity:", opX, y, opLblW, lineH, hFont));
+      PAGE_TC(0, CreateLabel(hw, L"Opacity:", opX, y, opLblW, lineH, hFont));
       HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"100",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_RIGHT,
         opX + opLblW + 2, y, opEditW, lineH, hw,
         (HMENU)(INT_PTR)IDC_MW_DISP_OPACITY, GetModuleHandle(NULL), NULL);
       if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-      TC(hEdit);
+      PAGE_TC(0, hEdit);
       HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
         WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
         0, 0, 0, 0, hw,
@@ -183,20 +277,33 @@ void DisplaysWindow::DoBuildControls() {
         SendMessage(hSpin, UDM_SETRANGE32, 1, 100);
         SendMessage(hSpin, UDM_SETPOS32, 0, 100);
       }
-      TC(hSpin);
-      TC(CreateLabel(hw, L"%", opX + opLblW + 2 + opEditW + 2, y, opPctW, lineH, hFont));
+      PAGE_TC(0, hSpin);
+      PAGE_TC(0, CreateLabel(hw, L"%", opX + opLblW + 2 + opEditW + 2, y, opPctW, lineH, hFont));
     }
   }
   y += lineH + gap;
-  TC(CreateCheck(hw, L"Use mirrors for ALT-S (instead of stretch)",
+  PAGE_TC(0, CreateCheck(hw, L"Use mirrors for ALT-S (instead of stretch)",
     IDC_MW_DISP_MIRROR_ALTS, x, y, rw, lineH, hFont, p->m_bMirrorModeForAltS));
   y += lineH + gap;
-  TC(CreateCheck(hw, L"Don't ask when no mirrors are enabled (enable all automatically)",
+  PAGE_TC(0, CreateCheck(hw, L"Don't ask when no mirrors are enabled (enable all automatically)",
     IDC_MW_DISP_MIRROR_NOPROMPT, x, y, rw, lineH, hFont, p->m_bMirrorPromptDisabled));
-  y += lineH + gap + 8;
 
-  // ===== Video Input =====
-  TC(CreateLabel(hw, L"Video Input", x, y, rw, lineH, hFontBold));
+  #undef PAGE_TC
+}
+
+//----------------------------------------------------------------------
+// Page 1: Video Input
+//----------------------------------------------------------------------
+
+void DisplaysWindow::BuildVideoInputPage(int x, int y, int rw, int lineH, int gap) {
+  HWND hw = m_hWnd;
+  HFONT hFont = m_hFont;
+  HFONT hFontBold = m_hFontBold;
+  Engine* p = m_pEngine;
+
+  #define PAGE_TC(page, expr) do { HWND _h = (expr); if (_h) { TrackControl(_h); m_pageCtrls[page].push_back(_h); } } while(0)
+
+  PAGE_TC(1, CreateLabel(hw, L"Video Input", x, y, rw, lineH, hFontBold));
   y += lineH + gap;
 
   {
@@ -204,7 +311,7 @@ void DisplaysWindow::DoBuildControls() {
     int sLbl = MulDiv(70, lineH, 26);
 
     // Source selector combo
-    TC(CreateLabel(hw, L"Source:", x, y, sLbl, lineH, hFont));
+    PAGE_TC(1, CreateLabel(hw, L"Source:", x, y, sLbl, lineH, hFont));
     HWND hSrc = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
       x + sLbl + 4, y, rw - sLbl - 4, lineH * 6, hw,
@@ -215,12 +322,12 @@ void DisplaysWindow::DoBuildControls() {
     SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"Webcam");
     SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"Video File");
     SendMessage(hSrc, CB_SETCURSEL, p->m_nVideoInputSource, 0);
-    TC(hSrc);
+    PAGE_TC(1, hSrc);
     y += lineH + gap;
 
     // Spout sender combo + Refresh
     int refreshW = MulDiv(72, lineH, 26);
-    TC(CreateLabel(hw, L"Sender:", x, y, sLbl, lineH, hFont));
+    PAGE_TC(1, CreateLabel(hw, L"Sender:", x, y, sLbl, lineH, hFont));
     HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
       x + sLbl + 4, y, rw - sLbl - 4 - refreshW - 8, lineH * 8, hw,
@@ -239,14 +346,14 @@ void DisplaysWindow::DoBuildControls() {
     }
     SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
     if (p->m_nVideoInputSource != p->VID_SOURCE_SPOUT) EnableWindow(hCombo, FALSE);
-    TC(hCombo);
-    TC(CreateBtn(hw, L"Refresh", IDC_MW_SPINPUT_REFRESH, x + rw - refreshW, y, refreshW, lineH, hFont));
+    PAGE_TC(1, hCombo);
+    PAGE_TC(1, CreateBtn(hw, L"Refresh", IDC_MW_SPINPUT_REFRESH, x + rw - refreshW, y, refreshW, lineH, hFont));
     if (p->m_nVideoInputSource != p->VID_SOURCE_SPOUT)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_REFRESH), FALSE);
     y += lineH + gap;
 
     // Webcam device combo + Refresh
-    TC(CreateLabel(hw, L"Webcam:", x, y, sLbl, lineH, hFont));
+    PAGE_TC(1, CreateLabel(hw, L"Webcam:", x, y, sLbl, lineH, hFont));
     HWND hWebcam = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
       x + sLbl + 4, y, rw - sLbl - 4 - refreshW - 8, lineH * 8, hw,
@@ -264,29 +371,29 @@ void DisplaysWindow::DoBuildControls() {
       SendMessage(hWebcam, CB_SETCURSEL, wcSel, 0);
     }
     if (p->m_nVideoInputSource != p->VID_SOURCE_WEBCAM) EnableWindow(hWebcam, FALSE);
-    TC(hWebcam);
-    TC(CreateBtn(hw, L"Refresh", IDC_MW_VIDINPUT_WEBCAM_REF, x + rw - refreshW, y, refreshW, lineH, hFont));
+    PAGE_TC(1, hWebcam);
+    PAGE_TC(1, CreateBtn(hw, L"Refresh", IDC_MW_VIDINPUT_WEBCAM_REF, x + rw - refreshW, y, refreshW, lineH, hFont));
     if (p->m_nVideoInputSource != p->VID_SOURCE_WEBCAM)
       EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_WEBCAM_REF), FALSE);
     y += lineH + gap;
 
     // Video file path + Browse
     int browseW = MulDiv(72, lineH, 26);
-    TC(CreateLabel(hw, L"File:", x, y, sLbl, lineH, hFont));
+    PAGE_TC(1, CreateLabel(hw, L"File:", x, y, sLbl, lineH, hFont));
     HWND hFileEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", p->m_szVideoFile,
       WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
       x + sLbl + 4, y, rw - sLbl - 4 - browseW - 8, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_VIDINPUT_FILE_EDIT, GetModuleHandle(NULL), NULL);
     if (hFileEdit && hFont) SendMessage(hFileEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     if (p->m_nVideoInputSource != p->VID_SOURCE_FILE) EnableWindow(hFileEdit, FALSE);
-    TC(hFileEdit);
-    TC(CreateBtn(hw, L"Browse...", IDC_MW_VIDINPUT_FILE_BROWSE, x + rw - browseW, y, browseW, lineH, hFont));
+    PAGE_TC(1, hFileEdit);
+    PAGE_TC(1, CreateBtn(hw, L"Browse...", IDC_MW_VIDINPUT_FILE_BROWSE, x + rw - browseW, y, browseW, lineH, hFont));
     if (p->m_nVideoInputSource != p->VID_SOURCE_FILE)
       EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_FILE_BROWSE), FALSE);
     y += lineH + gap;
 
     // Loop checkbox
-    TC(CreateCheck(hw, L"Loop video", IDC_MW_VIDINPUT_FILE_LOOP, x, y, rw / 3, lineH, hFont, p->m_bVideoLoop));
+    PAGE_TC(1, CreateCheck(hw, L"Loop video", IDC_MW_VIDINPUT_FILE_LOOP, x, y, rw / 3, lineH, hFont, p->m_bVideoLoop));
     if (p->m_nVideoInputSource != p->VID_SOURCE_FILE)
       EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_FILE_LOOP), FALSE);
     y += lineH + gap;
@@ -294,9 +401,9 @@ void DisplaysWindow::DoBuildControls() {
     // Layer radio: Background / Overlay
     int layLbl = MulDiv(50, lineH, 26);
     int radioW = MulDiv(110, lineH, 26);
-    TC(CreateLabel(hw, L"Layer:", x, y, layLbl, lineH, hFont));
-    TC(CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !p->m_bSpoutInputOnTop, true));
-    TC(CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, p->m_bSpoutInputOnTop));
+    PAGE_TC(1, CreateLabel(hw, L"Layer:", x, y, layLbl, lineH, hFont));
+    PAGE_TC(1, CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !p->m_bSpoutInputOnTop, true));
+    PAGE_TC(1, CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, p->m_bSpoutInputOnTop));
     if (!active) {
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_BG), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_OV), FALSE);
@@ -306,45 +413,42 @@ void DisplaysWindow::DoBuildControls() {
     // Opacity slider
     int slLbl = MulDiv(80, lineH, 26);
     int valW = MulDiv(50, lineH, 26);
-    TC(CreateLabel(hw, L"Opacity:", x, y, slLbl, lineH, hFont));
-    TC(CreateSlider(hw, IDC_MW_SPINPUT_OPACITY, x + slLbl + 4, y, rw - slLbl - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputOpacity * 100)));
+    PAGE_TC(1, CreateLabel(hw, L"Opacity:", x, y, slLbl, lineH, hFont));
+    PAGE_TC(1, CreateSlider(hw, IDC_MW_SPINPUT_OPACITY, x + slLbl + 4, y, rw - slLbl - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputOpacity * 100)));
     { wchar_t buf[32]; swprintf(buf, 32, L"%d%%", (int)(p->m_fSpoutInputOpacity * 100));
-    TC(CreateLabel(hw, buf, x + rw - valW, y, valW, lineH, hFont)); }
+    PAGE_TC(1, CreateLabel(hw, buf, x + rw - valW, y, valW, lineH, hFont)); }
     SetWindowLongPtrW(m_childCtrls.back(), GWLP_ID, IDC_MW_SPINPUT_OPACITY_LBL);
     if (!active) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_OPACITY), FALSE);
     y += lineH + gap;
 
     // Luma Key checkbox
-    TC(CreateCheck(hw, L"Luma Key", IDC_MW_SPINPUT_LUMAKEY, x, y, rw / 3, lineH, hFont, p->m_bSpoutInputLumaKey));
+    PAGE_TC(1, CreateCheck(hw, L"Luma Key", IDC_MW_SPINPUT_LUMAKEY, x, y, rw / 3, lineH, hFont, p->m_bSpoutInputLumaKey));
     if (!active) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMAKEY), FALSE);
     y += lineH + gap;
 
     // Threshold slider
     int indent = MulDiv(16, lineH, 26);
     int slLbl2 = MulDiv(90, lineH, 26);
-    TC(CreateLabel(hw, L"Threshold:", x + indent, y, slLbl2, lineH, hFont));
-    TC(CreateSlider(hw, IDC_MW_SPINPUT_LUMA_THR, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputLumaThreshold * 100)));
+    PAGE_TC(1, CreateLabel(hw, L"Threshold:", x + indent, y, slLbl2, lineH, hFont));
+    PAGE_TC(1, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_THR, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputLumaThreshold * 100)));
     { wchar_t b[32]; swprintf(b, 32, L"%d%%", (int)(p->m_fSpoutInputLumaThreshold * 100));
-    TC(CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont)); }
+    PAGE_TC(1, CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont)); }
     SetWindowLongPtrW(m_childCtrls.back(), GWLP_ID, IDC_MW_SPINPUT_LUMA_THR_LBL);
     if (!active || !p->m_bSpoutInputLumaKey)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_THR), FALSE);
     y += lineH + gap;
 
     // Softness slider
-    TC(CreateLabel(hw, L"Softness:", x + indent, y, slLbl2, lineH, hFont));
-    TC(CreateSlider(hw, IDC_MW_SPINPUT_LUMA_SOFT, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputLumaSoftness * 100)));
+    PAGE_TC(1, CreateLabel(hw, L"Softness:", x + indent, y, slLbl2, lineH, hFont));
+    PAGE_TC(1, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_SOFT, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(p->m_fSpoutInputLumaSoftness * 100)));
     { wchar_t b[32]; swprintf(b, 32, L"%d%%", (int)(p->m_fSpoutInputLumaSoftness * 100));
-    TC(CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont)); }
+    PAGE_TC(1, CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont)); }
     SetWindowLongPtrW(m_childCtrls.back(), GWLP_ID, IDC_MW_SPINPUT_LUMA_SOFT_LBL);
     if (!active || !p->m_bSpoutInputLumaKey)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_SOFT), FALSE);
   }
 
-  #undef TC
-
-  // Populate display list
-  p->RefreshDisplaysTab();
+  #undef PAGE_TC
 }
 
 //----------------------------------------------------------------------
@@ -385,6 +489,15 @@ LRESULT DisplaysWindow::DoHScroll(HWND hWnd, int id, int pos) {
 
 LRESULT DisplaysWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
   Engine* p = m_pEngine;
+
+  // Tab control selection change
+  if (pnm->idFrom == IDC_MW_DISP_TAB && pnm->code == TCN_SELCHANGE) {
+    int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
+    ShowPage(sel);
+    return 0;
+  }
+
+  // Opacity spin control
   if (pnm->idFrom == IDC_MW_DISP_OPACITY_SPIN && pnm->code == UDN_DELTAPOS) {
     NMUPDOWN* pud = (NMUPDOWN*)pnm;
     int newVal = pud->iPos + pud->iDelta;

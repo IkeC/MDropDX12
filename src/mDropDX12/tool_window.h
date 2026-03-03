@@ -123,6 +123,15 @@ protected:
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
   LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+
+private:
+  HWND m_hTab = NULL;
+  int  m_nActivePage = 0;
+  std::vector<HWND> m_pageCtrls[DISPLAYS_NUM_PAGES];
+
+  void ShowPage(int page);
+  void BuildOutputsPage(int x, int y, int rw, int lineH, int gap);
+  void BuildVideoInputPage(int x, int y, int rw, int lineH, int gap);
 };
 
 } // namespace mdrop
