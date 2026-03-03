@@ -177,7 +177,15 @@ namespace fs = std::filesystem;
 #define DEFAULT_WIDTH 720;
 #define DEFAULT_HEIGHT 720;
 
-namespace mdrop { Engine g_engine; }
+namespace mdrop {
+  Engine g_engine;
+  extern bool TranspaMode;
+  extern int ToggleFPSNumPressed;
+  extern int HardcutMode;
+  extern int beatcount;
+  void ToggleTransparency(HWND);
+  void ToggleWindowOpacity(HWND, bool);
+}
 using namespace mdrop;
 MDropDX12 mdropdx12;
 HINSTANCE api_orig_hinstance = nullptr;
@@ -1476,7 +1484,8 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_MW_HOTKEY_ACTION:
   {
-    // Dispatched from DispatchHotkeyAction() for toggle actions that need App.cpp locals
+    // Dispatched from DispatchHotkeyAction() for actions that need App.cpp locals
+    // or render-window-level state (HWND, TranspaMode, media keys, UI mode, etc.)
     int id = (int)wParam;
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
@@ -1506,6 +1515,100 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       }
       SetForegroundWindow(hWnd);
       break;
+    case HK_ALWAYS_ON_TOP:
+      g_engine.m_bAlwaysOnTop = !g_engine.m_bAlwaysOnTop;
+      g_engine.ToggleAlwaysOnTop(hWnd);
+      g_engine.AddNotification(g_engine.m_bAlwaysOnTop
+          ? L"Always On Top enabled" : L"Always On Top disabled");
+      break;
+    case HK_TRANSPARENCY_MODE:
+      TranspaMode = !TranspaMode;
+      ToggleTransparency(hWnd);
+      g_engine.AddNotification(TranspaMode
+          ? L"Transparency Mode enabled" : L"Transparency Mode disabled");
+      break;
+    case HK_BLACK_MODE:
+      g_engine.m_blackmode = !g_engine.m_blackmode;
+      g_engine.AddNotification(g_engine.m_blackmode
+          ? L"Black Mode enabled" : L"Black Mode disabled");
+      break;
+    case HK_FPS_CYCLE: {
+      static const int cycle[] = { 60, 90, 120, 144, 240, 360, 720, 0, 30 };
+      static const wchar_t* labels[] = { L"60 fps", L"90 fps", L"120 fps", L"144 fps",
+        L"240 fps", L"360 fps", L"720 fps", L"Unlimited fps", L"30 fps" };
+      ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % 9;
+      g_engine.SetFPSCap(cycle[ToggleFPSNumPressed]);
+      g_engine.AddNotification((wchar_t*)labels[ToggleFPSNumPressed]);
+      break;
+    }
+    case HK_OPACITY_UP:
+      ToggleWindowOpacity(hWnd, false);
+      break;
+    case HK_OPACITY_DOWN:
+      ToggleWindowOpacity(hWnd, true);
+      break;
+    case HK_OPACITY_25:
+    case HK_OPACITY_50:
+    case HK_OPACITY_75:
+    case HK_OPACITY_100:
+      g_engine.SetOpacity(hWnd);
+      break;
+    case HK_MEDIA_PLAY_PAUSE:
+      g_engine.AddError(L"Play/Pause", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
+      keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_STOP:
+      g_engine.AddError(L"Stop", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_STOP, 0, 0, 0);
+      keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_PREV_TRACK:
+      g_engine.AddError(L"Previous", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_PREV_TRACK, 0, 0, 0);
+      keybd_event(VK_MEDIA_PREV_TRACK, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_NEXT_TRACK:
+      g_engine.AddError(L"Next", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
+      keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_REWIND:
+      g_engine.AddError(L"Rewind", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_REWIND));
+      break;
+    case HK_MEDIA_FAST_FORWARD:
+      g_engine.AddError(L"Fast Forward", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_FAST_FORWARD));
+      break;
+    case HK_INJECT_EFFECT_CYCLE: {
+      static wchar_t* kInjectNames[] = {
+          L"Inject Effect: Off", L"Inject Effect: Brighten",
+          L"Inject Effect: Darken", L"Inject Effect: Solarize", L"Inject Effect: Invert"
+      };
+      g_engine.m_nInjectEffectMode = (g_engine.m_nInjectEffectMode + 1) % 5;
+      g_engine.AddNotificationColored(kInjectNames[g_engine.m_nInjectEffectMode], 1.5f, 0xFF00FFFF);
+      break;
+    }
+    case HK_HARDCUT_MODE_CYCLE: {
+      HardcutMode++;
+      if (HardcutMode == 1)  { g_engine.m_bHardCutsDisabled = false; g_engine.AddNotification(L"Hard Cut Mode: Normal"); }
+      if (HardcutMode == 2)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Blend"); }
+      if (HardcutMode == 3)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass"); }
+      if (HardcutMode == 4)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Middle"); }
+      if (HardcutMode == 5)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Treble"); }
+      if (HardcutMode == 6)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Fast Blend"); }
+      if (HardcutMode == 7)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Treble Fast Blend"); }
+      if (HardcutMode == 8)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Blend and Hardcut Treble"); }
+      if (HardcutMode == 9)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Rhythmic Hardcut"); }
+      if (HardcutMode == 10) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: 2 beats"); beatcount = -1; }
+      if (HardcutMode == 11) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: 4 beats"); beatcount = -1; }
+      if (HardcutMode == 12) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Kinetronix (Vizikord)"); beatcount = -1; }
+      if (HardcutMode == 13) { HardcutMode = 0; g_engine.m_bHardCutsDisabled = true; g_engine.AddNotification(L"Hard Cut Mode: OFF"); }
+      break;
+    }
+    // HK_OPEN_PRESET_LIST, HK_SAVE_PRESET, HK_OPEN_MENU, HK_SPRITE_MODE
+    // are handled directly in DispatchHotkeyAction (Engine member access)
     }
     break;
   }

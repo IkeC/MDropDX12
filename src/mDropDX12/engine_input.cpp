@@ -986,6 +986,18 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
     switch (wParam) {
     case VK_F2:
+      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
+          (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+        // Ctrl+Shift+F2: reset all hotkeys to defaults
+        ResetHotkeyDefaults();
+        SaveHotkeySettings();
+        GenerateHelpText();
+        HWND hRender = GetPluginWindow();
+        if (hRender)
+          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
+        AddNotification(L"All hotkeys reset to defaults");
+        return 0;
+      }
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
         // Ctrl+F2: kill switch — disable all display outputs + reset open windows
         EnqueueRenderCmd(RenderCmd::DisableAllOutputs);
@@ -1000,196 +1012,17 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           PostMessage(m_hotkeysWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
       }
       return 0;
-    case VK_F3:
-    {
-      bool bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-      bool bShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-      if (bCtrl && bShift) {
-        // Ctrl+Shift+F3: reset FPS cap to 30
-        ToggleFPSNumPressed = 8;
-        SetFPSCap(30);
-        AddNotification(L"30 fps");
-      }
-      else if (bCtrl) {
-        wchar_t buf[1024];
-        if (m_max_fps_fs == 0) {
-          swprintf(buf, L"Unlimited fps");
-        }
-        else {
-          swprintf(buf, 1024, L"%d fps", m_max_fps_fs);
-        }
-        AddNotification(buf);
-      }
-      else {
-        static const int cycle[] = { 60, 90, 120, 144, 240, 360, 720, 0, 30 };
-        static const wchar_t* labels[] = { L"60 fps", L"90 fps", L"120 fps", L"144 fps",
-          L"240 fps", L"360 fps", L"720 fps", L"Unlimited fps", L"30 fps" };
-        ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % 9;
-        SetFPSCap(cycle[ToggleFPSNumPressed]);
-        AddNotification((wchar_t*)labels[ToggleFPSNumPressed]);
-      }
-    }
-    return 0; // we processed (or absorbed) the key
-    case VK_F4: m_bShowPresetInfo = !m_bShowPresetInfo; return 0; // we processed (or absorbed) the key
-    case VK_F5: m_bShowFPS = !m_bShowFPS; return 0; // we processed (or absorbed) the key
-    case VK_F6: m_bShowRating = !m_bShowRating; return 0; // we processed (or absorbed) the key
-    case VK_F7:
-      m_bAlwaysOnTop = !m_bAlwaysOnTop;
-      if (m_bAlwaysOnTop) {
-        ToggleAlwaysOnTop(hWnd);
-        AddNotification(L"Always On Top enabled");
-      }
-      else {
-        ToggleAlwaysOnTop(hWnd);
-        AddNotification(L"Always On Top disabled");
-      }
-      return 0;
-    case VK_F12:
-      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-        m_blackmode = !m_blackmode;
-        if (m_blackmode) {
-          AddNotification(L"Black Mode enabled");
-        }
-        else {
-          AddNotification(L"Black Mode disabled");
-        }
-      }
-      else {
-        TranspaMode = !TranspaMode;
-        if (TranspaMode) {
-          ToggleTransparency(hWnd);
-          AddNotification(L"Transparency Mode enabled");
-        }
-        else {
-          ToggleTransparency(hWnd);
-          AddNotification(L"Transparency Mode disabled");
-        }
-      }
-      return 0;
-    case VK_F8:
-      OpenSettingsWindow();
-      return 0;
-      // F9 is handled in App.cpp
-    case VK_F10:
-      if (bShiftHeldDown)
-        EnqueueRenderCmd(RenderCmd::SpoutFixedSize);
-      else
-        EnqueueRenderCmd(RenderCmd::ToggleSpout);
-      return 0;
-    case VK_F11:
-    {
-      if (bShiftHeldDown) {
-        // Shift+F11: Hard Cut Mode cycling
-        HardcutMode++;
-        if (HardcutMode == 1)  { m_bHardCutsDisabled = false; AddNotification(L"Hard Cut Mode: Normal"); }
-        if (HardcutMode == 2)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Blend"); }
-        if (HardcutMode == 3)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass"); }
-        if (HardcutMode == 4)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Middle"); }
-        if (HardcutMode == 5)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Treble"); }
-        if (HardcutMode == 6)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Fast Blend"); }
-        if (HardcutMode == 7)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Treble Fast Blend"); }
-        if (HardcutMode == 8)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Bass Blend and Hardcut Treble"); }
-        if (HardcutMode == 9)  { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Rhythmic Hardcut"); }
-        if (HardcutMode == 10) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: 2 beats"); beatcount = -1; }
-        if (HardcutMode == 11) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: 4 beats"); beatcount = -1; }
-        if (HardcutMode == 12) { m_bHardCutsDisabled = true;  AddNotification(L"Hard Cut Mode: Kinetronix (Vizikord)"); beatcount = -1; }
-        if (HardcutMode == 13) { HardcutMode = 0; m_bHardCutsDisabled = true; AddNotification(L"Hard Cut Mode: OFF"); }
-      } else {
-        // F11: Inject effect cycle (MilkDrop3 parity)
-        static wchar_t* kInjectNames[] = {
-            L"Inject Effect: Off", L"Inject Effect: Brighten",
-            L"Inject Effect: Darken", L"Inject Effect: Solarize", L"Inject Effect: Invert"
-        };
-        m_nInjectEffectMode = (m_nInjectEffectMode + 1) % 5;
-        AddNotificationColored(kInjectNames[m_nInjectEffectMode], 1.5f, 0xFF00FFFF);
-      }
-    }
-    return 0;
-    case 'Q':
-    {
-      if (bCtrlHeldDown) {
-        const float multiplier = bShiftHeldDown ? 2.0f : 0.5f;
-        float newQuality = clamp(m_fRenderQuality * multiplier, 0.01f, 1.0f);
-        if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
-          m_fRenderQuality = newQuality;
-          EnqueueRenderCmd(RenderCmd::ResetBuffers);
-          SendSettingsInfoToMDropDX12Remote();
-        }
-        return 0;
-      }
-      break;
-    }
-    case 'H':
-    {
-      if (bCtrlHeldDown) {
-        if (bShiftHeldDown) {
-          m_ColShiftHue -= 0.02f;
-          if (m_ColShiftHue <= -1.0f) {
-            m_ColShiftHue = 1.0f;
-          }
-        }
-        else {
-          m_ColShiftHue += 0.02f;
-          if (m_ColShiftHue >= 1.0f) {
-            m_ColShiftHue = -1.0f;
-          }
-        }
-        SendSettingsInfoToMDropDX12Remote();
-        return 0;
-      }
-      break;
-    }
-
-    //reenabling this feature soon. (This will be Shift+F9)
-//	if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG)
-//		ReadCustomMessages();		// re-read custom messages
-//	return 0; // we processed (or absorbed) the key
-//case VK_F8:
-
-//	{
-//		m_UI_mode = UI_CHANGEDIR;
-
-//		// enter WaitString mode
-//		m_waitstring.bActive = true;
-//		m_waitstring.bFilterBadChars = false;
-//		m_waitstring.bDisplayAsCode = false;
-//		m_waitstring.nSelAnchorPos = -1;
-//		m_waitstring.nMaxLen = min(sizeof(m_waitstring.szText)-1, MAX_PATH - 1);
-//		lstrcpyW(m_waitstring.szText, GetPresetDir());
-//		{
-//			// for subtle beauty - remove the trailing '\' from the directory name (if it's not just "x:\")
-//			int len = lstrlenW(m_waitstring.szText);
-//			if (len > 3 && m_waitstring.szText[len-1] == '\\')
-//				m_waitstring.szText[len-1] = 0;
-//		}
-//		wasabiApiLangString(IDS_DIRECTORY_TO_JUMP_TO, m_waitstring.szPrompt, 512);
-//		m_waitstring.szToolTip[0] = 0;
-//		m_waitstring.nCursorPos = lstrlenW(m_waitstring.szText);	// set the starting edit position
-//	}
-//	return 0; // we processed (or absorbed) the key
-
-    case VK_F9:
-      m_bShowShaderHelp = !m_bShowShaderHelp;
-      return 0;
-
-    case VK_SCROLL:
-      m_bPresetLockedByUser = GetKeyState(VK_SCROLL) & 1;
-      TogglePlaylist();
-      return 0;
-
-  // check ???
-  //case VK_F6:	break;
-  //case VK_F7: conflict
-  //case VK_F8:	break;
-  //case VK_F9: conflict
 
     case 'L':
+      // Ctrl+L: hardcoded fallback for opening Settings window
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-        // Ctrl+L: open settings window
         OpenSettingsWindow();
         return 0;
       }
       break;
+
+    // All other F-keys, VK_SCROLL, Ctrl+Q/H are handled by the
+    // data-driven binding table (LookupLocalHotkey above).
 
     } // end switch(wParam)
     //------------------------------------------
@@ -1558,46 +1391,20 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         //          and some to DefWindowProc)
     //		note: regular hotkeys should be handled in HandleRegularKey.
     switch (wParam) {
-    case VK_LEFT:
-      if (m_UI_mode == UI_REGULAR) {
-        if (bCtrlHeldDown) {
-          AddError(L"Rewind", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-          SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_REWIND));
-        } else {
-          AddError(L"Previous", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-          keybd_event(VK_MEDIA_PREV_TRACK, 0, 0, 0);
-          keybd_event(VK_MEDIA_PREV_TRACK, 0, KEYEVENTF_KEYUP, 0);
-        }
-      }
-      break;
+    // VK_LEFT: UI_REGULAR media control handled by binding table
     case VK_RIGHT:
       if (m_UI_mode == UI_LOAD) {
-        // it's annoying when the music skips if you hit the left arrow from the Load menu, so instead, we exit the menu
-        if (wParam == VK_LEFT) m_UI_mode = UI_REGULAR;
-        return 0; // we processed (or absorbed) the key
+        return 0; // absorb right arrow in preset browser
       }
       else if (m_UI_mode == UI_UPGRADE_PIXEL_SHADER) {
         m_UI_mode = UI_MENU;
         return 0; // we processed (or absorbed) the key
       }
       else if (m_UI_mode == UI_MASHUP) {
-        if (wParam == VK_LEFT)
-          m_nMashSlot = max(0, m_nMashSlot - 1);
-        else
-          m_nMashSlot = min(MASH_SLOTS - 1, m_nMashSlot + 1);
+        m_nMashSlot = min(MASH_SLOTS - 1, m_nMashSlot + 1);
         return 0; // we processed (or absorbed) the key
       }
-      else if (m_UI_mode == UI_REGULAR) {
-        if (bCtrlHeldDown) {
-          AddError(L"Fast Forward", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-          SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_FAST_FORWARD));
-        } else {
-          AddError(L"Next", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-          keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
-          keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
-        }
-      }
-
+      // UI_REGULAR media control handled by binding table
       break;
 
     case VK_ESCAPE:
@@ -1658,18 +1465,8 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           if (m_nPresetListCurPos > 0)
             m_nPresetListCurPos--;
         return 0; // we processed (or absorbed) the key
-
-        // remember this preset's name so the next time they hit 'L' it jumps straight to it
-        //lstrcpy(m_szLastPresetSelected, m_presets[m_nPresetListCurPos].szFilename.c_str());
       }
-      else if (bShiftHeldDown) {
-        ToggleWindowOpacity(hWnd, false);
-      }
-      else {
-        AddError(L"Stop", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-        keybd_event(VK_MEDIA_STOP, 0, 0, 0);
-        keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
-      }
+      // UI_REGULAR opacity/media handled by binding table
       break;
 
     case VK_DOWN:
@@ -1684,71 +1481,15 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           if (m_nPresetListCurPos < m_nPresets - 1)
             m_nPresetListCurPos++;
         return 0; // we processed (or absorbed) the key
-
-        // remember this preset's name so the next time they hit 'L' it jumps straight to it
-        //lstrcpy(m_szLastPresetSelected, m_presets[m_nPresetListCurPos].szFilename.c_str());
       }
-      else if (bShiftHeldDown) {
-        ToggleWindowOpacity(hWnd, true);
-      }
-      else {
-        AddError(L"Play/Pause", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
-        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
-      }
+      // UI_REGULAR opacity/media handled by binding table
       break;
 
-    case 'X':
-      if (m_UI_mode == UI_REGULAR) {
-        if ((GetKeyState(VK_CONTROL) & mask) != 0) {
-          EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
-          return 0;
-        }
-        AddError(L"Play/Pause", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
-        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
-      }
-      break;
-    case 'C':
-      if (m_UI_mode == UI_REGULAR) {
-        if ((GetKeyState(VK_SHIFT) & mask) == 0 && (GetKeyState(VK_CONTROL) & mask) == 0) {
-          AddError(L"Stop", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-          keybd_event(VK_MEDIA_STOP, 0, 0, 0);
-          keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
-        }
-      }
-      break;
-    case 'V':
-      if (m_UI_mode == UI_REGULAR) {
-        AddError(L"Next", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
-        keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
-        keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
-      }
-      break;
-    case 'A':
-      if (m_UI_mode == UI_REGULAR) {
-        if ((GetKeyState(VK_CONTROL) & mask) != 0) {
-          m_ChangePresetWithSong = !m_ChangePresetWithSong;
-          if (m_ChangePresetWithSong) {
-            AddError(L"Auto Preset Change enabled", 5.0f, ERR_NOTIFY, false);
-          }
-          else {
-            AddError(L"Auto Preset Change disabled", 5.0f, ERR_NOTIFY, false);
-          }
-          return 0; // we processed (or absorbed) the key
-        }
-      }
-      break;
+    // X/C/V/A media keys and Ctrl combos handled by binding table
     case VK_SPACE:
       if (m_UI_mode == UI_LOAD)
         goto HitEnterFromLoadMenu;
-      if (!m_bPresetLockedByCode) {
-        RenderCommand cmd;
-        cmd.cmd = RenderCmd::NextPreset;
-        cmd.fParam = m_fBlendTimeUser;
-        EnqueueRenderCmd(std::move(cmd));
-        return 0; // we processed (or absorbed) the key
-      }
+      // UI_REGULAR next-preset handled by binding table
       break;
 
     case VK_PRIOR:
@@ -1932,7 +1673,6 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       if (m_UI_mode == UI_LOAD) {
         // Navigate up one directory in the preset browser
         wchar_t* p = GetPresetDir();
-        int dirLen = lstrlenW(p);
         wchar_t* p2 = wcsrchr(p, L'\\');
         if (p2 && p2 > p) {
           *p2 = 0;
@@ -1945,60 +1685,9 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         }
         return 0;
       }
-      // pass on to parent
-      //PostMessage(m_hWndParent,message,wParam,lParam);
-      PrevPreset(0);
-      m_fHardCutThresh *= 2.0f;  // make it a little less likely that a random hard cut follows soon.
-      //m_nNumericInputDigits = 0;
-    //m_nNumericInputNum = 0;
-      return 0;
-
-
-      // ========================================
-      // SPOUT
-      //
-      //		CTRL-Z - start or stop spout output
-      //
-    case 'Z':
-      if (bCtrlHeldDown) {
-        if (bShiftHeldDown) {
-          SetSpoutFixedSize(true, true);
-        }
-        else {
-          ToggleSpout();
-        }
-      }
+      // UI_REGULAR prev-preset handled by binding table
+      // Ctrl+Z/S/T/K handled by binding table
       break;
-
-    case 'S':
-      if (bCtrlHeldDown) {
-        g_engine.SaveCurrentPresetToQuicksave(bShiftHeldDown);
-        return 0;
-      }
-      break;
-
-    case 'T':
-      if (bCtrlHeldDown) {
-        // stop display of custom message or song title.
-        KillAllSupertexts();
-        return 0;
-      }
-      break;
-
-    case 'K':
-      if (bCtrlHeldDown)      // kill all sprites
-      {
-        KillAllSprites();
-        return 0;
-      }
-      break;
-      /*case keyMappings[2]: // 'Y'
-          if (bCtrlHeldDown)      // stop display of custom message or song title.
-          {
-        m_supertext.fStartTime = -1.0f;
-              return 0;
-          }
-          break;*/
     }
     if (wParam == keyMappings[2])	// 'Y'
     {
@@ -2067,446 +1756,120 @@ int Engine::HandleRegularKey(WPARAM wParam) {
   else if (m_UI_mode == UI_MASHUP && wParam >= '1' && wParam <= ('0' + MASH_SLOTS)) {
     m_nMashSlot = (int)(wParam - '1');
   }
-  else switch (wParam) {
-  case '0':
-  case '1':
-  case '2':
-  case '3':
-  case '4':
-  case '5':
-  case '6':
-  case '7':
-  case '8':
-  case '9':
-  {
-    int digit = (int)(wParam - '0');
-    m_nNumericInputNum = (m_nNumericInputNum * 10) + digit;
-    m_nNumericInputDigits++;
-
-    if (m_nNumericInputDigits >= 2) {
-      if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG)
-        LaunchCustomMessage(m_nNumericInputNum);
-      else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE)
-        m_pendingSpriteLoads.push_back({m_nNumericInputNum, -1});
-      else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE_KILL) {
-        for (int x = 0; x < NUM_TEX; x++)
-          if (m_texmgr.m_tex[x].nUserData == m_nNumericInputNum)
-            m_texmgr.KillTex(x);
-      }
-
-      m_nNumericInputDigits = 0;
-      m_nNumericInputNum = 0;
-    }
-  }
-  return 0; // we processed (or absorbed) the key
-
-  // row 1 keys
-  case 'q':
-  case 'Q':
-  {
-
-    USHORT mask = 1 << (sizeof(SHORT) * 8 - 1);	// we want the highest-order bit
-    bool bCtrlHeldDown = (GetKeyState(VK_CONTROL) & mask) != 0;
-
-    if (!bCtrlHeldDown) {
-      if (wParam == 'q') {
-        m_pState->m_fVideoEchoZoom /= 1.05f;
-      }
-      else {
-        m_pState->m_fVideoEchoZoom *= 1.05f;
-      }
-      SendPresetWaveInfoToMDropDX12Remote();
-    }
-    else {
-      const float multiplier = (wParam == 'q') ? 0.5f : 2.0f;
-      float newQuality = clamp(m_fRenderQuality * multiplier, 0.01f, 1.0f);
-      if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
-        m_fRenderQuality = newQuality;
-        ResetBufferAndFonts();
-        SendSettingsInfoToMDropDX12Remote();
-      }
-    }
-    return 0; // we processed (or absorbed) the key
-  }
-  case 'w':
-    m_pState->m_nWaveMode++;
-    if (m_pState->m_nWaveMode >= NUM_WAVES) m_pState->m_nWaveMode = 0;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'W':
-    m_pState->m_nWaveMode--;
-    if (m_pState->m_nWaveMode < 0) m_pState->m_nWaveMode = NUM_WAVES - 1;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'e':
-    m_pState->m_fWaveAlpha -= 0.1f;
-    if (m_pState->m_fWaveAlpha.eval(-1) < 0.0f) m_pState->m_fWaveAlpha = 0.0f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'E':
-    m_pState->m_fWaveAlpha += 0.1f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    //if (m_pState->m_fWaveAlpha.eval(-1) > 1.0f) m_pState->m_fWaveAlpha = 1.0f;
-    return 0; // we processed (or absorbed) the key
-
-  case 'I':
-    m_pState->m_fZoom -= 0.01f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'i':
-    m_pState->m_fZoom += 0.01f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-
-  case 'n':
-  case 'N':
-    m_bShowDebugInfo = !m_bShowDebugInfo;
-    return 0; // we processed (or absorbed) the key
-
-  case 'r':
-  case 'R':
-    m_bSequentialPresetOrder = !m_bSequentialPresetOrder;
-    {
-      wchar_t buf[1024], tmp[64];
-      swprintf(buf, wasabiApiLangString(IDS_PRESET_ORDER_IS_NOW_X),
-        wasabiApiLangString((m_bSequentialPresetOrder) ? IDS_SEQUENTIAL : IDS_RANDOM, tmp, 64));
-      AddNotification(buf);
-    }
-
-    // erase all history, too:
-    m_presetHistory[0] = m_szCurrentPresetFile;
-    m_presetHistoryPos = 0;
-    m_presetHistoryFwdFence = 1;
-    m_presetHistoryBackFence = 0;
-
-    return 0; // we processed (or absorbed) the key
-
-  case 'u':	m_pState->m_fWarpScale /= 1.1f;			break;
-  case 'U':	m_pState->m_fWarpScale *= 1.1f;			break;
-    // case 'b':	m_pState->m_fWarpAnimSpeed /= 1.1f;		break;
-    // case 'B':	m_pState->m_fWarpAnimSpeed *= 1.1f;		break;
-
-  case 't':
-  case 'T':
-    LaunchSongTitleAnim(-1);
-    return 0; // we processed (or absorbed) the key
-  case 'o':
-    m_pState->m_fWarpAmount /= 1.1f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'O':
-    m_pState->m_fWarpAmount *= 1.1f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case '!':
-    // randomize warp shader — load random preset (keep comp), then reload original (keep warp)
-  {
-    bool bWarpLock = m_bWarpShaderLock;
-    wchar_t szOldPreset[MAX_PATH];
-    lstrcpyW(szOldPreset, m_szCurrentPresetFile);
-    m_bWarpShaderLock = false;
-    LoadRandomPreset(0.0f);
-    if (WaitForPendingLoad(3000)) {
-      m_bWarpShaderLock = true;
-      LoadPreset(szOldPreset, 0.0f);
-      WaitForPendingLoad(3000);
-    }
-    m_bWarpShaderLock = bWarpLock;
-  }
-  break;
-  case '@':
-    // randomize comp shader — load random preset (keep warp), then reload original (keep comp)
-  {
-    bool bCompLock = m_bCompShaderLock;
-    wchar_t szOldPreset[MAX_PATH];
-    lstrcpyW(szOldPreset, m_szCurrentPresetFile);
-    m_bCompShaderLock = false;
-    LoadRandomPreset(0.0f);
-    if (WaitForPendingLoad(3000)) {
-      m_bCompShaderLock = true;
-      LoadPreset(szOldPreset, 0.0f);
-      WaitForPendingLoad(3000);
-    }
-    m_bCompShaderLock = bCompLock;
-  }
-  break;
-
-  case 'a':
-  case 'A':
-    // load a random preset, a random warp shader, and a random comp shader.
-    // not quite as extreme as a mash-up.
-  {
-    USHORT mask = 1 << (sizeof(SHORT) * 8 - 1);	// we want the highest-order bit
-    bool bShiftHeldDown = (GetKeyState(VK_SHIFT) & mask) != 0;
-    if (!bShiftHeldDown) {
-      bool bCompLock = m_bCompShaderLock;
-      bool bWarpLock = m_bWarpShaderLock;
-      m_bCompShaderLock = false; m_bWarpShaderLock = false;
-      LoadRandomPreset(0.0f);
-      if (WaitForPendingLoad(3000)) {
-        m_bCompShaderLock = true; m_bWarpShaderLock = false;
-        LoadRandomPreset(0.0f);
-        if (WaitForPendingLoad(3000)) {
-          m_bCompShaderLock = false; m_bWarpShaderLock = true;
-          LoadRandomPreset(0.0f);
-          WaitForPendingLoad(3000);
+  else {
+    // For UI_REGULAR mode, suppress character keys that are bound in the hotkey table.
+    // The action was already dispatched by WM_KEYDOWN's LookupLocalHotkey().
+    if (m_UI_mode == UI_REGULAR) {
+      SHORT vkScan = VkKeyScanW((wchar_t)wParam);
+      if (vkScan != -1) {
+        UINT vk = LOBYTE(vkScan);
+        UINT scanMods = HIBYTE(vkScan);
+        UINT mods = 0;
+        if (scanMods & 1) mods |= MOD_SHIFT;
+        if (scanMods & 2) mods |= MOD_CONTROL;
+        if (scanMods & 4) mods |= MOD_ALT;
+        for (int i = 0; i < NUM_HOTKEYS; i++) {
+          if (m_hotkeys[i].vk == vk && m_hotkeys[i].modifiers == mods &&
+              m_hotkeys[i].scope == HKSCOPE_LOCAL) {
+            return 0; // already dispatched by WM_KEYDOWN
+          }
         }
       }
-      m_bCompShaderLock = bCompLock;
-      m_bWarpShaderLock = bWarpLock;
     }
-  }
-  break;
-  case 'd':
-  case 'D':
-    if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) {
-      // Ctrl+D handled in App.cpp
-      if (!m_bCompShaderLock && !m_bWarpShaderLock) {
-        m_bCompShaderLock = true; m_bWarpShaderLock = false;
-        AddNotification(wasabiApiLangString(IDS_COMPSHADER_LOCKED));
+
+    switch (wParam) {
+    // ── Numeric input (sprites, custom messages) ──
+    case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9':
+    {
+      int digit = (int)(wParam - '0');
+      m_nNumericInputNum = (m_nNumericInputNum * 10) + digit;
+      m_nNumericInputDigits++;
+      if (m_nNumericInputDigits >= 2) {
+        if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG)
+          LaunchCustomMessage(m_nNumericInputNum);
+        else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE)
+          m_pendingSpriteLoads.push_back({m_nNumericInputNum, -1});
+        else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE_KILL) {
+          for (int x = 0; x < NUM_TEX; x++)
+            if (m_texmgr.m_tex[x].nUserData == m_nNumericInputNum)
+              m_texmgr.KillTex(x);
+        }
+        m_nNumericInputDigits = 0;
+        m_nNumericInputNum = 0;
       }
-      else if (m_bCompShaderLock && !m_bWarpShaderLock) {
-        m_bCompShaderLock = false; m_bWarpShaderLock = true;
-        AddNotification(wasabiApiLangString(IDS_WARPSHADER_LOCKED));
+    }
+    return 0;
+
+    // ── Modal keys: only non-REGULAR behavior remains ──
+
+    case 'h':
+    case 'H':
+      // Mashup mode: randomize current slot (h) or all slots (H)
+      if (m_UI_mode == UI_MASHUP) {
+        if (wParam == 'h') {
+          m_nMashPreset[m_nMashSlot] = m_nDirs + (rand() % (m_nPresets - m_nDirs));
+          m_nLastMashChangeFrame[m_nMashSlot] = GetFrame() + MASH_APPLY_DELAY_FRAMES;
+        }
+        else {
+          for (int mash = 0; mash < MASH_SLOTS; mash++) {
+            m_nMashPreset[mash] = m_nDirs + (rand() % (m_nPresets - m_nDirs));
+            m_nLastMashChangeFrame[mash] = GetFrame() + MASH_APPLY_DELAY_FRAMES;
+          }
+        }
       }
-      else if (!m_bCompShaderLock && m_bWarpShaderLock) {
-        m_bCompShaderLock = true; m_bWarpShaderLock = true;
-        AddNotification(wasabiApiLangString(IDS_ALLSHADERS_LOCKED));
+      // UI_REGULAR hard cut handled by binding table
+      return 0;
+
+    case 'k':
+    case 'K':
+    {
+      // Shift+K: enter sprite-kill input mode (not in binding table as separate action)
+      USHORT mask = 1 << (sizeof(SHORT) * 8 - 1);
+      bool bShiftHeldDown = (GetKeyState(VK_SHIFT) & mask) != 0;
+      if (bShiftHeldDown) {
+        m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE_KILL;
+        SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
+        PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
+        m_nNumericInputNum = 0;
+        m_nNumericInputDigits = 0;
       }
-      else {
-        m_bCompShaderLock = false; m_bWarpShaderLock = false;
-        AddNotification(wasabiApiLangString(IDS_ALLSHADERS_UNLOCKED));
+      // Non-shift k/K sprite mode toggle handled by binding table
+    }
+    return 0;
+
+    case 'l':
+    case 'L':
+      // Menu → Load transition (UI_REGULAR→UI_LOAD handled by binding table)
+      m_show_help = 0;
+      if (m_UI_mode == UI_MENU) {
+        if (!DirHasMilkFilesHelper(m_szPresetDir)) {
+          swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
+          TryDescendIntoPresetSubdirHelper(m_szPresetDir);
+          WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
+        }
+        UpdatePresetList(false, true);
+        m_UI_mode = UI_LOAD;
+        m_bUserPagedUp = false;
+        m_bUserPagedDown = false;
+        return 0;
       }
       break;
-    }
-    // row 2 keys
-      // 'A' KEY IS FREE!!
-      // 'D' KEY IS FREE!!
-  case 'p':
-    m_pState->m_fVideoEchoAlpha -= 0.1f;
-    if (m_pState->m_fVideoEchoAlpha.eval(-1) < 0) m_pState->m_fVideoEchoAlpha = 0;
-    return 0; // we processed (or absorbed) the key
-  case 'P':
-    m_pState->m_fVideoEchoAlpha += 0.1f;
-    if (m_pState->m_fVideoEchoAlpha.eval(-1) > 1.0f) m_pState->m_fVideoEchoAlpha = 1.0f;
-    return 0; // we processed (or absorbed) the key
-    /*case 'd':
-      m_pState->m_fDecay += 0.01f;
-      if (m_pState->m_fDecay.eval(-1) > 1.0f) m_pState->m_fDecay = 1.0f;
-      return 0; // we processed (or absorbed) the key
-    case 'D':
-      m_pState->m_fDecay -= 0.01f;
-      if (m_pState->m_fDecay.eval(-1) < 0.9f) m_pState->m_fDecay = 0.9f;
-      return 0; // we processed (or absorbed) the key*/
-  case 'h':
-  case 'H':
-    // instant hard cut
-    if (m_UI_mode == UI_MASHUP) {
-      if (wParam == 'h') {
-        m_nMashPreset[m_nMashSlot] = m_nDirs + (rand() % (m_nPresets - m_nDirs));
-        m_nLastMashChangeFrame[m_nMashSlot] = GetFrame() + MASH_APPLY_DELAY_FRAMES;  // causes instant apply
-      }
-      else {
-        for (int mash = 0; mash < MASH_SLOTS; mash++) {
-          m_nMashPreset[mash] = m_nDirs + (rand() % (m_nPresets - m_nDirs));
-          m_nLastMashChangeFrame[mash] = GetFrame() + MASH_APPLY_DELAY_FRAMES;  // causes instant apply
-        }
-      }
-    }
-    else {
-      NextPreset(0);
-      m_fHardCutThresh *= 2.0f;  // make it a little less likely that a random hard cut follows soon.
-    }
-    return 0; // we processed (or absorbed) the key
-  case 'f':
-  case 'F':
-    m_pState->m_nVideoEchoOrientation = (m_pState->m_nVideoEchoOrientation + 1) % 4;
-    return 0; // we processed (or absorbed) the key
-  // B/b formerly brightness — now on +/- keys
-  case 'g':
-    m_pState->m_fGammaAdj -= 0.1f;
-    if (m_pState->m_fGammaAdj.eval(-1) < 0.0f) m_pState->m_fGammaAdj = 0.0f;
-    {
-      wchar_t buf[64];
-      swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
-    }
-    return 0;
-  case 'G':
-    m_pState->m_fGammaAdj += 0.1f;
-    {
-      wchar_t buf[64];
-      swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
-    }
-    return 0;
-  case 'j':
-    m_pState->m_fWaveScale *= 0.9f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'J':
-    m_pState->m_fWaveScale /= 0.9f;
-    SendPresetWaveInfoToMDropDX12Remote();
-    return 0; // we processed (or absorbed) the key
-  case 'k':
-  case 'K':
-  {
-    USHORT mask = 1 << (sizeof(SHORT) * 8 - 1);	// we want the highest-order bit
-    bool bShiftHeldDown = (GetKeyState(VK_SHIFT) & mask) != 0;
 
-    if (bShiftHeldDown) {
-      m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE_KILL;
-      SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
-      PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
-    }
-    else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE) {
-      m_nNumericInputMode = NUMERIC_INPUT_MODE_CUST_MSG;
-      SendMessageToMDropDX12Remote(L"STATUS=Message Mode set");
-      PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
-    }
-    else {
-      m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE;
-      SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
-      PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
-    }
-
-    m_nNumericInputNum = 0;
-    m_nNumericInputDigits = 0;
-  }
-  return 0; // we processed (or absorbed) the key
-
-  // row 3/misc. keys
-
-  case '[':
-    m_pState->m_fXPush -= 0.005f;
-    return 0; // we processed (or absorbed) the key
-  case ']':
-    m_pState->m_fXPush += 0.005f;
-    return 0; // we processed (or absorbed) the key
-  case '{':
-    m_pState->m_fYPush -= 0.005f;
-    return 0; // we processed (or absorbed) the key
-  case '}':
-    m_pState->m_fYPush += 0.005f;
-    return 0; // we processed (or absorbed) the key
-  case '<':
-    m_pState->m_fRot += 0.02f;
-    return 0; // we processed (or absorbed) the key
-  case '>':
-    m_pState->m_fRot -= 0.02f;
-    return 0; // we processed (or absorbed) the key
-
-  case 's':				// SAVE PRESET
-  case 'S':
-    // SPOUT
-    m_show_help = 0;
-    if (m_UI_mode == UI_REGULAR) {
-      bool isCtrlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-      if (!isCtrlPressed) {
-        //m_bPresetLockedByCode = true;
-        m_UI_mode = UI_SAVEAS;
-
-        // enter WaitString mode
-        m_waitstring.bActive = true;
-        m_waitstring.bFilterBadChars = true;
-        m_waitstring.bDisplayAsCode = false;
-        m_waitstring.nSelAnchorPos = -1;
-        m_waitstring.nMaxLen = min(sizeof(m_waitstring.szText) - 1, MAX_PATH - lstrlenW(GetPresetDir()) - 6);	// 6 for the extension + null char.    We set this because win32 LoadFile, MoveFile, etc. barf if the path+filename+ext are > MAX_PATH chars.
-        lstrcpyW(m_waitstring.szText, m_pState->m_szDesc);			// initial string is the filename, minus the extension
-        wasabiApiLangString(IDS_SAVE_AS, m_waitstring.szPrompt, 512);
-        m_waitstring.szToolTip[0] = 0;
-        m_waitstring.nCursorPos = lstrlenW(m_waitstring.szText);	// set the starting edit position      
-      }
-
+    case 'm':
+    case 'M':
+      // Menu/Load toggle (UI_REGULAR→UI_MENU handled by binding table)
+      m_show_help = 0;
+      if (m_UI_mode == UI_MENU)
+        m_UI_mode = UI_REGULAR;
+      else if (m_UI_mode == UI_LOAD)
+        m_UI_mode = UI_MENU;
       return 0;
+
+    case 'y':
+    case 'Y':
+      return 0; // absorbed
     }
-    break;
-
-  case '`':
-  case '~':
-    m_bPresetLockedByUser = !m_bPresetLockedByUser;
-    if (m_bPresetLockedByUser) {
-      wchar_t buf[64];
-      wcscpy(buf, L"Preset locked");
-      AddNotification(buf);
-    }
-    else {
-      wchar_t buf[64];
-      wcscpy(buf, L"Preset unlocked");
-      AddNotification(buf);
-    }
-    SendSettingsInfoToMDropDX12Remote();
-    return 0;
-
-  case 'l': // LOAD PRESET
-  case 'L':
-    // SPOUT
-    m_show_help = 0;
-
-    // Note: Ctrl+L folder picker is handled in WM_KEYDOWN (not here in WM_CHAR)
-
-    if (m_UI_mode == UI_LOAD) {
-      m_UI_mode = UI_REGULAR;
-      return 0; // we processed (or absorbed) the key
-
-    }
-    else if (
-      m_UI_mode == UI_REGULAR ||
-      m_UI_mode == UI_MENU) {
-      // If current preset dir has no .milk files, reset to default presets directory
-      if (!DirHasMilkFilesHelper(m_szPresetDir)) {
-        swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
-        TryDescendIntoPresetSubdirHelper(m_szPresetDir);
-        WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
-      }
-      UpdatePresetList(false, true); // force synchronous re-scan
-      m_UI_mode = UI_LOAD;
-      m_bUserPagedUp = false;
-      m_bUserPagedDown = false;
-      return 0; // we processed (or absorbed) the key
-
-    }
-    break;
-
-  case 'm':
-  case 'M':
-
-    // SPOUT
-    m_show_help = 0;
-
-    if (m_UI_mode == UI_MENU)
-      m_UI_mode = UI_REGULAR;
-    else if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_LOAD)
-      m_UI_mode = UI_MENU;
-    return 0; // we processed (or absorbed) the key
-
-  case '-':
-    m_ColShiftBrightness -= 0.02f;
-    if (m_ColShiftBrightness < -1.0f) m_ColShiftBrightness = -1.0f;
-    { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
-    SendSettingsInfoToMDropDX12Remote();
-    return 0;
-  case '+':
-    m_ColShiftBrightness += 0.02f;
-    if (m_ColShiftBrightness > 1.0f) m_ColShiftBrightness = 1.0f;
-    { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
-      AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
-    SendSettingsInfoToMDropDX12Remote();
-    return 0;
-
-  case '*':
-    ReadCustomMessages();
-    g_engine.AddNotification(L"Messages reloaded");
-    m_nNumericInputDigits = 0;
-    m_nNumericInputNum = 0;
-    return 0;
-  }
-
-  if (wParam == 'y' || wParam == 'Y')	// 'y' or 'Y'
-  {
-    // MDropDX12: 'k' now toggles between sprite and message mode
-    return 0; // we processed (or absorbed) the key
   }
 
   return 1;

@@ -20,7 +20,7 @@ extern Engine g_engine;
 //----------------------------------------------------------------------
 
 HotkeysWindow::HotkeysWindow(Engine* pEngine)
-  : ToolWindow(pEngine, 580, 520) {}
+  : ToolWindow(pEngine, 680, 580) {}
 
 //----------------------------------------------------------------------
 // Engine bridge: Open/Close via Engine members
@@ -56,6 +56,13 @@ static int LaunchAppSlot(int actionId) {
   return actionId - HK_LAUNCH_APP_1;  // 0-3
 }
 
+// Column indices for the ListView
+enum { COL_CATEGORY = 0, COL_ACTION, COL_SHORTCUT, COL_SCOPE };
+
+// Sort state
+static int  s_sortColumn = COL_CATEGORY;  // default: sort by category
+static bool s_sortAscending = true;
+
 static void RefreshHotkeyList(HWND hList, Engine* p)
 {
   if (!hList) return;
@@ -76,26 +83,79 @@ static void RefreshHotkeyList(HWND hList, Engine* p)
       }
     }
 
+    // Store the hotkey index in lParam for sorting
     LVITEMW lvi = {};
-    lvi.mask = LVIF_TEXT;
+    lvi.mask = LVIF_TEXT | LVIF_PARAM;
     lvi.iItem = i;
     lvi.iSubItem = 0;
-    lvi.pszText = (LPWSTR)actionName.c_str();
+    lvi.lParam = (LPARAM)i;  // hotkey index
+    const wchar_t* catName = (p->m_hotkeys[i].category < HKCAT_COUNT)
+        ? kCategoryNames[p->m_hotkeys[i].category] : L"?";
+    lvi.pszText = (LPWSTR)catName;
     SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+    // Action column
+    lvi.mask = LVIF_TEXT;
+    lvi.iSubItem = COL_ACTION;
+    lvi.pszText = (LPWSTR)actionName.c_str();
+    SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&lvi);
 
     // Shortcut column
     std::wstring shortcut = p->FormatHotkeyDisplay(p->m_hotkeys[i].modifiers, p->m_hotkeys[i].vk);
-    lvi.iSubItem = 1;
+    lvi.iSubItem = COL_SHORTCUT;
     lvi.pszText = (LPWSTR)shortcut.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&lvi);
 
     // Scope column
     const wchar_t* scope = (p->m_hotkeys[i].vk == 0) ? L"-" :
       (p->m_hotkeys[i].scope == HKSCOPE_GLOBAL ? L"Global" : L"Local");
-    lvi.iSubItem = 2;
+    lvi.iSubItem = COL_SCOPE;
     lvi.pszText = (LPWSTR)scope;
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&lvi);
   }
+}
+
+//----------------------------------------------------------------------
+// Sort comparison callback for ListView_SortItemsEx
+//----------------------------------------------------------------------
+
+struct SortContext {
+  HWND hList;
+  Engine* pEngine;
+};
+
+static int CALLBACK HotkeyListCompare(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
+{
+  SortContext* ctx = (SortContext*)lParamSort;
+  Engine* p = ctx->pEngine;
+
+  // lParam1/lParam2 are hotkey indices stored in LVITEM::lParam
+  int idx1 = (int)lParam1;
+  int idx2 = (int)lParam2;
+  if (idx1 < 0 || idx1 >= NUM_HOTKEYS || idx2 < 0 || idx2 >= NUM_HOTKEYS)
+    return 0;
+
+  int cmp = 0;
+  switch (s_sortColumn) {
+  case COL_CATEGORY:
+    cmp = (int)p->m_hotkeys[idx1].category - (int)p->m_hotkeys[idx2].category;
+    if (cmp == 0) // secondary sort by action name within category
+      cmp = _wcsicmp(p->m_hotkeys[idx1].szAction, p->m_hotkeys[idx2].szAction);
+    break;
+  case COL_ACTION:
+    cmp = _wcsicmp(p->m_hotkeys[idx1].szAction, p->m_hotkeys[idx2].szAction);
+    break;
+  case COL_SHORTCUT:
+    cmp = (int)p->m_hotkeys[idx1].vk - (int)p->m_hotkeys[idx2].vk;
+    if (cmp == 0)
+      cmp = (int)p->m_hotkeys[idx1].modifiers - (int)p->m_hotkeys[idx2].modifiers;
+    break;
+  case COL_SCOPE:
+    cmp = (int)p->m_hotkeys[idx1].scope - (int)p->m_hotkeys[idx2].scope;
+    break;
+  }
+
+  return s_sortAscending ? cmp : -cmp;
 }
 
 //----------------------------------------------------------------------
@@ -105,9 +165,31 @@ static void RefreshHotkeyList(HWND hList, Engine* p)
 static void SaveAndReRegister(Engine* p)
 {
   p->SaveHotkeySettings();
+  p->GenerateHelpText();  // refresh F1 help overlay with new bindings
   HWND hRender = p->GetPluginWindow();
   if (hRender)
     PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
+}
+
+//----------------------------------------------------------------------
+// Helper: get hotkey index from ListView item (stored in lParam)
+//----------------------------------------------------------------------
+
+static int GetHotkeyIndex(HWND hList, int iItem)
+{
+  LVITEMW lvi = {};
+  lvi.mask = LVIF_PARAM;
+  lvi.iItem = iItem;
+  if (SendMessageW(hList, LVM_GETITEMW, 0, (LPARAM)&lvi))
+    return (int)lvi.lParam;
+  return -1;
+}
+
+static int GetSelectedHotkeyIndex(HWND hList)
+{
+  int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+  if (sel < 0) return -1;
+  return GetHotkeyIndex(hList, sel);
 }
 
 //----------------------------------------------------------------------
@@ -128,27 +210,33 @@ void HotkeysWindow::DoBuildControls()
   TrackControl(CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw, lineH, hFontBold));
   y += lineH + gap;
 
-  // ListView (report mode, full row select, single select)
-  int listH = lineH * (NUM_HOTKEYS + 2);  // enough for all rows + header
-  HWND hList = CreateThemedListView(IDC_MW_HOTKEYS_LIST, x, y, rw, listH);
+  // ListView (report mode, full row select, single select, sortable headers)
+  int listH = lineH * min(NUM_HOTKEYS + 2, 30);  // cap height, scrollbar for rest
+  HWND hList = CreateThemedListView(IDC_MW_HOTKEYS_LIST, x, y, rw, listH,
+                                    /*visible=*/true, /*sortable=*/true);
   TrackControl(hList);
   if (hList) {
-    // Columns: Action, Shortcut, Scope
-    int colAction = MulDiv(rw, 45, 100);
-    int colScope = MulDiv(rw, 18, 100);
-    int colShortcut = rw - colAction - colScope - GetSystemMetrics(SM_CXVSCROLL) - 4;
+    // Columns: Category, Action, Shortcut, Scope
+    int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
+    int colCategory = MulDiv(rw, 18, 100);
+    int colAction   = MulDiv(rw, 35, 100);
+    int colScope    = MulDiv(rw, 15, 100);
+    int colShortcut = rw - colCategory - colAction - colScope - scrollW;
 
     LVCOLUMNW col = {};
     col.mask = LVCF_TEXT | LVCF_WIDTH;
+    col.pszText = (LPWSTR)L"Category";
+    col.cx = colCategory;
+    SendMessageW(hList, LVM_INSERTCOLUMNW, COL_CATEGORY, (LPARAM)&col);
     col.pszText = (LPWSTR)L"Action";
     col.cx = colAction;
-    SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
+    SendMessageW(hList, LVM_INSERTCOLUMNW, COL_ACTION, (LPARAM)&col);
     col.pszText = (LPWSTR)L"Shortcut";
     col.cx = colShortcut;
-    SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
+    SendMessageW(hList, LVM_INSERTCOLUMNW, COL_SHORTCUT, (LPARAM)&col);
     col.pszText = (LPWSTR)L"Scope";
     col.cx = colScope;
-    SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
+    SendMessageW(hList, LVM_INSERTCOLUMNW, COL_SCOPE, (LPARAM)&col);
 
     RefreshHotkeyList(hList, m_pEngine);
     ListView_SetItemState(hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
@@ -201,11 +289,11 @@ void HotkeysWindow::DoBuildControls()
 
   // Update scope checkbox and path controls to match first selected item
   if (hList) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel >= 0 && sel < NUM_HOTKEYS) {
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS) {
       CheckDlgButton(hw, IDC_MW_HOTKEYS_SCOPE,
-        m_pEngine->m_hotkeys[sel].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
-      ShowPathControls(hw, sel);
+        m_pEngine->m_hotkeys[hkIdx].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+      ShowPathControls(hw, hkIdx);
     }
   }
 }
@@ -220,8 +308,8 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
   HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEYS_LIST);
 
   if (id == IDC_MW_HOTKEYS_SET && code == BN_CLICKED) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel < 0 || sel >= NUM_HOTKEYS) {
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx < 0 || hkIdx >= NUM_HOTKEYS) {
       p->AddNotification(L"Select a hotkey action first");
       return 0;
     }
@@ -244,23 +332,25 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
 
     // Conflict detection: clear any other binding with the same key+mod
     for (int i = 0; i < NUM_HOTKEYS; i++) {
-      if (i != sel && p->m_hotkeys[i].vk == vk && p->m_hotkeys[i].modifiers == mod) {
+      if (i != hkIdx && p->m_hotkeys[i].vk == vk && p->m_hotkeys[i].modifiers == mod) {
         p->m_hotkeys[i].vk = 0;
         p->m_hotkeys[i].modifiers = 0;
       }
     }
 
     // Assign
-    p->m_hotkeys[sel].modifiers = mod;
-    p->m_hotkeys[sel].vk = vk;
+    p->m_hotkeys[hkIdx].modifiers = mod;
+    p->m_hotkeys[hkIdx].vk = vk;
 
     // Use current scope checkbox state
     bool bGlobal = (IsDlgButtonChecked(hWnd, IDC_MW_HOTKEYS_SCOPE) == BST_CHECKED);
-    p->m_hotkeys[sel].scope = bGlobal ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+    p->m_hotkeys[hkIdx].scope = bGlobal ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
 
+    int lvSel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
     SaveAndReRegister(p);
     RefreshHotkeyList(hList, p);
-    ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    if (lvSel >= 0)
+      ListView_SetItemState(hList, lvSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 
     std::wstring notif = L"Hotkey set: " + p->FormatHotkeyDisplay(mod, vk);
     p->AddNotification((wchar_t*)notif.c_str());
@@ -268,13 +358,15 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
   }
 
   if (id == IDC_MW_HOTKEYS_CLEAR && code == BN_CLICKED) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel >= 0 && sel < NUM_HOTKEYS) {
-      p->m_hotkeys[sel].vk = 0;
-      p->m_hotkeys[sel].modifiers = 0;
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS) {
+      p->m_hotkeys[hkIdx].vk = 0;
+      p->m_hotkeys[hkIdx].modifiers = 0;
+      int lvSel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
       SaveAndReRegister(p);
       RefreshHotkeyList(hList, p);
-      ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      if (lvSel >= 0)
+        ListView_SetItemState(hList, lvSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 
       HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEYS_EDIT);
       if (hHotkey) SendMessageW(hHotkey, HKM_SETHOTKEY, 0, 0);
@@ -283,21 +375,23 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
   }
 
   if (id == IDC_MW_HOTKEYS_SCOPE && code == BN_CLICKED) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel >= 0 && sel < NUM_HOTKEYS && p->m_hotkeys[sel].vk != 0) {
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS && p->m_hotkeys[hkIdx].vk != 0) {
       bool bGlobal = (IsDlgButtonChecked(hWnd, IDC_MW_HOTKEYS_SCOPE) == BST_CHECKED);
-      p->m_hotkeys[sel].scope = bGlobal ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+      p->m_hotkeys[hkIdx].scope = bGlobal ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+      int lvSel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
       SaveAndReRegister(p);
       RefreshHotkeyList(hList, p);
-      ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      if (lvSel >= 0)
+        ListView_SetItemState(hList, lvSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
     }
     return 0;
   }
 
   if (id == IDC_MW_HOTKEYS_BROWSE && code == BN_CLICKED) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel >= 0 && sel < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[sel].id)) {
-      int slot = LaunchAppSlot(p->m_hotkeys[sel].id);
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[hkIdx].id)) {
+      int slot = LaunchAppSlot(p->m_hotkeys[hkIdx].id);
       wchar_t szFile[MAX_PATH] = {};
       wcsncpy_s(szFile, p->m_szLaunchApp[slot], _TRUNCATE);
       OPENFILENAMEW ofn = {};
@@ -311,24 +405,28 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
       if (GetOpenFileNameW(&ofn)) {
         wcsncpy_s(p->m_szLaunchApp[slot], szFile, _TRUNCATE);
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_HOTKEYS_PATH), szFile);
+        int lvSel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
         SaveAndReRegister(p);
         RefreshHotkeyList(hList, p);
-        ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        if (lvSel >= 0)
+          ListView_SetItemState(hList, lvSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
       }
     }
     return 0;
   }
 
   if (id == IDC_MW_HOTKEYS_PATH && code == EN_KILLFOCUS) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel >= 0 && sel < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[sel].id)) {
-      int slot = LaunchAppSlot(p->m_hotkeys[sel].id);
+    int hkIdx = GetSelectedHotkeyIndex(hList);
+    if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[hkIdx].id)) {
+      int slot = LaunchAppSlot(p->m_hotkeys[hkIdx].id);
       wchar_t szPath[MAX_PATH] = {};
       GetWindowTextW(GetDlgItem(hWnd, IDC_MW_HOTKEYS_PATH), szPath, MAX_PATH);
       wcsncpy_s(p->m_szLaunchApp[slot], szPath, _TRUNCATE);
+      int lvSel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
       SaveAndReRegister(p);
       RefreshHotkeyList(hList, p);
-      ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      if (lvSel >= 0)
+        ListView_SetItemState(hList, lvSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
     }
     return 0;
   }
@@ -338,13 +436,16 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
     SaveAndReRegister(p);
     RefreshHotkeyList(hList, p);
     ListView_SetItemState(hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    CheckDlgButton(hWnd, IDC_MW_HOTKEYS_SCOPE,
-      p->m_hotkeys[0].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+    int hkIdx0 = GetHotkeyIndex(hList, 0);
+    if (hkIdx0 >= 0 && hkIdx0 < NUM_HOTKEYS) {
+      CheckDlgButton(hWnd, IDC_MW_HOTKEYS_SCOPE,
+        p->m_hotkeys[hkIdx0].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+      ShowPathControls(hWnd, hkIdx0);
+    }
 
     HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEYS_EDIT);
     if (hHotkey) SendMessageW(hHotkey, HKM_SETHOTKEY, 0, 0);
 
-    ShowPathControls(hWnd, 0);  // update path visibility for new selection
     p->AddNotification(L"Hotkeys reset to defaults");
     return 0;
   }
@@ -353,23 +454,40 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
 }
 
 //----------------------------------------------------------------------
-// DoNotify — ListView selection change
+// DoNotify — ListView selection change + column click sorting
 //----------------------------------------------------------------------
 
 LRESULT HotkeysWindow::DoNotify(HWND hWnd, NMHDR* pnm)
 {
-  if (pnm->idFrom == IDC_MW_HOTKEYS_LIST && pnm->code == LVN_ITEMCHANGED) {
+  if (pnm->idFrom != IDC_MW_HOTKEYS_LIST) return -1;
+
+  if (pnm->code == LVN_ITEMCHANGED) {
     NMLISTVIEW* pnmlv = (NMLISTVIEW*)pnm;
     if (pnmlv->uNewState & LVIS_SELECTED) {
-      int sel = pnmlv->iItem;
-      if (sel >= 0 && sel < NUM_HOTKEYS) {
+      int hkIdx = GetHotkeyIndex(GetDlgItem(hWnd, IDC_MW_HOTKEYS_LIST), pnmlv->iItem);
+      if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS) {
         CheckDlgButton(hWnd, IDC_MW_HOTKEYS_SCOPE,
-          m_pEngine->m_hotkeys[sel].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
-        ShowPathControls(hWnd, sel);
+          m_pEngine->m_hotkeys[hkIdx].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+        ShowPathControls(hWnd, hkIdx);
       }
     }
     return 0;
   }
+
+  if (pnm->code == LVN_COLUMNCLICK) {
+    NMLISTVIEW* pnmlv = (NMLISTVIEW*)pnm;
+    if (pnmlv->iSubItem == s_sortColumn)
+      s_sortAscending = !s_sortAscending;  // toggle direction
+    else {
+      s_sortColumn = pnmlv->iSubItem;
+      s_sortAscending = true;
+    }
+    HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEYS_LIST);
+    SortContext ctx = { hList, m_pEngine };
+    ListView_SortItems(hList, HotkeyListCompare, (LPARAM)&ctx);
+    return 0;
+  }
+
   return -1;
 }
 

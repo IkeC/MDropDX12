@@ -2,38 +2,155 @@
 //
 // Part of the MDropDX12 configurable hotkeys system.
 // Supports local (render-window-focus) and global (system-wide) bindings.
+// ~84 reassignable bindings; F1/F2/Ctrl+F2/Escape remain hardcoded.
 
 #include "engine.h"
 #include "utility.h"
+#include "support.h"
+#include "resource.h"
+#include "wasabi.h"
 #include <TlHelp32.h>
 
 namespace mdrop {
 
+extern Engine g_engine;
+extern int ToggleFPSNumPressed;
+extern int HardcutMode;
+extern float timetick;
+extern float timetick2;
+extern float TimeToAutoLockPreset;
+extern int beatcount;
+extern bool TranspaMode;
+extern bool AutoLockedPreset;
+
+void ToggleTransparency(HWND hwnd);
+void ToggleWindowOpacity(HWND hwnd, bool bDown);
+
+// Helper: map a VK_OEM code for special characters on US QWERTY.
+// We use fixed VK_OEM codes so defaults are keyboard-layout-independent.
+// VK_OEM_4 = [  VK_OEM_6 = ]  VK_OEM_COMMA = ,  VK_OEM_PERIOD = .
+// VK_OEM_3 = `  VK_OEM_MINUS = -  VK_OEM_PLUS = =+
+// VK_OEM_1 = ;  VK_OEM_2 = /  VK_OEM_5 = backslash  VK_OEM_7 = '
+// For shifted variants ({, }, <, >, ~, !, @) we use the base VK + MOD_SHIFT.
+
+#define HK_DEF(idx, _id, _mod, _vk, _scope, _cat, _action, _ini) \
+    m_hotkeys[idx] = { _id, _mod, _vk, _scope, _cat, \
+                        _action, _ini, _mod, _vk, _scope }
+
 void Engine::ResetHotkeyDefaults()
 {
-    m_hotkeys[0] = { HK_TOGGLE_FULLSCREEN, 0, 0, HKSCOPE_LOCAL,
-                     L"Toggle Fullscreen", L"ToggleFullscreen", 0, 0, HKSCOPE_LOCAL };
-    m_hotkeys[1] = { HK_TOGGLE_STRETCH, 0, 0, HKSCOPE_LOCAL,
-                     L"Toggle Stretch/Mirror", L"ToggleStretch", 0, 0, HKSCOPE_LOCAL };
-    m_hotkeys[2] = { HK_OPEN_SETTINGS, 0, 0, HKSCOPE_LOCAL,
-                     L"Open Settings", L"OpenSettings", 0, 0, HKSCOPE_LOCAL };
-    m_hotkeys[3] = { HK_OPEN_DISPLAYS, MOD_CONTROL, VK_F8, HKSCOPE_LOCAL,
-                     L"Open Spout/Displays", L"OpenDisplays", MOD_CONTROL, VK_F8, HKSCOPE_LOCAL };
-    m_hotkeys[4] = { HK_OPEN_SONGINFO, MOD_SHIFT | MOD_CONTROL, VK_F8, HKSCOPE_LOCAL,
-                     L"Open Song Info", L"OpenSongInfo", MOD_SHIFT | MOD_CONTROL, VK_F8, HKSCOPE_LOCAL };
-    m_hotkeys[5] = { HK_OPEN_HOTKEYS, MOD_CONTROL, VK_F7, HKSCOPE_LOCAL,
-                     L"Open Hotkeys", L"OpenHotkeys", MOD_CONTROL, VK_F7, HKSCOPE_LOCAL };
-    m_hotkeys[6] = { HK_LAUNCH_APP_1, 0, 0, HKSCOPE_GLOBAL,
-                     L"Launch App 1", L"LaunchApp1", 0, 0, HKSCOPE_GLOBAL };
-    m_hotkeys[7] = { HK_LAUNCH_APP_2, 0, 0, HKSCOPE_GLOBAL,
-                     L"Launch App 2", L"LaunchApp2", 0, 0, HKSCOPE_GLOBAL };
-    m_hotkeys[8] = { HK_LAUNCH_APP_3, 0, 0, HKSCOPE_GLOBAL,
-                     L"Launch App 3", L"LaunchApp3", 0, 0, HKSCOPE_GLOBAL };
-    m_hotkeys[9] = { HK_LAUNCH_APP_4, 0, 0, HKSCOPE_GLOBAL,
-                     L"Launch App 4", L"LaunchApp4", 0, 0, HKSCOPE_GLOBAL };
-    for (int i = 0; i < 4; i++)
-        m_szLaunchApp[i][0] = L'\0';
+    memset(m_hotkeys, 0, sizeof(m_hotkeys));
+    int i = 0;
+
+    // ── Navigation ──
+    HK_DEF(i++, HK_NEXT_PRESET,       0,                     VK_SPACE,     HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Next Preset",           L"NextPreset");
+    HK_DEF(i++, HK_PREV_PRESET,       0,                     VK_BACK,      HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Previous Preset",       L"PrevPreset");
+    HK_DEF(i++, HK_HARD_CUT,          0,                     'H',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Hard Cut",              L"HardCut");
+    HK_DEF(i++, HK_RANDOM_MASHUP,     0,                     'A',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Random Mashup",         L"RandomMashup");
+    HK_DEF(i++, HK_LOCK_PRESET,       0,                     VK_OEM_3,     HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Lock/Unlock Preset",    L"LockPreset");
+    HK_DEF(i++, HK_TOGGLE_RANDOM,     0,                     'R',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Random/Sequential",     L"ToggleRandom");
+    HK_DEF(i++, HK_OPEN_PRESET_LIST,  0,                     'L',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Preset Browser",        L"OpenPresetList");
+    HK_DEF(i++, HK_SAVE_PRESET,       0,                     'S',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Save Preset As...",     L"SavePreset");
+    HK_DEF(i++, HK_OPEN_MENU,         0,                     'M',          HKSCOPE_LOCAL, HKCAT_NAVIGATION, L"Toggle Menu",           L"OpenMenu");
+
+    // ── Visual ──
+    HK_DEF(i++, HK_OPACITY_UP,        MOD_SHIFT,             VK_UP,        HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity Up",            L"OpacityUp");
+    HK_DEF(i++, HK_OPACITY_DOWN,      MOD_SHIFT,             VK_DOWN,      HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity Down",          L"OpacityDown");
+    HK_DEF(i++, HK_OPACITY_25,        0,                     0,            HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity 25%",           L"Opacity25");
+    HK_DEF(i++, HK_OPACITY_50,        0,                     0,            HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity 50%",           L"Opacity50");
+    HK_DEF(i++, HK_OPACITY_75,        0,                     0,            HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity 75%",           L"Opacity75");
+    HK_DEF(i++, HK_OPACITY_100,       0,                     0,            HKSCOPE_LOCAL, HKCAT_VISUAL, L"Opacity 100%",          L"Opacity100");
+    HK_DEF(i++, HK_WAVE_MODE_NEXT,    0,                     'W',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Mode +",           L"WaveModeNext");
+    HK_DEF(i++, HK_WAVE_MODE_PREV,    MOD_SHIFT,             'W',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Mode -",           L"WaveModePrev");
+    HK_DEF(i++, HK_WAVE_ALPHA_DOWN,   0,                     'E',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Alpha -",          L"WaveAlphaDown");
+    HK_DEF(i++, HK_WAVE_ALPHA_UP,     MOD_SHIFT,             'E',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Alpha +",          L"WaveAlphaUp");
+    HK_DEF(i++, HK_WAVE_SCALE_DOWN,   0,                     'J',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Scale -",          L"WaveScaleDown");
+    HK_DEF(i++, HK_WAVE_SCALE_UP,     MOD_SHIFT,             'J',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Wave Scale +",          L"WaveScaleUp");
+    HK_DEF(i++, HK_ZOOM_IN,           0,                     'I',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Zoom In",               L"ZoomIn");
+    HK_DEF(i++, HK_ZOOM_OUT,          MOD_SHIFT,             'I',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Zoom Out",              L"ZoomOut");
+    HK_DEF(i++, HK_WARP_AMOUNT_DOWN,  0,                     'O',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Warp Amount -",         L"WarpAmtDown");
+    HK_DEF(i++, HK_WARP_AMOUNT_UP,    MOD_SHIFT,             'O',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Warp Amount +",         L"WarpAmtUp");
+    HK_DEF(i++, HK_WARP_SCALE_DOWN,   0,                     'U',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Warp Scale -",          L"WarpScaleDown");
+    HK_DEF(i++, HK_WARP_SCALE_UP,     MOD_SHIFT,             'U',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Warp Scale +",          L"WarpScaleUp");
+    HK_DEF(i++, HK_ECHO_ALPHA_DOWN,   0,                     'P',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Echo Alpha -",          L"EchoAlphaDown");
+    HK_DEF(i++, HK_ECHO_ALPHA_UP,     MOD_SHIFT,             'P',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Echo Alpha +",          L"EchoAlphaUp");
+    HK_DEF(i++, HK_ECHO_ZOOM_DOWN,    0,                     'Q',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Echo Zoom -",           L"EchoZoomDown");
+    HK_DEF(i++, HK_ECHO_ZOOM_UP,      MOD_SHIFT,             'Q',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Echo Zoom +",           L"EchoZoomUp");
+    HK_DEF(i++, HK_ECHO_ORIENT,       0,                     'F',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Echo Orientation",      L"EchoOrient");
+    HK_DEF(i++, HK_GAMMA_DOWN,        0,                     'G',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Gamma -",               L"GammaDown");
+    HK_DEF(i++, HK_GAMMA_UP,          MOD_SHIFT,             'G',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Gamma +",               L"GammaUp");
+    HK_DEF(i++, HK_PUSH_X_NEG,        0,                     VK_OEM_4,     HKSCOPE_LOCAL, HKCAT_VISUAL, L"Push X -",              L"PushXNeg");
+    HK_DEF(i++, HK_PUSH_X_POS,        0,                     VK_OEM_6,     HKSCOPE_LOCAL, HKCAT_VISUAL, L"Push X +",              L"PushXPos");
+    HK_DEF(i++, HK_PUSH_Y_NEG,        MOD_SHIFT,             VK_OEM_4,     HKSCOPE_LOCAL, HKCAT_VISUAL, L"Push Y -",              L"PushYNeg");
+    HK_DEF(i++, HK_PUSH_Y_POS,        MOD_SHIFT,             VK_OEM_6,     HKSCOPE_LOCAL, HKCAT_VISUAL, L"Push Y +",              L"PushYPos");
+    HK_DEF(i++, HK_ROTATE_LEFT,       MOD_SHIFT,             VK_OEM_COMMA, HKSCOPE_LOCAL, HKCAT_VISUAL, L"Rotate Left",           L"RotateLeft");
+    HK_DEF(i++, HK_ROTATE_RIGHT,      MOD_SHIFT,             VK_OEM_PERIOD,HKSCOPE_LOCAL, HKCAT_VISUAL, L"Rotate Right",          L"RotateRight");
+    HK_DEF(i++, HK_BRIGHTNESS_DOWN,   0,                     VK_OEM_MINUS, HKSCOPE_LOCAL, HKCAT_VISUAL, L"Brightness -",          L"BrightnessDown");
+    HK_DEF(i++, HK_BRIGHTNESS_UP,     MOD_SHIFT,             VK_OEM_PLUS,  HKSCOPE_LOCAL, HKCAT_VISUAL, L"Brightness +",          L"BrightnessUp");
+    HK_DEF(i++, HK_HUE_FORWARD,       MOD_CONTROL,           'H',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Hue +",                 L"HueForward");
+    HK_DEF(i++, HK_HUE_BACKWARD,      MOD_CONTROL|MOD_SHIFT, 'H',          HKSCOPE_LOCAL, HKCAT_VISUAL, L"Hue -",                 L"HueBackward");
+
+    // ── Media ──
+    HK_DEF(i++, HK_MEDIA_PLAY_PAUSE,  0,                     VK_DOWN,      HKSCOPE_LOCAL, HKCAT_MEDIA, L"Play/Pause",            L"MediaPlayPause");
+    HK_DEF(i++, HK_MEDIA_STOP,        0,                     VK_UP,        HKSCOPE_LOCAL, HKCAT_MEDIA, L"Stop",                  L"MediaStop");
+    HK_DEF(i++, HK_MEDIA_PREV_TRACK,  0,                     VK_LEFT,      HKSCOPE_LOCAL, HKCAT_MEDIA, L"Previous Track",        L"MediaPrevTrack");
+    HK_DEF(i++, HK_MEDIA_NEXT_TRACK,  0,                     VK_RIGHT,     HKSCOPE_LOCAL, HKCAT_MEDIA, L"Next Track",            L"MediaNextTrack");
+    HK_DEF(i++, HK_MEDIA_REWIND,      MOD_CONTROL,           VK_LEFT,      HKSCOPE_LOCAL, HKCAT_MEDIA, L"Rewind",                L"MediaRewind");
+    HK_DEF(i++, HK_MEDIA_FAST_FORWARD,MOD_CONTROL,           VK_RIGHT,     HKSCOPE_LOCAL, HKCAT_MEDIA, L"Fast Forward",          L"MediaFastFwd");
+
+    // ── Window ──
+    HK_DEF(i++, HK_TOGGLE_FULLSCREEN, 0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Fullscreen",     L"ToggleFullscreen");
+    HK_DEF(i++, HK_TOGGLE_STRETCH,    0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Stretch/Mirror", L"ToggleStretch");
+    HK_DEF(i++, HK_ALWAYS_ON_TOP,     0,                     VK_F7,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Always On Top",         L"AlwaysOnTop");
+    HK_DEF(i++, HK_TRANSPARENCY_MODE, 0,                     VK_F12,       HKSCOPE_LOCAL, HKCAT_WINDOW, L"Transparency Mode",     L"TransparencyMode");
+    HK_DEF(i++, HK_BLACK_MODE,        MOD_CONTROL,           VK_F12,       HKSCOPE_LOCAL, HKCAT_WINDOW, L"Black Mode",            L"BlackMode");
+    HK_DEF(i++, HK_FPS_CYCLE,         0,                     VK_F3,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"FPS Cycle",             L"FPSCycle");
+    HK_DEF(i++, HK_SHOW_PRESET_INFO,  0,                     VK_F4,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Show Preset Info",      L"ShowPresetInfo");
+    HK_DEF(i++, HK_SHOW_FPS,          0,                     VK_F5,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Show FPS",              L"ShowFPS");
+    HK_DEF(i++, HK_SHOW_RATING,       0,                     VK_F6,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Show Rating",           L"ShowRating");
+    HK_DEF(i++, HK_SHOW_SHADER_HELP,  0,                     VK_F9,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Shader Help",           L"ShowShaderHelp");
+
+    // ── Tools ──
+    HK_DEF(i++, HK_OPEN_SETTINGS,     0,                     VK_F8,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Settings",         L"OpenSettings");
+    HK_DEF(i++, HK_OPEN_DISPLAYS,     MOD_CONTROL,           VK_F8,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Spout/Displays",   L"OpenDisplays");
+    HK_DEF(i++, HK_OPEN_SONGINFO,     MOD_SHIFT|MOD_CONTROL, VK_F8,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Song Info",        L"OpenSongInfo");
+    HK_DEF(i++, HK_OPEN_HOTKEYS,      MOD_CONTROL,           VK_F7,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Hotkeys",          L"OpenHotkeys");
+    HK_DEF(i++, HK_OPEN_MIDI,         0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open MIDI",             L"OpenMidi");
+
+    // ── Shader/Effects ──
+    HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
+    HK_DEF(i++, HK_HARDCUT_MODE_CYCLE,MOD_SHIFT,             VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Hard Cut Mode Cycle",  L"HardcutModeCycle");
+    HK_DEF(i++, HK_QUALITY_DOWN,      MOD_CONTROL,           'Q',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Quality Down",          L"QualityDown");
+    HK_DEF(i++, HK_QUALITY_UP,        MOD_CONTROL|MOD_SHIFT, 'Q',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Quality Up",            L"QualityUp");
+    HK_DEF(i++, HK_SPOUT_TOGGLE,      0,                     VK_F10,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Spout Toggle",          L"SpoutToggle");
+    HK_DEF(i++, HK_SPOUT_FIXED_SIZE,  MOD_SHIFT,             VK_F10,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Spout Fixed Size",     L"SpoutFixedSize");
+    HK_DEF(i++, HK_SCREENSHOT,        MOD_CONTROL,           'X',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Screenshot",            L"Screenshot");
+    HK_DEF(i++, HK_SHADER_LOCK_CYCLE, 0,                     'D',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Shader Lock Cycle",    L"ShaderLockCycle");
+    HK_DEF(i++, HK_SONG_TITLE,        0,                     'T',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Song Title Anim",      L"SongTitle");
+    HK_DEF(i++, HK_KILL_SPRITES,      MOD_CONTROL,           'K',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Kill Sprites",          L"KillSprites");
+    HK_DEF(i++, HK_KILL_SUPERTEXTS,   MOD_CONTROL,           'T',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Kill Text Overlays",   L"KillSupertexts");
+    HK_DEF(i++, HK_AUTO_PRESET_CHANGE,MOD_CONTROL,           'A',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Auto Preset Change",   L"AutoPresetChange");
+    HK_DEF(i++, HK_SCRAMBLE_WARP,     MOD_SHIFT,             '1',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Scramble Warp",        L"ScrambleWarp");
+    HK_DEF(i++, HK_SCRAMBLE_COMP,     MOD_SHIFT,             '2',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Scramble Comp",        L"ScrambleComp");
+    HK_DEF(i++, HK_QUICKSAVE,         MOD_CONTROL,           'S',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Quicksave Preset",     L"Quicksave");
+    HK_DEF(i++, HK_SCROLL_LOCK,       0,                     VK_SCROLL,    HKSCOPE_LOCAL, HKCAT_SHADER, L"Scroll Lock",          L"ScrollLock");
+    HK_DEF(i++, HK_RELOAD_MESSAGES,   MOD_SHIFT,             '8',          HKSCOPE_LOCAL, HKCAT_SHADER, L"Reload Messages",      L"ReloadMessages");
+
+    // ── Misc ──
+    HK_DEF(i++, HK_DEBUG_INFO,        0,                     'N',          HKSCOPE_LOCAL, HKCAT_MISC, L"Debug Info",              L"DebugInfo");
+    HK_DEF(i++, HK_SPRITE_MODE,       0,                     'K',          HKSCOPE_LOCAL, HKCAT_MISC, L"Sprite/Message Mode",    L"SpriteMode");
+
+    // ── Launch ──
+    HK_DEF(i++, HK_LAUNCH_APP_1,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 1", L"LaunchApp1");
+    HK_DEF(i++, HK_LAUNCH_APP_2,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 2", L"LaunchApp2");
+    HK_DEF(i++, HK_LAUNCH_APP_3,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 3", L"LaunchApp3");
+    HK_DEF(i++, HK_LAUNCH_APP_4,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 4", L"LaunchApp4");
+
+    for (int j = 0; j < 4; j++)
+        m_szLaunchApp[j][0] = L'\0';
 }
+
+#undef HK_DEF
 
 void Engine::LoadHotkeySettings()
 {
@@ -42,31 +159,66 @@ void Engine::LoadHotkeySettings()
     // Start from defaults
     ResetHotkeyDefaults();
 
+    // Version marker: detects whether the INI was written by the expanded system.
+    // Version 0 (absent) = pre-expansion (only 10 hotkeys).
+    // Version 2 = full reassignable hotkeys system.
+    static constexpr int HOTKEY_INI_VERSION = 2;
+    int iniVersion = GetPrivateProfileIntW(L"Hotkeys", L"Version", 0, pIni);
+
     // Migration: if old "Enabled" key exists, migrate scope for configured bindings
     int oldEnabled = GetPrivateProfileIntW(L"Hotkeys", L"Enabled", -1, pIni);
 
-    // Read overrides from INI
-    for (int i = 0; i < NUM_HOTKEYS; i++) {
-        wchar_t modKey[128], vkKey[128], scopeKey[128];
-        swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
-        swprintf(vkKey, 128, L"%s_VK", m_hotkeys[i].szIniKey);
-        swprintf(scopeKey, 128, L"%s_Scope", m_hotkeys[i].szIniKey);
+    if (iniVersion >= HOTKEY_INI_VERSION) {
+        // Read overrides from INI (expanded system has written all keys)
+        for (int i = 0; i < NUM_HOTKEYS; i++) {
+            wchar_t modKey[128], vkKey[128], scopeKey[128];
+            swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
+            swprintf(vkKey, 128, L"%s_VK", m_hotkeys[i].szIniKey);
+            swprintf(scopeKey, 128, L"%s_Scope", m_hotkeys[i].szIniKey);
 
-        m_hotkeys[i].modifiers = (UINT)GetPrivateProfileIntW(L"Hotkeys", modKey, (int)m_hotkeys[i].modifiers, pIni);
-        m_hotkeys[i].vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", vkKey, (int)m_hotkeys[i].vk, pIni);
-        m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
+            m_hotkeys[i].modifiers = (UINT)GetPrivateProfileIntW(L"Hotkeys", modKey, (int)m_hotkeys[i].modifiers, pIni);
+            m_hotkeys[i].vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", vkKey, (int)m_hotkeys[i].vk, pIni);
+            m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
+        }
+    } else {
+        // Pre-expansion INI: only load the bindings that existed in the old system
+        // (ToggleFullscreen, ToggleStretch, OpenSettings, OpenDisplays, OpenSongInfo,
+        //  OpenHotkeys, LaunchApp1-4). All other bindings keep their defaults.
+        static const wchar_t* oldKeys[] = {
+            L"ToggleFullscreen", L"ToggleStretch", L"OpenSettings", L"OpenDisplays",
+            L"OpenSongInfo", L"OpenHotkeys", L"LaunchApp1", L"LaunchApp2",
+            L"LaunchApp3", L"LaunchApp4"
+        };
+        for (int i = 0; i < NUM_HOTKEYS; i++) {
+            bool isOldKey = false;
+            for (auto* k : oldKeys) {
+                if (wcscmp(m_hotkeys[i].szIniKey, k) == 0) { isOldKey = true; break; }
+            }
+            if (!isOldKey) continue;  // keep default for new bindings
+
+            wchar_t modKey[128], vkKey[128], scopeKey[128];
+            swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
+            swprintf(vkKey, 128, L"%s_VK", m_hotkeys[i].szIniKey);
+            swprintf(scopeKey, 128, L"%s_Scope", m_hotkeys[i].szIniKey);
+
+            m_hotkeys[i].modifiers = (UINT)GetPrivateProfileIntW(L"Hotkeys", modKey, (int)m_hotkeys[i].modifiers, pIni);
+            m_hotkeys[i].vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", vkKey, (int)m_hotkeys[i].vk, pIni);
+            m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
+        }
+
+        // Write the version marker + save all bindings so future loads use the full path
+        SaveHotkeySettings();
     }
 
     // Migration: old system had master enable toggle for first 2 bindings
     if (oldEnabled >= 0) {
         if (oldEnabled == 1) {
-            // Promote any configured bindings to global scope
-            for (int i = 0; i < 2 && i < NUM_HOTKEYS; i++) {
-                if (m_hotkeys[i].vk != 0)
+            for (int i = 0; i < NUM_HOTKEYS; i++) {
+                if ((m_hotkeys[i].id == HK_TOGGLE_FULLSCREEN || m_hotkeys[i].id == HK_TOGGLE_STRETCH)
+                    && m_hotkeys[i].vk != 0)
                     m_hotkeys[i].scope = HKSCOPE_GLOBAL;
             }
         }
-        // Delete the old key and re-save in new format
         WritePrivateProfileStringW(L"Hotkeys", L"Enabled", NULL, pIni);
         SaveHotkeySettings();
     }
@@ -83,6 +235,9 @@ void Engine::SaveHotkeySettings()
 {
     wchar_t* pIni = GetConfigIniFile();
     wchar_t buf[64];
+
+    // Write version marker so LoadHotkeySettings knows this is the expanded system
+    WritePrivateProfileStringW(L"Hotkeys", L"Version", L"2", pIni);
 
     for (int i = 0; i < NUM_HOTKEYS; i++) {
         wchar_t modKey[128], vkKey[128], scopeKey[128];
@@ -126,7 +281,252 @@ void Engine::UnregisterGlobalHotkeys(HWND hwnd)
 
 bool Engine::DispatchHotkeyAction(int actionId)
 {
+    HWND hRender = GetPluginWindow();
+    #define clamp(value, mn, mx) ((value) < (mn) ? (mn) : ((value) > (mx) ? (mx) : (value)))
+
     switch (actionId) {
+    // ── Navigation ──
+    case HK_NEXT_PRESET:
+        if (!m_bPresetLockedByCode) {
+            RenderCommand cmd;
+            cmd.cmd = RenderCmd::NextPreset;
+            cmd.fParam = m_fBlendTimeUser;
+            EnqueueRenderCmd(std::move(cmd));
+        }
+        return true;
+    case HK_PREV_PRESET:
+        PrevPreset(0);
+        m_fHardCutThresh *= 2.0f;
+        return true;
+    case HK_HARD_CUT:
+        NextPreset(0);
+        m_fHardCutThresh *= 2.0f;
+        return true;
+    case HK_RANDOM_MASHUP: {
+        bool bCompLock = m_bCompShaderLock;
+        bool bWarpLock = m_bWarpShaderLock;
+        m_bCompShaderLock = false; m_bWarpShaderLock = false;
+        LoadRandomPreset(0.0f);
+        if (WaitForPendingLoad(3000)) {
+            m_bCompShaderLock = true; m_bWarpShaderLock = false;
+            LoadRandomPreset(0.0f);
+            if (WaitForPendingLoad(3000)) {
+                m_bCompShaderLock = false; m_bWarpShaderLock = true;
+                LoadRandomPreset(0.0f);
+                WaitForPendingLoad(3000);
+            }
+        }
+        m_bCompShaderLock = bCompLock;
+        m_bWarpShaderLock = bWarpLock;
+        return true;
+    }
+    case HK_LOCK_PRESET:
+        m_bPresetLockedByUser = !m_bPresetLockedByUser;
+        AddNotification(m_bPresetLockedByUser ? L"Preset locked" : L"Preset unlocked");
+        SendSettingsInfoToMDropDX12Remote();
+        return true;
+    case HK_TOGGLE_RANDOM:
+        m_bSequentialPresetOrder = !m_bSequentialPresetOrder;
+        AddNotification(m_bSequentialPresetOrder ? L"Preset order: Sequential" : L"Preset order: Random");
+        m_presetHistory[0] = m_szCurrentPresetFile;
+        m_presetHistoryPos = 0;
+        m_presetHistoryFwdFence = 1;
+        m_presetHistoryBackFence = 0;
+        return true;
+    case HK_OPEN_PRESET_LIST:
+        m_show_help = 0;
+        if (m_UI_mode == UI_LOAD) {
+            m_UI_mode = UI_REGULAR;
+        } else if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_MENU) {
+            if (!DirHasMilkFilesHelper(m_szPresetDir)) {
+                swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
+                TryDescendIntoPresetSubdirHelper(m_szPresetDir);
+                WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
+            }
+            UpdatePresetList(false, true);
+            m_UI_mode = UI_LOAD;
+            m_bUserPagedUp = false;
+            m_bUserPagedDown = false;
+        }
+        return true;
+    case HK_SAVE_PRESET:
+        if (m_UI_mode == UI_REGULAR) {
+            m_show_help = 0;
+            m_UI_mode = UI_SAVEAS;
+            m_waitstring.bActive = true;
+            m_waitstring.bFilterBadChars = true;
+            m_waitstring.bDisplayAsCode = false;
+            m_waitstring.nSelAnchorPos = -1;
+            m_waitstring.nMaxLen = min(sizeof(m_waitstring.szText) - 1,
+                (size_t)(MAX_PATH - lstrlenW(GetPresetDir()) - 6));
+            lstrcpyW(m_waitstring.szText, m_pState->m_szDesc);
+            wasabiApiLangString(IDS_SAVE_AS, m_waitstring.szPrompt, 512);
+            m_waitstring.szToolTip[0] = 0;
+            m_waitstring.nCursorPos = lstrlenW(m_waitstring.szText);
+        }
+        return true;
+    case HK_OPEN_MENU:
+        m_show_help = 0;
+        if (m_UI_mode == UI_MENU)
+            m_UI_mode = UI_REGULAR;
+        else if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_LOAD)
+            m_UI_mode = UI_MENU;
+        return true;
+
+    // ── Visual ──
+    case HK_OPACITY_UP:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+    case HK_OPACITY_DOWN:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+    case HK_OPACITY_25:  fOpacity = 0.25f; if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0); return true;
+    case HK_OPACITY_50:  fOpacity = 0.50f; if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0); return true;
+    case HK_OPACITY_75:  fOpacity = 0.75f; if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0); return true;
+    case HK_OPACITY_100: fOpacity = 1.00f; if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0); return true;
+    case HK_WAVE_MODE_NEXT:
+        m_pState->m_nWaveMode++;
+        if (m_pState->m_nWaveMode >= NUM_WAVES) m_pState->m_nWaveMode = 0;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WAVE_MODE_PREV:
+        m_pState->m_nWaveMode--;
+        if (m_pState->m_nWaveMode < 0) m_pState->m_nWaveMode = NUM_WAVES - 1;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WAVE_ALPHA_DOWN:
+        m_pState->m_fWaveAlpha -= 0.1f;
+        if (m_pState->m_fWaveAlpha.eval(-1) < 0.0f) m_pState->m_fWaveAlpha = 0.0f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WAVE_ALPHA_UP:
+        m_pState->m_fWaveAlpha += 0.1f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WAVE_SCALE_DOWN:
+        m_pState->m_fWaveScale *= 0.9f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WAVE_SCALE_UP:
+        m_pState->m_fWaveScale /= 0.9f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_ZOOM_IN:
+        m_pState->m_fZoom += 0.01f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_ZOOM_OUT:
+        m_pState->m_fZoom -= 0.01f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WARP_AMOUNT_DOWN:
+        m_pState->m_fWarpAmount /= 1.1f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WARP_AMOUNT_UP:
+        m_pState->m_fWarpAmount *= 1.1f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_WARP_SCALE_DOWN:
+        m_pState->m_fWarpScale /= 1.1f;
+        return true;
+    case HK_WARP_SCALE_UP:
+        m_pState->m_fWarpScale *= 1.1f;
+        return true;
+    case HK_ECHO_ALPHA_DOWN:
+        m_pState->m_fVideoEchoAlpha -= 0.1f;
+        if (m_pState->m_fVideoEchoAlpha.eval(-1) < 0) m_pState->m_fVideoEchoAlpha = 0;
+        return true;
+    case HK_ECHO_ALPHA_UP:
+        m_pState->m_fVideoEchoAlpha += 0.1f;
+        if (m_pState->m_fVideoEchoAlpha.eval(-1) > 1.0f) m_pState->m_fVideoEchoAlpha = 1.0f;
+        return true;
+    case HK_ECHO_ZOOM_DOWN:
+        m_pState->m_fVideoEchoZoom /= 1.05f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_ECHO_ZOOM_UP:
+        m_pState->m_fVideoEchoZoom *= 1.05f;
+        SendPresetWaveInfoToMDropDX12Remote();
+        return true;
+    case HK_ECHO_ORIENT:
+        m_pState->m_nVideoEchoOrientation = (m_pState->m_nVideoEchoOrientation + 1) % 4;
+        return true;
+    case HK_GAMMA_DOWN:
+        m_pState->m_fGammaAdj -= 0.1f;
+        if (m_pState->m_fGammaAdj.eval(-1) < 0.0f) m_pState->m_fGammaAdj = 0.0f;
+        { wchar_t buf[64]; swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
+          AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+        return true;
+    case HK_GAMMA_UP:
+        m_pState->m_fGammaAdj += 0.1f;
+        { wchar_t buf[64]; swprintf(buf, 64, L"Gamma: %.1f", m_pState->m_fGammaAdj.eval(-1));
+          AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+        return true;
+    case HK_PUSH_X_NEG: m_pState->m_fXPush -= 0.005f; return true;
+    case HK_PUSH_X_POS: m_pState->m_fXPush += 0.005f; return true;
+    case HK_PUSH_Y_NEG: m_pState->m_fYPush -= 0.005f; return true;
+    case HK_PUSH_Y_POS: m_pState->m_fYPush += 0.005f; return true;
+    case HK_ROTATE_LEFT:  m_pState->m_fRot += 0.02f; return true;
+    case HK_ROTATE_RIGHT: m_pState->m_fRot -= 0.02f; return true;
+    case HK_BRIGHTNESS_DOWN:
+        m_ColShiftBrightness -= 0.02f;
+        if (m_ColShiftBrightness < -1.0f) m_ColShiftBrightness = -1.0f;
+        { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+          AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+        SendSettingsInfoToMDropDX12Remote();
+        return true;
+    case HK_BRIGHTNESS_UP:
+        m_ColShiftBrightness += 0.02f;
+        if (m_ColShiftBrightness > 1.0f) m_ColShiftBrightness = 1.0f;
+        { wchar_t buf[64]; swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
+          AddNotificationColored(buf, 1.5f, 0xFF00FFFF); }
+        SendSettingsInfoToMDropDX12Remote();
+        return true;
+    case HK_HUE_FORWARD:
+        m_ColShiftHue += 0.02f;
+        if (m_ColShiftHue >= 1.0f) m_ColShiftHue = -1.0f;
+        SendSettingsInfoToMDropDX12Remote();
+        return true;
+    case HK_HUE_BACKWARD:
+        m_ColShiftHue -= 0.02f;
+        if (m_ColShiftHue <= -1.0f) m_ColShiftHue = 1.0f;
+        SendSettingsInfoToMDropDX12Remote();
+        return true;
+
+    // ── Media (need render window for keybd_event context) ──
+    case HK_MEDIA_PLAY_PAUSE:
+    case HK_MEDIA_STOP:
+    case HK_MEDIA_PREV_TRACK:
+    case HK_MEDIA_NEXT_TRACK:
+    case HK_MEDIA_REWIND:
+    case HK_MEDIA_FAST_FORWARD:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+
+    // ── Window (need App.cpp or render-window-local state) ──
+    case HK_TOGGLE_FULLSCREEN:
+    case HK_TOGGLE_STRETCH:
+    case HK_ALWAYS_ON_TOP:
+    case HK_TRANSPARENCY_MODE:
+    case HK_BLACK_MODE:
+    case HK_FPS_CYCLE:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+    case HK_SHOW_PRESET_INFO:
+        m_bShowPresetInfo = !m_bShowPresetInfo;
+        return true;
+    case HK_SHOW_FPS:
+        m_bShowFPS = !m_bShowFPS;
+        return true;
+    case HK_SHOW_RATING:
+        m_bShowRating = !m_bShowRating;
+        return true;
+    case HK_SHOW_SHADER_HELP:
+        m_bShowShaderHelp = !m_bShowShaderHelp;
+        return true;
+
+    // ── Tools ──
     case HK_OPEN_SETTINGS:
         OpenSettingsWindow();
         return true;
@@ -139,21 +539,139 @@ bool Engine::DispatchHotkeyAction(int actionId)
     case HK_OPEN_HOTKEYS:
         OpenHotkeysWindow();
         return true;
-    case HK_TOGGLE_FULLSCREEN:
-    case HK_TOGGLE_STRETCH: {
-        // These need App.cpp-level dispatch (ToggleFullScreen etc.)
-        HWND hRender = GetPluginWindow();
-        if (hRender)
-            PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+    case HK_OPEN_MIDI:
+        OpenMidiWindow();
+        return true;
+
+    // ── Shader/Effects ──
+    case HK_INJECT_EFFECT_CYCLE:
+    case HK_HARDCUT_MODE_CYCLE:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+    case HK_QUALITY_DOWN: {
+        float newQuality = clamp(m_fRenderQuality * 0.5f, 0.01f, 1.0f);
+        if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
+            m_fRenderQuality = newQuality;
+            EnqueueRenderCmd(RenderCmd::ResetBuffers);
+            SendSettingsInfoToMDropDX12Remote();
+        }
         return true;
     }
+    case HK_QUALITY_UP: {
+        float newQuality = clamp(m_fRenderQuality * 2.0f, 0.01f, 1.0f);
+        if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
+            m_fRenderQuality = newQuality;
+            EnqueueRenderCmd(RenderCmd::ResetBuffers);
+            SendSettingsInfoToMDropDX12Remote();
+        }
+        return true;
+    }
+    case HK_SPOUT_TOGGLE:
+        ToggleSpout();
+        return true;
+    case HK_SPOUT_FIXED_SIZE:
+        SetSpoutFixedSize(true, true);
+        return true;
+    case HK_SCREENSHOT:
+        EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
+        return true;
+    case HK_SHADER_LOCK_CYCLE:
+        if (!m_bCompShaderLock && !m_bWarpShaderLock) {
+            m_bCompShaderLock = true; m_bWarpShaderLock = false;
+            AddNotification(L"Comp shader locked");
+        } else if (m_bCompShaderLock && !m_bWarpShaderLock) {
+            m_bCompShaderLock = false; m_bWarpShaderLock = true;
+            AddNotification(L"Warp shader locked");
+        } else if (!m_bCompShaderLock && m_bWarpShaderLock) {
+            m_bCompShaderLock = true; m_bWarpShaderLock = true;
+            AddNotification(L"All shaders locked");
+        } else {
+            m_bCompShaderLock = false; m_bWarpShaderLock = false;
+            AddNotification(L"All shaders unlocked");
+        }
+        return true;
+    case HK_SONG_TITLE:
+        LaunchSongTitleAnim(-1);
+        return true;
+    case HK_KILL_SPRITES:
+        KillAllSprites();
+        return true;
+    case HK_KILL_SUPERTEXTS:
+        KillAllSupertexts();
+        return true;
+    case HK_AUTO_PRESET_CHANGE:
+        m_ChangePresetWithSong = !m_ChangePresetWithSong;
+        AddNotification(m_ChangePresetWithSong
+            ? L"Auto Preset Change enabled" : L"Auto Preset Change disabled");
+        return true;
+    case HK_SCRAMBLE_WARP: {
+        bool bWarpLock = m_bWarpShaderLock;
+        wchar_t szOldPreset[MAX_PATH];
+        lstrcpyW(szOldPreset, m_szCurrentPresetFile);
+        m_bWarpShaderLock = false;
+        LoadRandomPreset(0.0f);
+        if (WaitForPendingLoad(3000)) {
+            m_bWarpShaderLock = true;
+            LoadPreset(szOldPreset, 0.0f);
+            WaitForPendingLoad(3000);
+        }
+        m_bWarpShaderLock = bWarpLock;
+        return true;
+    }
+    case HK_SCRAMBLE_COMP: {
+        bool bCompLock = m_bCompShaderLock;
+        wchar_t szOldPreset[MAX_PATH];
+        lstrcpyW(szOldPreset, m_szCurrentPresetFile);
+        m_bCompShaderLock = false;
+        LoadRandomPreset(0.0f);
+        if (WaitForPendingLoad(3000)) {
+            m_bCompShaderLock = true;
+            LoadPreset(szOldPreset, 0.0f);
+            WaitForPendingLoad(3000);
+        }
+        m_bCompShaderLock = bCompLock;
+        return true;
+    }
+    case HK_QUICKSAVE:
+        SaveCurrentPresetToQuicksave(false);
+        return true;
+    case HK_SCROLL_LOCK:
+        m_bPresetLockedByUser = GetKeyState(VK_SCROLL) & 1;
+        TogglePlaylist();
+        return true;
+    case HK_RELOAD_MESSAGES:
+        ReadCustomMessages();
+        AddNotification(L"Messages reloaded");
+        return true;
+
+    // ── Misc ──
+    case HK_DEBUG_INFO:
+        m_bShowDebugInfo = !m_bShowDebugInfo;
+        return true;
+    case HK_SPRITE_MODE:
+        if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE) {
+            m_nNumericInputMode = NUMERIC_INPUT_MODE_CUST_MSG;
+            SendMessageToMDropDX12Remote(L"STATUS=Message Mode set");
+            PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
+        } else {
+            m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE;
+            SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
+            PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
+        }
+        m_nNumericInputNum = 0;
+        m_nNumericInputDigits = 0;
+        return true;
+
+    // ── Launch ──
     case HK_LAUNCH_APP_1: LaunchOrFocusApp(0); return true;
     case HK_LAUNCH_APP_2: LaunchOrFocusApp(1); return true;
     case HK_LAUNCH_APP_3: LaunchOrFocusApp(2); return true;
     case HK_LAUNCH_APP_4: LaunchOrFocusApp(3); return true;
+
     default:
         return false;
     }
+    #undef clamp
 }
 
 void Engine::LaunchOrFocusApp(int slot)
@@ -272,21 +790,33 @@ std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk)
 
     // Map virtual key to name
     switch (vk) {
-    case VK_RETURN:  result += L"ENTER"; break;
-    case VK_ESCAPE:  result += L"ESC"; break;
-    case VK_SPACE:   result += L"SPACE"; break;
-    case VK_TAB:     result += L"TAB"; break;
-    case VK_BACK:    result += L"BACKSPACE"; break;
-    case VK_DELETE:  result += L"DELETE"; break;
-    case VK_INSERT:  result += L"INSERT"; break;
-    case VK_HOME:    result += L"HOME"; break;
-    case VK_END:     result += L"END"; break;
-    case VK_PRIOR:   result += L"PGUP"; break;
-    case VK_NEXT:    result += L"PGDN"; break;
-    case VK_UP:      result += L"UP"; break;
-    case VK_DOWN:    result += L"DOWN"; break;
-    case VK_LEFT:    result += L"LEFT"; break;
-    case VK_RIGHT:   result += L"RIGHT"; break;
+    case VK_RETURN:     result += L"ENTER"; break;
+    case VK_ESCAPE:     result += L"ESC"; break;
+    case VK_SPACE:      result += L"SPACE"; break;
+    case VK_TAB:        result += L"TAB"; break;
+    case VK_BACK:       result += L"BACKSPACE"; break;
+    case VK_DELETE:     result += L"DELETE"; break;
+    case VK_INSERT:     result += L"INSERT"; break;
+    case VK_HOME:       result += L"HOME"; break;
+    case VK_END:        result += L"END"; break;
+    case VK_PRIOR:      result += L"PGUP"; break;
+    case VK_NEXT:       result += L"PGDN"; break;
+    case VK_UP:         result += L"UP"; break;
+    case VK_DOWN:       result += L"DOWN"; break;
+    case VK_LEFT:       result += L"LEFT"; break;
+    case VK_RIGHT:      result += L"RIGHT"; break;
+    case VK_SCROLL:     result += L"SCROLL LOCK"; break;
+    case VK_OEM_3:      result += L"`"; break;
+    case VK_OEM_4:      result += L"["; break;
+    case VK_OEM_6:      result += L"]"; break;
+    case VK_OEM_COMMA:  result += L","; break;
+    case VK_OEM_PERIOD: result += L"."; break;
+    case VK_OEM_MINUS:  result += L"-"; break;
+    case VK_OEM_PLUS:   result += L"="; break;
+    case VK_OEM_1:      result += L";"; break;
+    case VK_OEM_2:      result += L"/"; break;
+    case VK_OEM_5:      result += L"\\"; break;
+    case VK_OEM_7:      result += L"'"; break;
     default:
         if (vk >= VK_F1 && vk <= VK_F24) {
             wchar_t fbuf[8];
@@ -304,6 +834,78 @@ std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk)
         break;
     }
     return result;
+}
+
+// ── Dynamic F1 Help Text ──
+
+void Engine::GenerateHelpText()
+{
+    // Build two help pages from the binding table.
+    // Page 1: grouped by category with current bindings.
+    // Page 2: remaining categories + fixed keys section.
+
+    wchar_t* p1 = m_szHelpPage1;
+    wchar_t* p2 = m_szHelpPage2;
+    int rem1 = _countof(m_szHelpPage1) - 1;
+    int rem2 = _countof(m_szHelpPage2) - 1;
+    bool usePage2 = false;
+
+    auto appendLine = [&](const wchar_t* line) {
+        int len = (int)wcslen(line);
+        if (!usePage2) {
+            if (rem1 > len + 2) {
+                wcscpy(p1, line);
+                p1 += len;
+                *p1++ = L'\n'; rem1 -= len + 1;
+            } else {
+                usePage2 = true;
+            }
+        }
+        if (usePage2 && rem2 > len + 2) {
+            wcscpy(p2, line);
+            p2 += len;
+            *p2++ = L'\n'; rem2 -= len + 1;
+        }
+    };
+
+    appendLine(L"MDropDX12 Keyboard Shortcuts (F1 to cycle pages, ESC to close)");
+    appendLine(L"");
+
+    // Iterate categories
+    for (int cat = 0; cat < HKCAT_COUNT; cat++) {
+        // Category header
+        wchar_t header[128];
+        swprintf(header, 128, L"\x2500\x2500\x2500 %s \x2500\x2500\x2500", kCategoryNames[cat]);
+        appendLine(header);
+
+        // List bindings in this category
+        for (int i = 0; i < NUM_HOTKEYS; i++) {
+            if ((int)m_hotkeys[i].category != cat) continue;
+            std::wstring key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+            wchar_t line[160];
+            swprintf(line, 160, L"  %-20s %s", key.c_str(), m_hotkeys[i].szAction);
+            appendLine(line);
+        }
+        appendLine(L"");
+
+        // Switch to page 2 after about 3500 chars used on page 1
+        if (!usePage2 && (_countof(m_szHelpPage1) - 1 - rem1) > 3500)
+            usePage2 = true;
+    }
+
+    // Fixed keys section on page 2
+    usePage2 = true;
+    appendLine(L"\x2500\x2500\x2500 Fixed Keys (not reassignable) \x2500\x2500\x2500");
+    appendLine(L"  F1                   Toggle Help Overlay");
+    appendLine(L"  F2                   (reserved)");
+    appendLine(L"  CTRL+F2              Kill Switch \x2014 disable all outputs");
+    appendLine(L"  ESC                  Close menu / Close app");
+    appendLine(L"  0-9                  Numeric input (sprites/messages)");
+    appendLine(L"");
+    appendLine(L"Reassign keys in the Hotkeys window (CTRL+F7)");
+
+    *p1 = L'\0';
+    *p2 = L'\0';
 }
 
 } // namespace mdrop

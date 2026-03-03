@@ -304,9 +304,11 @@ LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,
 // Themed ListView factory
 //----------------------------------------------------------------------
 
-HWND ToolWindow::CreateThemedListView(int id, int x, int y, int w, int h, bool visible)
+HWND ToolWindow::CreateThemedListView(int id, int x, int y, int w, int h,
+                                      bool visible, bool sortable)
 {
-  DWORD style = WS_CHILD | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER;
+  DWORD style = WS_CHILD | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
+  if (!sortable) style |= LVS_NOSORTHEADER;
   if (visible) style |= WS_VISIBLE | WS_TABSTOP;
 
   HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,

@@ -136,7 +136,9 @@ public:
   HFONT GetFontBold() const { return m_hFontBold; }
 
   // Create a report-mode ListView with standard styles. Does NOT call TrackControl().
-  HWND CreateThemedListView(int id, int x, int y, int w, int h, bool visible = true);
+  // When sortable=true, column headers are clickable (omits LVS_NOSORTHEADER).
+  HWND CreateThemedListView(int id, int x, int y, int w, int h,
+                            bool visible = true, bool sortable = false);
 
   // Common control setup: creates fonts, font +/- buttons, pin button with tooltip.
   // Returns the Y position below the header row for subclasses to continue from.
@@ -258,8 +260,8 @@ protected:
   int GetPinControlID() const override       { return IDC_MW_HOTKEYS_PIN; }
   int GetFontPlusControlID() const override  { return IDC_MW_HOTKEYS_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_MW_HOTKEYS_FONT_MINUS; }
-  int GetMinWidth() const override  { return 480; }
-  int GetMinHeight() const override { return 400; }
+  int GetMinWidth() const override  { return 560; }
+  int GetMinHeight() const override { return 480; }
 
   DWORD GetCommonControlFlags() const override;
   void    DoBuildControls() override;

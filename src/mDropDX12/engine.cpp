@@ -997,12 +997,13 @@ void Engine::MyPreInitialize() {
   // seed the system's random number generator w/the current system time:
   //srand((unsigned)time(NULL));  -don't - let winamp do it
 
-// attempt to load a unicode F1 help message otherwise revert to the ansi version
-  g_szHelp = (wchar_t*)GetTextResource(IDR_TEXT2, 1);
-  if (!g_szHelp) g_szHelp = (wchar_t*)GetTextResource(IDR_TEXT1, 0);
-  else g_szHelp_W = 1;
-  g_szHelp_Page2 = (wchar_t*)GetTextResource(IDR_TEXT2_PAGE2, 1);
-  if (!g_szHelp_Page2) g_szHelp_Page2 = (wchar_t*)GetTextResource(IDR_TEXT1_PAGE2, 0);
+// Generate F1 help text dynamically from the hotkey binding table.
+  // This replaces the old static .bin resource loading so the help
+  // overlay always reflects the user's current key assignments.
+  GenerateHelpText();
+  g_szHelp = m_szHelpPage1;
+  g_szHelp_Page2 = m_szHelpPage2;
+  g_szHelp_W = 1;
 
   // CONFIG PANEL SETTINGS THAT WE'VE ADDED (TAB #2)
   m_bFirstRun = true;

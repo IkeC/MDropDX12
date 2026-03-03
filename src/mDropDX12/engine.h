@@ -423,6 +423,11 @@ public:
   bool LookupLocalHotkey(UINT vk, UINT modifiers);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
 
+  // Dynamic F1 help text (generated from binding table)
+  wchar_t m_szHelpPage1[8192] = {};
+  wchar_t m_szHelpPage2[8192] = {};
+  void GenerateHelpText();
+
   // Launch App hotkey slots (4 configurable paths)
   wchar_t m_szLaunchApp[4][MAX_PATH] = {};
   void LaunchOrFocusApp(int slot);
