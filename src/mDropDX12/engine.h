@@ -47,6 +47,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "state.h"
 #include "dx12helpers.h"  // DX12Texture
 #include "video_capture.h" // VideoCaptureSource (needed for unique_ptr complete type)
+#include "midi_input.h"   // MidiInput, MidiRow (needed for MIDI members)
 #include "tool_window.h"  // DisplaysWindow (needed for unique_ptr complete type)
 #include <vector>
 #include <array>
@@ -421,6 +422,10 @@ public:
   bool DispatchHotkeyAction(int actionId);
   bool LookupLocalHotkey(UINT vk, UINT modifiers);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
+
+  // Launch App hotkey slots (4 configurable paths)
+  wchar_t m_szLaunchApp[4][MAX_PATH] = {};
+  void LaunchOrFocusApp(int slot);
 
   // Idle timer (screensaver mode)
   bool m_bIdleTimerEnabled = false;
@@ -884,6 +889,26 @@ public:
   void ParseControllerJSON(const std::string& jsonText);
   void ShowControllerHelpPopup(HWND hParent);
 
+  // ── MIDI ──
+  bool    m_bMidiEnabled = false;
+  int     m_nMidiDeviceID = -1;        // winmm MIDI input device ID
+  wchar_t m_szMidiDeviceName[256] = {};
+  int     m_nMidiBufferDelay = 30;     // CC debounce delay (ms)
+  std::vector<MidiRow> m_midiRows;     // 50 mapping slots
+  MidiInput m_midiInput;
+
+  void LoadMidiJSON();
+  void SaveMidiJSON();
+  void LoadMidiSettings();
+  void SaveMidiSettings();
+  void ParseMidiJSON(const std::string& json);
+  std::string SerializeMidiJSON() const;
+  void ExecuteMidiButton(const MidiRow& row);
+  void ExecuteMidiKnob(const MidiRow& row, int midiValue);
+  void LoadMidiDefaultActions(std::vector<std::string>& out);
+  void OpenMidiDevice();
+  void CloseMidiDevice();
+
   int               m_nTitleTexSizeX, m_nTitleTexSizeY;
   UINT              m_adapterId;
   MYVERTEX* m_verts;
@@ -1032,6 +1057,11 @@ public:
   std::unique_ptr<HotkeysWindow> m_hotkeysWindow;
   void OpenHotkeysWindow();
   void CloseHotkeysWindow();
+
+  // MIDI window (ToolWindow subclass, own thread)
+  std::unique_ptr<MidiWindow> m_midiWindow;
+  void OpenMidiWindow();
+  void CloseMidiWindow();
 
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);

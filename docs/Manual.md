@@ -50,6 +50,9 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 | F6 | Show/hide preset rating |
 | F7 | Toggle always on top |
 | F8 or CTRL+L | Open Settings window |
+| CTRL+F7 | Open Hotkeys window |
+| CTRL+F8 | Open Displays window |
+| SHIFT+CTRL+F8 | Open Song Info window |
 | F9 | Toggle clickthrough mode |
 | F10 or CTRL+Z | Toggle Spout output |
 | SHIFT+F10 or SHIFT+CTRL+Z | Toggle fixed Spout resolution |
@@ -147,7 +150,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 
 ## Settings Window (F8)
 
-Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with dark theme support. The pin icon in the top-right corner toggles always-on-top for the Settings window (on by default).
+Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with tri-mode theme support (Dark / Light / Follow System). The pin icon in the top-right corner toggles always-on-top for the Settings window (on by default). Settings, Displays, Song Info, and Hotkeys windows are standalone ToolWindows that run on their own threads and remember their positions and active tabs between sessions.
 
 ### General Tab
 
@@ -171,7 +174,8 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Display Seconds**: How long track info remains visible (0.5-60 seconds)
 - **Show Now**: Force-display current track info immediately
 - **Change Preset with Song**: Auto-advance when a new track starts
-- **Show FPS / Always on Top / Borderless / Dark Theme**: Toggle checkboxes
+- **Show FPS / Always on Top / Borderless**: Toggle checkboxes
+- **Theme**: Select Dark, Light, or Follow System. Follow System auto-detects your Windows theme and switches when you change it in Windows Settings > Personalization > Colors
 - **Font +/- buttons**: Adjust HUD overlay font size
 - **Resources button**: Opens the Resource Viewer showing all textures loaded by the current preset with their load status, type, dimensions, and file paths
 
@@ -197,7 +201,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 ### System Tab
 
 - **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
-- **Global Hotkeys**: Configure system-wide hotkeys that work even when MDropDX12 is not the active window. Check **Enable** to activate global hotkeys. Select an action from the list, press a key combination in the capture field, and click **Set** to assign it. Click **Clear** to remove a hotkey. If a hotkey conflicts with another application, a notification appears and the previous binding is kept. Global hotkeys are disabled by default. ALT+S and ALT+ENTER always work as local shortcuts when the visualizer window has focus.
+- **Hotkeys...**: Opens the Hotkeys window (also available via Ctrl+F7). See the Configurable Hotkeys section below.
 - **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
 - **Game Controller**: Map game controller buttons to visualizer commands. Check **Enable** to start polling. Select a controller from the **Device** dropdown, click **Scan** to re-enumerate connected controllers. The **Button Mapping** text editor shows the JSON configuration mapping button numbers to commands. Click **Defaults** for the default DualSense mapping, **Save** to write to `controller.json`, **Load** to read it back. The **?** button shows an Xbox controller button reference. See Game Controller section below for details.
 
@@ -244,6 +248,10 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 ### Displays Tab
 
+The Displays tab is split into two sub-tabs: **Display Outputs** and **Video Input**.
+
+#### Display Outputs Sub-Tab
+
 - **Output List**: Shows all detected monitors and Spout senders with status (OFF / ON / ACTIVE)
 - **Enable**: Toggle the selected output on or off
 - **Fullscreen**: Toggle fullscreen mode for monitor mirrors
@@ -258,9 +266,18 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
-- **Video Input**: Composite a video source as a background or overlay layer on the visualization. Select a source from the **Source** dropdown: **None**, **Spout** (receive from an external Spout sender), **Webcam** (capture from a connected camera via Media Foundation), or **Video File** (play an MP4 or other video file). Choose **Background** or **Overlay** layer, adjust **Opacity**, and optionally enable **Luma Key** with threshold and softness controls for transparency keying. See the Video Input section below for details.
 
-See the Display Outputs section below for details.
+#### Video Input Sub-Tab
+
+- **Source**: Select video input source — **None**, **Spout** (receive from an external Spout sender), **Webcam** (capture from a connected camera via Media Foundation), or **Video File** (play an MP4 or other video file)
+- **Layer**: Choose **Background** or **Overlay** compositing mode
+- **Opacity**: Controls transparency of the video layer (0-100%)
+- **Luma Key**: When enabled, dark areas of the video become transparent. Adjust **Threshold** and **Softness** controls for keying
+- **Webcam Device**: Select a connected camera (with Refresh button)
+- **Video File**: Browse for an MP4 or other video file (with Loop checkbox)
+- **Spout Sender**: Select a Spout sender name (with Refresh button)
+
+See the Display Outputs and Video Input sections below for details.
 
 ### About Tab
 
@@ -807,7 +824,7 @@ The Remote discovers MDropDX12 by matching the window title (configurable in Set
 - `COL_HUE=` / `COL_SATURATION=` / `COL_BRIGHTNESS=` — Color adjustments
 - `CAPTURE` — Screenshot
 
-Not yet handled: `VIDEOINPUT=`, `SPOUTINPUT=`
+Not yet handled: `VIDEOINPUT=`
 
 ## Script System
 
@@ -905,6 +922,50 @@ Use the **Button Mapping** text editor on the System tab to edit mappings direct
 - **Defaults**: Fills the editor with the default DualSense/Xbox mapping
 - **Save**: Writes the editor contents to `controller.json` and reloads the config
 - **Load**: Reads `controller.json` from disk and fills the editor
+
+## Configurable Hotkeys
+
+MDropDX12 supports configurable hotkeys for frequently used actions. Open the Hotkeys window via **Ctrl+F7** or Settings > System > **Hotkeys...** button.
+
+### Hotkeys Window
+
+The Hotkeys window displays a list of configurable bindings with columns for Name, Key, and Scope. Each binding has:
+
+- **Name**: The action the hotkey triggers (e.g., "Displays Window", "Song Info Window", "Hotkeys Window")
+- **Key**: The assigned key combination
+- **Scope**: **Local** (works only when the render window has focus) or **Global** (works system-wide via RegisterHotKey)
+
+### Assigning Hotkeys
+
+1. Select a binding in the list
+2. Click **Set** to enter capture mode
+3. Press the desired key combination (modifiers + key)
+4. The new binding is saved automatically
+
+Click **Clear** to remove the current binding. Click **Reset to Defaults** to restore all original assignments.
+
+### Conflict Detection
+
+If you assign a key combination that is already used by another binding, the conflicting binding is automatically cleared to prevent duplicate registrations.
+
+### Default Bindings
+
+| Action | Default Key | Default Scope |
+|--------|-------------|---------------|
+| Displays Window | Ctrl+F8 | Local |
+| Song Info Window | Shift+Ctrl+F8 | Local |
+| Hotkeys Window | Ctrl+F7 | Local |
+
+### Scope Behavior
+
+- **Local** hotkeys only work when the MDropDX12 render window has focus
+- **Global** hotkeys work system-wide regardless of which application is in the foreground, using the Windows RegisterHotKey API
+
+## Song Info Window
+
+Press **Shift+Ctrl+F8** to open a standalone Song Info window showing the current track information (artist, title, album). This is a ToolWindow that runs on its own thread with independent always-on-top, theme support, and sticky position.
+
+The Song Info window provides the same track info source selector and display options as the General tab in Settings, allowing quick access to track info configuration without opening the full Settings window.
 
 ## GPU Protection
 

@@ -1248,6 +1248,10 @@ void Engine::MyReadConfig() {
   LoadControllerSettings();
   LoadControllerJSON();
 
+  // MIDI input
+  LoadMidiSettings();
+  LoadMidiJSON();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
@@ -1869,6 +1873,8 @@ void Engine::CleanUpMyNonDx9Stuff() {
   CloseDisplaysWindow();
   CloseSongInfoWindow();
   CloseHotkeysWindow();
+  CloseMidiWindow();
+  CloseMidiDevice();
 
   // Join any in-flight preset load thread
   if (m_presetLoadThread.joinable())

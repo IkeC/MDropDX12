@@ -1496,6 +1496,12 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
+    // Open MIDI window
+    if (id == IDC_MW_OPEN_MIDI && code == BN_CLICKED) {
+      p->OpenMidiWindow();
+      return 0;
+    }
+
     // Close button
     if (id == IDC_MW_CLOSE && code == BN_CLICKED) {
       PostMessage(hWnd, WM_CLOSE, 0, 0);
@@ -3058,10 +3064,12 @@ void SettingsWindow::DoBuildControls() {
   }
   y += lineH + gap + 8;
 
-  // Keyboard Shortcuts
+  // Keyboard Shortcuts / MIDI
   {
     int btnW = MulDiv(100, lineH, 26);
-    PAGE_CTRL(3, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - 8, lineH, hFontBold, false));
+    int midiW = MulDiv(80, lineH, 26);
+    PAGE_CTRL(3, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - midiW - 16, lineH, hFontBold, false));
+    PAGE_CTRL(3, CreateBtn(hw, L"MIDI...", IDC_MW_OPEN_MIDI, x + rw - btnW - midiW - 8, y, midiW, lineH, hFont));
     PAGE_CTRL(3, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
   }
   y += lineH + gap + 8;

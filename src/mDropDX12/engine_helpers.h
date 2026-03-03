@@ -374,6 +374,30 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_HOTKEYS_CLEAR      7087  // Clear button
 #define IDC_MW_HOTKEYS_SCOPE      7088  // Checkbox: "Global (system-wide)"
 #define IDC_MW_HOTKEYS_RESET      7089  // Reset to Defaults button
+#define IDC_MW_HOTKEYS_PATH       7110  // Edit: app path for Launch App rows
+#define IDC_MW_HOTKEYS_BROWSE     7111  // Browse button for Launch App rows
+
+// MIDI window controls (7090-7109)
+#define IDC_MW_MIDI_PIN         7090
+#define IDC_MW_MIDI_FONT_PLUS   7091
+#define IDC_MW_MIDI_FONT_MINUS  7092
+#define IDC_MW_MIDI_LIST        7093   // ListView (report mode)
+#define IDC_MW_MIDI_DEVICE      7094   // ComboBox: MIDI device selector
+#define IDC_MW_MIDI_SCAN        7095   // Button: Scan devices
+#define IDC_MW_MIDI_ENABLE      7096   // Checkbox: Enable MIDI
+#define IDC_MW_MIDI_LEARN       7097   // Button: Learn
+#define IDC_MW_MIDI_CLEAR       7098   // Button: Clear selected row
+#define IDC_MW_MIDI_DELETE      7099   // Button: Delete selected row
+#define IDC_MW_MIDI_SAVE        7100   // Button: Save
+#define IDC_MW_MIDI_LOAD        7101   // Button: Load
+#define IDC_MW_MIDI_DEFAULTS    7102   // Button: Defaults
+#define IDC_MW_MIDI_LABEL       7103   // Edit: row label
+#define IDC_MW_MIDI_TYPE        7104   // ComboBox: Button/Knob
+#define IDC_MW_MIDI_ACTION      7105   // ComboBox: action (dropdown for buttons, list for knobs)
+#define IDC_MW_MIDI_INCREMENT   7106   // Edit: increment (knobs only)
+#define IDC_MW_MIDI_BUFFER      7107   // Edit: buffer delay ms
+#define IDC_MW_MIDI_BUFFER_SPIN 7108   // Spin for buffer
+#define IDC_MW_OPEN_MIDI        7109   // Button on General tab
 
 #define DISPLAYS_NUM_PAGES      2
 #define DISPLAYS_PAGE_OUTPUTS   0
@@ -548,6 +572,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_RESET_WINDOW        (WM_APP + 20) // reset to safe windowed mode (Ctrl+F2)
 #define WM_MW_REBUILD_FONTS       (WM_APP + 21) // cross-window font size sync
 #define WM_MW_HOTKEY_ACTION       (WM_APP + 22) // wParam = HotkeyAction ID (dispatch to App.cpp)
+#define WM_MW_MIDI_DATA           (WM_APP + 23) // lParam = packed MIDI bytes from MidiInput callback
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

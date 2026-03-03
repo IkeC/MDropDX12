@@ -79,6 +79,8 @@ void Engine::BroadcastFontSync(HWND hSender) {
     PostMessage(m_songInfoWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
   if (m_hotkeysWindow && m_hotkeysWindow->IsOpen() && m_hotkeysWindow->GetHWND() != hSender)
     PostMessage(m_hotkeysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_midiWindow && m_midiWindow->IsOpen() && m_midiWindow->GetHWND() != hSender)
+    PostMessage(m_midiWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
 }
 
 //----------------------------------------------------------------------

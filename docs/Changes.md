@@ -1,6 +1,32 @@
 # MDropDX12 Changelog
 
-## v1.4 (2026-03-02)
+## v1.4 (2026-03-03)
+
+### ToolWindow System
+
+- Extracted Settings, Displays, Song Info, and Hotkeys windows into standalone ToolWindow subclasses running on their own threads
+- Each ToolWindow has independent always-on-top pin button, font synchronization, dark theme support, and sticky window positions
+- ToolWindows remember their last active tab between sessions
+- Displays tab split into Display Outputs and Video Input sub-tabs
+
+### Configurable Hotkeys
+
+- Added dedicated Hotkeys window (Ctrl+F7) with ListView showing all 6 configurable bindings
+- Hotkey capture control with Set/Clear buttons and per-binding local/global scope toggle
+- Local hotkeys work when the render window has focus; global hotkeys work system-wide via RegisterHotKey
+- Conflict detection automatically clears duplicate bindings when assigning a new hotkey
+- Reset to Defaults button restores original key assignments
+- Default shortcuts: Ctrl+F8 (Displays), Shift+Ctrl+F8 (Song Info), Ctrl+F7 (Hotkeys)
+- Replaces the old Global Hotkeys section on the Settings System tab with a "Hotkeys..." button
+
+### Theme System
+
+- Replaced boolean Dark Theme checkbox with tri-mode Theme selector: Dark, Light, Follow System
+- Follow System mode reads Windows AppsUseLightTheme registry key and auto-switches when the user changes their Windows theme (via WM_SETTINGCHANGE)
+- Light mode uses standard Windows system colors for all ToolWindows
+- Dark mode unchanged (dark green theme matching MilkVision)
+- Theme setting persists to INI; migrates old DarkTheme=0/1 to new ThemeMode format
+- DWM caption, border, and text colors properly reset when switching to Light mode
 
 ### Video Input
 
@@ -23,6 +49,9 @@
 - Fixed video file playback failing for most MP4s (added stream selection, hardware transforms, proper stride handling via IMF2DBuffer)
 - Fixed video input invisible despite successful decode (MFVideoFormat_RGB32 has alpha=0; shader now sets alpha directly from opacity)
 - Fixed overlay radio button not responding (radio group handler swallowed non-log-level radio clicks)
+- Fixed global hotkey focus and Always Show Track Info
+- Fixed Always Show Track Info bypassing Overlay Notifications check
+- Separated track info from error notification bucket so it survives resize/preset changes
 
 ### Input & Control
 
@@ -40,8 +69,10 @@
 ### Code
 
 - New files: video_capture.h, video_capture.cpp (Media Foundation capture with dedicated thread)
+- New files: engine_hotkeys_ui.cpp, engine_songinfo_ui.cpp (ToolWindow subclasses)
 - Linked Media Foundation libraries (mfplat.lib, mfreadwrite.lib, mfuuid.lib, mf.lib)
 - Extracted shared CompositeVideoInput() from Spout-specific CompositeSpoutInput()
+- Extracted DX12 helper functions to reduce duplication across engine files
 
 ## v1.3 (2026-03-02)
 

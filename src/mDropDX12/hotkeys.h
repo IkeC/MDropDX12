@@ -11,6 +11,10 @@ enum HotkeyAction : int {
     HK_OPEN_DISPLAYS,            // default Ctrl+F8
     HK_OPEN_SONGINFO,            // default Shift+Ctrl+F8
     HK_OPEN_HOTKEYS,             // default Ctrl+F7
+    HK_LAUNCH_APP_1,             // Launch/focus external app slot 1
+    HK_LAUNCH_APP_2,             // Launch/focus external app slot 2
+    HK_LAUNCH_APP_3,             // Launch/focus external app slot 3
+    HK_LAUNCH_APP_4,             // Launch/focus external app slot 4
     HK_COUNT
 };
 

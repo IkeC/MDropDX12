@@ -12,6 +12,7 @@
 #include <thread>
 #include <atomic>
 #include "engine_helpers.h"
+#include "midi_input.h"
 
 namespace mdrop {
 
@@ -261,6 +262,56 @@ protected:
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+
+private:
+  HWND m_hPathLabel = NULL;
+  void ShowPathControls(HWND hWnd, int sel);
+};
+
+// ── Concrete subclass: MIDI window ──
+
+class MidiWindow : public ToolWindow {
+public:
+  MidiWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"MIDI"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12MidiWnd"; }
+  const wchar_t* GetINISection() const override  { return L"MidiWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_MIDI_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_MIDI_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_MIDI_FONT_MINUS; }
+  int GetMinWidth() const override  { return 580; }
+  int GetMinHeight() const override { return 550; }
+
+  DWORD   GetCommonControlFlags() const override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+  LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  HWND m_hList = NULL;
+  HWND m_hDeviceCombo = NULL;
+  HWND m_hTypeCombo = NULL;
+  HWND m_hActionCombo = NULL;
+  HWND m_hLabelEdit = NULL;
+  HWND m_hIncrementEdit = NULL;
+  bool m_bLearning = false;
+  int  m_nLearnRow = -1;
+  int  m_nSelectedRow = -1;
+
+  void PopulateListView();
+  void UpdateListViewRow(int idx);
+  void UpdateEditControls(int sel);
+  void SaveEditControls();
+  void PopulateDeviceCombo();
+  void PopulateActionCombo(MidiActionType type);
+  void StartLearn();
+  void StopLearn();
+  void OnMidiData(LPARAM lParam);
+  static const wchar_t* KnobActionName(MidiKnobAction id);
 };
 
 } // namespace mdrop

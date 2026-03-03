@@ -12,7 +12,7 @@ MDropDX12 captures audio from your system's default output device via WASAPI loo
 
 ## Download
 
-Download `MDropDX12-1.3-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
+Download `MDropDX12-1.4-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
 
 ## Installation
 

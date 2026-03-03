@@ -49,17 +49,38 @@ DWORD HotkeysWindow::GetCommonControlFlags() const {
 // Helper: refresh ListView contents from m_hotkeys[]
 //----------------------------------------------------------------------
 
+static bool IsLaunchAppAction(int actionId) {
+  return actionId >= HK_LAUNCH_APP_1 && actionId <= HK_LAUNCH_APP_4;
+}
+static int LaunchAppSlot(int actionId) {
+  return actionId - HK_LAUNCH_APP_1;  // 0-3
+}
+
 static void RefreshHotkeyList(HWND hList, Engine* p)
 {
   if (!hList) return;
   ListView_DeleteAllItems(hList);
 
   for (int i = 0; i < NUM_HOTKEYS; i++) {
+    // For Launch App rows, append configured exe name
+    std::wstring actionName = p->m_hotkeys[i].szAction;
+    if (IsLaunchAppAction(p->m_hotkeys[i].id)) {
+      int slot = LaunchAppSlot(p->m_hotkeys[i].id);
+      if (p->m_szLaunchApp[slot][0] != L'\0') {
+        const wchar_t* exeName = wcsrchr(p->m_szLaunchApp[slot], L'\\');
+        if (!exeName) exeName = wcsrchr(p->m_szLaunchApp[slot], L'/');
+        exeName = exeName ? exeName + 1 : p->m_szLaunchApp[slot];
+        actionName += L" (";
+        actionName += exeName;
+        actionName += L")";
+      }
+    }
+
     LVITEMW lvi = {};
     lvi.mask = LVIF_TEXT;
     lvi.iItem = i;
     lvi.iSubItem = 0;
-    lvi.pszText = (LPWSTR)p->m_hotkeys[i].szAction;
+    lvi.pszText = (LPWSTR)actionName.c_str();
     SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
 
     // Shortcut column
@@ -167,6 +188,18 @@ void HotkeysWindow::DoBuildControls()
   // "Global (system-wide)" checkbox
   TrackControl(CreateCheck(hw, L"Global (system-wide)", IDC_MW_HOTKEYS_SCOPE,
     x, y, rw, lineH, hFont, false));
+  y += lineH + gap;
+
+  // "App path:" label + edit + Browse button (for Launch App rows, initially hidden)
+  m_hPathLabel = CreateLabel(hw, L"App path:", x, y, MulDiv(70, lineH, 26), lineH, hFont, false);
+  TrackControl(m_hPathLabel);
+  int labelW = MulDiv(70, lineH, 26);
+  int browseW = MulDiv(80, lineH, 26);
+  int pathEditW = rw - labelW - browseW - 8;
+  TrackControl(CreateEdit(hw, L"", IDC_MW_HOTKEYS_PATH,
+    x + labelW, y, pathEditW, lineH, hFont, ES_AUTOHSCROLL, false));
+  TrackControl(CreateBtn(hw, L"Browse...", IDC_MW_HOTKEYS_BROWSE,
+    x + labelW + pathEditW + 8, y, browseW, lineH, hFont, false));
   y += lineH + gap + 8;
 
   // "Reset to Defaults" button
@@ -174,12 +207,13 @@ void HotkeysWindow::DoBuildControls()
   TrackControl(CreateBtn(hw, L"Reset to Defaults", IDC_MW_HOTKEYS_RESET,
     x, y, resetW, lineH, hFont));
 
-  // Update scope checkbox to match first selected item
+  // Update scope checkbox and path controls to match first selected item
   if (hList) {
     int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
     if (sel >= 0 && sel < NUM_HOTKEYS) {
       CheckDlgButton(hw, IDC_MW_HOTKEYS_SCOPE,
         m_pEngine->m_hotkeys[sel].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+      ShowPathControls(hw, sel);
     }
   }
 }
@@ -268,6 +302,45 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
     return 0;
   }
 
+  if (id == IDC_MW_HOTKEYS_BROWSE && code == BN_CLICKED) {
+    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+    if (sel >= 0 && sel < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[sel].id)) {
+      int slot = LaunchAppSlot(p->m_hotkeys[sel].id);
+      wchar_t szFile[MAX_PATH] = {};
+      wcsncpy_s(szFile, p->m_szLaunchApp[slot], _TRUNCATE);
+      OPENFILENAMEW ofn = {};
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hWnd;
+      ofn.lpstrFilter = L"Programs (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = szFile;
+      ofn.nMaxFile = MAX_PATH;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      ofn.lpstrTitle = L"Select Application";
+      if (GetOpenFileNameW(&ofn)) {
+        wcsncpy_s(p->m_szLaunchApp[slot], szFile, _TRUNCATE);
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_HOTKEYS_PATH), szFile);
+        SaveAndReRegister(p);
+        RefreshHotkeyList(hList, p);
+        ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      }
+    }
+    return 0;
+  }
+
+  if (id == IDC_MW_HOTKEYS_PATH && code == EN_KILLFOCUS) {
+    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+    if (sel >= 0 && sel < NUM_HOTKEYS && IsLaunchAppAction(p->m_hotkeys[sel].id)) {
+      int slot = LaunchAppSlot(p->m_hotkeys[sel].id);
+      wchar_t szPath[MAX_PATH] = {};
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MW_HOTKEYS_PATH), szPath, MAX_PATH);
+      wcsncpy_s(p->m_szLaunchApp[slot], szPath, _TRUNCATE);
+      SaveAndReRegister(p);
+      RefreshHotkeyList(hList, p);
+      ListView_SetItemState(hList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    }
+    return 0;
+  }
+
   if (id == IDC_MW_HOTKEYS_RESET && code == BN_CLICKED) {
     p->ResetHotkeyDefaults();
     SaveAndReRegister(p);
@@ -279,6 +352,7 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
     HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEYS_EDIT);
     if (hHotkey) SendMessageW(hHotkey, HKM_SETHOTKEY, 0, 0);
 
+    ShowPathControls(hWnd, 0);  // update path visibility for new selection
     p->AddNotification(L"Hotkeys reset to defaults");
     return 0;
   }
@@ -299,11 +373,33 @@ LRESULT HotkeysWindow::DoNotify(HWND hWnd, NMHDR* pnm)
       if (sel >= 0 && sel < NUM_HOTKEYS) {
         CheckDlgButton(hWnd, IDC_MW_HOTKEYS_SCOPE,
           m_pEngine->m_hotkeys[sel].scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+        ShowPathControls(hWnd, sel);
       }
     }
     return 0;
   }
   return -1;
+}
+
+//----------------------------------------------------------------------
+// ShowPathControls — show/hide path edit + browse for Launch App rows
+//----------------------------------------------------------------------
+
+void HotkeysWindow::ShowPathControls(HWND hWnd, int sel)
+{
+  bool show = (sel >= 0 && sel < NUM_HOTKEYS && IsLaunchAppAction(m_pEngine->m_hotkeys[sel].id));
+  int cmd = show ? SW_SHOW : SW_HIDE;
+  if (m_hPathLabel) ShowWindow(m_hPathLabel, cmd);
+  HWND hPath = GetDlgItem(hWnd, IDC_MW_HOTKEYS_PATH);
+  HWND hBrowse = GetDlgItem(hWnd, IDC_MW_HOTKEYS_BROWSE);
+  if (hPath) ShowWindow(hPath, cmd);
+  if (hBrowse) ShowWindow(hBrowse, cmd);
+
+  // Populate path edit with current value
+  if (show && hPath) {
+    int slot = LaunchAppSlot(m_pEngine->m_hotkeys[sel].id);
+    SetWindowTextW(hPath, m_pEngine->m_szLaunchApp[slot]);
+  }
 }
 
 } // namespace mdrop
