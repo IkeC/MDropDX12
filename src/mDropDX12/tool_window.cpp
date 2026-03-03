@@ -230,6 +230,9 @@ void ToolWindow::ApplyDarkTheme() {
       else if (_wcsicmp(szClass, HOTKEY_CLASSW) == 0)
         SetWindowTheme(hChild, bDark ? L"DarkMode_CFD" : NULL, NULL);
       else if (_wcsicmp(szClass, WC_LISTVIEWW) == 0) {
+        // Strip visual styles first so our NM_CUSTOMDRAW header painting takes full control,
+        // then set colors (SetWindowTheme can reset them if called after)
+        SetWindowTheme(hChild, bDark ? L"" : NULL, bDark ? L"" : NULL);
         if (bDark) {
           ListView_SetBkColor(hChild, m_pEngine->m_colSettingsCtrlBg);
           ListView_SetTextBkColor(hChild, m_pEngine->m_colSettingsCtrlBg);
@@ -239,9 +242,6 @@ void ToolWindow::ApplyDarkTheme() {
           ListView_SetTextBkColor(hChild, CLR_DEFAULT);
           ListView_SetTextColor(hChild, CLR_DEFAULT);
         }
-        HWND hHeader = ListView_GetHeader(hChild);
-        if (hHeader) SetWindowTheme(hHeader, bDark ? L"DarkMode_ItemsView" : NULL, NULL);
-        SetWindowTheme(hChild, bDark ? L"DarkMode_Explorer" : NULL, NULL);
       }
       else
         SetWindowTheme(hChild, bDark ? L"DarkMode_Explorer" : NULL, NULL);
@@ -249,6 +249,75 @@ void ToolWindow::ApplyDarkTheme() {
   }
 
   RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+}
+
+//----------------------------------------------------------------------
+// Dark ListView header helper (shared by ToolWindows + Resource Viewer)
+//----------------------------------------------------------------------
+
+LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,
+                                COLORREF colBg, COLORREF colBorder, COLORREF colText,
+                                bool* pHandled)
+{
+  *pHandled = false;
+  HWND hHeader = ListView_GetHeader(hListView);
+  if (!hHeader || pnm->hwndFrom != hHeader) return 0;
+
+  NMCUSTOMDRAW* pcd = (NMCUSTOMDRAW*)lParam;
+  switch (pcd->dwDrawStage) {
+  case CDDS_PREPAINT:
+    *pHandled = true;
+    return CDRF_NOTIFYITEMDRAW;
+  case CDDS_ITEMPREPAINT: {
+    HDC hdc = pcd->hdc;
+    RECT rc = pcd->rc;
+    HBRUSH hBr = CreateSolidBrush(colBg);
+    FillRect(hdc, &rc, hBr);
+    DeleteObject(hBr);
+    HPEN hPen = CreatePen(PS_SOLID, 1, colBorder);
+    HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+    MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+    LineTo(hdc, rc.right - 1, rc.bottom);
+    SelectObject(hdc, hOld);
+    DeleteObject(hPen);
+    wchar_t szText[128] = {};
+    HDITEMW hdi = {};
+    hdi.mask = HDI_TEXT;
+    hdi.pszText = szText;
+    hdi.cchTextMax = 128;
+    Header_GetItem(hHeader, (int)pcd->dwItemSpec, &hdi);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, colText);
+    HFONT hFont = (HFONT)SendMessage(hHeader, WM_GETFONT, 0, 0);
+    HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+    rc.left += 6;
+    DrawTextW(hdc, szText, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    if (hOldFont) SelectObject(hdc, hOldFont);
+    *pHandled = true;
+    return CDRF_SKIPDEFAULT;
+  }
+  }
+  return 0;
+}
+
+//----------------------------------------------------------------------
+// Themed ListView factory
+//----------------------------------------------------------------------
+
+HWND ToolWindow::CreateThemedListView(int id, int x, int y, int w, int h, bool visible)
+{
+  DWORD style = WS_CHILD | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER;
+  if (visible) style |= WS_VISIBLE | WS_TABSTOP;
+
+  HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,
+    style, x, y, w, h, m_hWnd,
+    (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hList) {
+    ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    if (m_hFont)
+      SendMessage(hList, WM_SETFONT, (WPARAM)m_hFont, TRUE);
+  }
+  return hList;
 }
 
 //----------------------------------------------------------------------
@@ -551,6 +620,20 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (tw->m_hTab && pnm->hwndFrom == tw->m_hTab && pnm->code == TCN_SELCHANGE) {
       tw->ShowPage(TabCtrl_GetCurSel(pnm->hwndFrom));
       return 0;
+    }
+    // ListView header dark theme custom draw (centralized for all ToolWindow ListViews)
+    if (p->IsDarkTheme() && pnm->code == NM_CUSTOMDRAW) {
+      HWND hParent = GetParent(pnm->hwndFrom);
+      if (hParent) {
+        wchar_t szClass[32];
+        GetClassNameW(hParent, szClass, 32);
+        if (_wcsicmp(szClass, WC_LISTVIEWW) == 0) {
+          bool handled = false;
+          LRESULT result = PaintDarkListViewHeader(pnm, lParam, hParent,
+            p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText, &handled);
+          if (handled) return result;
+        }
+      }
     }
     LRESULT r = tw->DoNotify(hWnd, pnm);
     if (r != -1) return r;

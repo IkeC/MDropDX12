@@ -3441,11 +3441,8 @@ void SettingsWindow::DoBuildControls() {
   // ListView for sprite entries
   {
     int listH = 8 * lineH;
-    m_hSpriteList = CreateWindowExW(0, WC_LISTVIEWW, L"",
-      WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SPR_LIST,
-      GetModuleHandle(NULL), NULL);
-    ListView_SetExtendedListViewStyle(m_hSpriteList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    m_hSpriteList = CreateThemedListView(IDC_MW_SPR_LIST, x, y, rw, listH, false);
+    PAGE_CTRL(6, m_hSpriteList);
 
     // Create ImageList for thumbnails (32x32)
     m_hSpriteImageList = (void*)ImageList_Create(32, 32, ILC_COLOR32, 100, 10);
@@ -3461,19 +3458,8 @@ void SettingsWindow::DoBuildControls() {
     col.cx = rw - 240; col.pszText = (LPWSTR)L"Path";
     SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
 
-    if (hFont) SendMessage(m_hSpriteList, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-    if (IsDarkTheme()) {
-      SetWindowTheme(m_hSpriteList, L"", L"");
-      ListView_SetBkColor(m_hSpriteList, m_colSettingsCtrlBg);
-      ListView_SetTextBkColor(m_hSpriteList, m_colSettingsCtrlBg);
-      ListView_SetTextColor(m_hSpriteList, m_colSettingsText);
-    }
-
     LoadSpritesFromINI();
     PopulateSpriteListView();
-
-    PAGE_CTRL(6, m_hSpriteList);
   }
   y += 8 * lineH + 4;
 
@@ -3529,7 +3515,6 @@ void SettingsWindow::DoBuildControls() {
     if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
     const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
     for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
-    if (IsDarkTheme()) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
     PAGE_CTRL(6, hBlend);
 
     PAGE_CTRL(6, CreateLabel(hw, L"Layer:", propCol2, y, propComboLblW, lineH, hFont, false));
@@ -3540,7 +3525,6 @@ void SettingsWindow::DoBuildControls() {
     if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
     SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
-    if (IsDarkTheme()) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
     PAGE_CTRL(6, hLayer);
   }
   y += lineH + 2;
@@ -4669,45 +4653,10 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
     NMHDR* pnm = (NMHDR*)lParam;
     // Custom-draw the ListView header (column headers) for dark theme
     if (p && p->IsDarkTheme() && pnm->code == NM_CUSTOMDRAW) {
-      // The header control is a child of the ListView
-      HWND hHeader = ListView_GetHeader(p->m_hResourceList);
-      if (pnm->hwndFrom == hHeader) {
-        NMCUSTOMDRAW* pcd = (NMCUSTOMDRAW*)lParam;
-        switch (pcd->dwDrawStage) {
-        case CDDS_PREPAINT:
-          return CDRF_NOTIFYITEMDRAW;
-        case CDDS_ITEMPREPAINT: {
-          HDC hdc = pcd->hdc;
-          RECT rc = pcd->rc;
-          // Fill header item background
-          HBRUSH hBr = CreateSolidBrush(p->m_colSettingsCtrlBg);
-          FillRect(hdc, &rc, hBr);
-          DeleteObject(hBr);
-          // Draw separator line at right edge
-          HPEN hPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBorder);
-          HPEN hOld = (HPEN)SelectObject(hdc, hPen);
-          MoveToEx(hdc, rc.right - 1, rc.top, NULL);
-          LineTo(hdc, rc.right - 1, rc.bottom);
-          SelectObject(hdc, hOld);
-          DeleteObject(hPen);
-          // Draw header text
-          wchar_t szText[128] = {};
-          HDITEMW hdi = {};
-          hdi.mask = HDI_TEXT;
-          hdi.pszText = szText;
-          hdi.cchTextMax = 128;
-          Header_GetItem(hHeader, (int)pcd->dwItemSpec, &hdi);
-          SetBkMode(hdc, TRANSPARENT);
-          SetTextColor(hdc, p->m_colSettingsText);
-          HFONT hFont = (HFONT)SendMessage(hHeader, WM_GETFONT, 0, 0);
-          HFONT hOldFont = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
-          rc.left += 6; // padding
-          DrawTextW(hdc, szText, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-          if (hOldFont) SelectObject(hdc, hOldFont);
-          return CDRF_SKIPDEFAULT;
-        }
-        }
-      }
+      bool handled = false;
+      LRESULT result = PaintDarkListViewHeader(pnm, lParam, p->m_hResourceList,
+        p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText, &handled);
+      if (handled) return result;
     }
     break;
   }

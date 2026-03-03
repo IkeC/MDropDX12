@@ -130,16 +130,9 @@ void HotkeysWindow::DoBuildControls()
 
   // ListView (report mode, full row select, single select)
   int listH = lineH * (NUM_HOTKEYS + 2);  // enough for all rows + header
-  HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE,
-    WC_LISTVIEWW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-    LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-    x, y, rw, listH, hw,
-    (HMENU)(INT_PTR)IDC_MW_HOTKEYS_LIST, GetModuleHandle(NULL), NULL);
+  HWND hList = CreateThemedListView(IDC_MW_HOTKEYS_LIST, x, y, rw, listH);
+  TrackControl(hList);
   if (hList) {
-    ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-    if (hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-
     // Columns: Action, Shortcut, Scope
     int colAction = MulDiv(rw, 45, 100);
     int colScope = MulDiv(rw, 18, 100);
@@ -160,7 +153,6 @@ void HotkeysWindow::DoBuildControls()
     RefreshHotkeyList(hList, m_pEngine);
     ListView_SetItemState(hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
   }
-  TrackControl(hList);
   y += listH + gap + 4;
 
   // "Press key combo:" label

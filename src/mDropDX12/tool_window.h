@@ -135,6 +135,9 @@ public:
   HFONT GetFont() const { return m_hFont; }
   HFONT GetFontBold() const { return m_hFontBold; }
 
+  // Create a report-mode ListView with standard styles. Does NOT call TrackControl().
+  HWND CreateThemedListView(int id, int x, int y, int w, int h, bool visible = true);
+
   // Common control setup: creates fonts, font +/- buttons, pin button with tooltip.
   // Returns the Y position below the header row for subclasses to continue from.
   // Populates lineH, gap, x, rw, clientW for the caller.
@@ -313,5 +316,11 @@ private:
   void OnMidiData(LPARAM lParam);
   static const wchar_t* KnobActionName(MidiKnobAction id);
 };
+
+// Paint a ListView header in dark theme via NM_CUSTOMDRAW.
+// Returns LRESULT to return from WndProc; sets *pHandled=true if the notification was handled.
+LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,
+                                COLORREF colBg, COLORREF colBorder, COLORREF colText,
+                                bool* pHandled);
 
 } // namespace mdrop

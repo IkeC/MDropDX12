@@ -521,15 +521,9 @@ void MidiWindow::DoBuildControls()
   int listH = rc.bottom - y - lineH * 5 - gap * 6 - 20;  // leave room for edit area
   if (listH < lineH * 5) listH = lineH * 5;
 
-  m_hList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-    LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-    x, y, rw, listH, hw,
-    (HMENU)(INT_PTR)IDC_MW_MIDI_LIST, GetModuleHandle(NULL), NULL);
+  m_hList = CreateThemedListView(IDC_MW_MIDI_LIST, x, y, rw, listH);
+  TrackControl(m_hList);
   if (m_hList) {
-    ListView_SetExtendedListViewStyle(m_hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-    if (hFont) SendMessage(m_hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-
     // Column widths proportional to rw
     int colW[] = {
       MulDiv(rw, 6, 100),   // #
@@ -557,7 +551,6 @@ void MidiWindow::DoBuildControls()
     if (!m_pEngine->m_midiRows.empty())
       ListView_SetItemState(m_hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
   }
-  TrackControl(m_hList);
   y += listH + gap + 2;
 
   // Detail editing area
