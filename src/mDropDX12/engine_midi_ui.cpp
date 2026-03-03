@@ -345,7 +345,7 @@ void MidiWindow::PopulateActionCombo(MidiActionType type)
     const wchar_t* cmds[] = {
       L"NEXT", L"PREV", L"HARDCUT", L"LOCK", L"RAND", L"MASHUP",
       L"FULLSCREEN", L"SETTINGS", L"STRETCH", L"MIRROR", L"RESET",
-      L"CAPTURE", L"SPOUT", L"BLACKOUT", L"PRESETINFO", NULL
+      L"RESETWINDOW", L"CAPTURE", L"SPOUT", L"BLACKOUT", L"PRESETINFO", NULL
     };
     for (int i = 0; cmds[i]; i++)
       SendMessageW(m_hActionCombo, CB_ADDSTRING, 0, (LPARAM)cmds[i]);

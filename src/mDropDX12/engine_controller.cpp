@@ -21,7 +21,7 @@ std::string Engine::GetDefaultControllerJSON()
     return
         "// Button-to-command mapping for game controllers\r\n"
         "// Commands: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP,\r\n"
-        "//           FULLSCREEN, STRETCH, MIRROR, RESET,\r\n"
+        "//           FULLSCREEN, STRETCH, MIRROR, RESETWINDOW,\r\n"
         "//           PRESETINFO, SETTINGS, CAPTURE, SPOUT,\r\n"
         "//           BLACKOUT, SEND=<vk>\r\n"
         "// Any IPC command also works as a value, e.g.:\r\n"
@@ -328,7 +328,7 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
     else if (cmd == "MIRROR") {
         if (hwnd) PostMessage(hwnd, WM_MW_TOGGLE_MIRROR_MODE, 0, 0);
     }
-    else if (cmd == "RESET") {
+    else if (cmd == "RESETWINDOW") {
         if (hwnd) PostMessage(hwnd, WM_MW_RESET_WINDOW, 0, 0);
     }
     else if (cmd == "CAPTURE") {
@@ -568,7 +568,8 @@ static LRESULT CALLBACK ControllerHelpWndProc(HWND hWnd, UINT uMsg, WPARAM wPara
             L"NEXT, PREV, HARDCUT \u2014 Preset navigation",
             L"LOCK, RAND \u2014 Preset lock / random toggle",
             L"MASHUP \u2014 Mashup blend mode",
-            L"FULLSCREEN, STRETCH, MIRROR, RESET \u2014 Window modes",
+            L"FULLSCREEN, STRETCH, MIRROR, RESETWINDOW \u2014 Window modes",
+            L"RESET \u2014 Reset script timer (Milkwave compatible)",
             L"PRESETINFO, SETTINGS \u2014 UI toggles",
             L"CAPTURE, SPOUT, BLACKOUT \u2014 Screenshot / Spout / black mode",
             L"SEND=<vk> \u2014 Send arbitrary virtual keypress",
