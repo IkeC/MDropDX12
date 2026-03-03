@@ -334,11 +334,12 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
 }
 
 void Engine::SyncScriptUI() {
-  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd))
+  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  if (!hw || !IsWindow(hw))
     return;
 
   // Update listbox selection
-  HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_LIST);
+  HWND hList = GetDlgItem(hw, IDC_MW_SCRIPT_LIST);
   if (hList) {
     if (m_script.currentLine >= 0)
       SendMessage(hList, LB_SETCURSEL, m_script.currentLine, 0);
@@ -347,7 +348,7 @@ void Engine::SyncScriptUI() {
   }
 
   // Update line label
-  HWND hLine = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_LINE);
+  HWND hLine = GetDlgItem(hw, IDC_MW_SCRIPT_LINE);
   if (hLine) {
     if (m_script.playing && m_script.currentLine >= 0) {
       wchar_t buf[64];
@@ -363,13 +364,13 @@ void Engine::SyncScriptUI() {
   }
 
   // Update BPM/Beats edit fields
-  HWND hBpm = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_BPM);
+  HWND hBpm = GetDlgItem(hw, IDC_MW_SCRIPT_BPM);
   if (hBpm) {
     wchar_t buf[32];
     swprintf_s(buf, L"%.1f", m_script.bpm);
     SetWindowTextW(hBpm, buf);
   }
-  HWND hBeats = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_BEATS);
+  HWND hBeats = GetDlgItem(hw, IDC_MW_SCRIPT_BEATS);
   if (hBeats) {
     wchar_t buf[32];
     swprintf_s(buf, L"%d", m_script.beats);

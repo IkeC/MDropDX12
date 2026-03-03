@@ -363,6 +363,18 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SONGINFO_FONT_MINUS  7072
 #define IDC_MW_OPEN_SONGINFO        7073  // Button on General tab to open Song Info window
 
+// Hotkeys window controls
+#define IDC_MW_HOTKEYS_PIN        7080
+#define IDC_MW_HOTKEYS_FONT_PLUS  7081
+#define IDC_MW_HOTKEYS_FONT_MINUS 7082
+#define IDC_MW_OPEN_HOTKEYS       7083  // Button on Settings System tab
+#define IDC_MW_HOTKEYS_LIST       7084  // ListView (report mode)
+#define IDC_MW_HOTKEYS_EDIT       7085  // HOTKEY_CLASS control
+#define IDC_MW_HOTKEYS_SET        7086  // Set button
+#define IDC_MW_HOTKEYS_CLEAR      7087  // Clear button
+#define IDC_MW_HOTKEYS_SCOPE      7088  // Checkbox: "Global (system-wide)"
+#define IDC_MW_HOTKEYS_RESET      7089  // Reset to Defaults button
+
 #define DISPLAYS_NUM_PAGES      2
 #define DISPLAYS_PAGE_OUTPUTS   0
 #define DISPLAYS_PAGE_VIDINPUT  1
@@ -535,6 +547,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_TOGGLE_MIRROR_MODE  (WM_APP + 19) // toggle per-output mirror windows
 #define WM_MW_RESET_WINDOW        (WM_APP + 20) // reset to safe windowed mode (Ctrl+F2)
 #define WM_MW_REBUILD_FONTS       (WM_APP + 21) // cross-window font size sync
+#define WM_MW_HOTKEY_ACTION       (WM_APP + 22) // wParam = HotkeyAction ID (dispatch to App.cpp)
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

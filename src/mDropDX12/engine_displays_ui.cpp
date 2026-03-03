@@ -39,52 +39,6 @@ void Engine::CloseDisplaysWindow() {
 }
 
 //----------------------------------------------------------------------
-// Tab subclass proc — paints dark background via WM_ERASEBKGND
-//----------------------------------------------------------------------
-
-static LRESULT CALLBACK DisplaysTabSubclassProc(
-  HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-  UINT_PTR /*subclassId*/, DWORD_PTR refData)
-{
-  switch (msg) {
-  case WM_ERASEBKGND: {
-    Engine* p = (Engine*)refData;
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      RECT rc;
-      GetClientRect(hwnd, &rc);
-      FillRect(hdc, &rc, p->m_hBrSettingsBg);
-      return 1;
-    }
-    break;
-  }
-  case WM_NCDESTROY:
-    RemoveWindowSubclass(hwnd, DisplaysTabSubclassProc, 1);
-    break;
-  }
-  return DefSubclassProc(hwnd, msg, wParam, lParam);
-}
-
-//----------------------------------------------------------------------
-// Show/hide page controls
-//----------------------------------------------------------------------
-
-void DisplaysWindow::ShowPage(int page) {
-  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) {
-    if (i == page) {
-      for (HWND h : m_pageCtrls[i])
-        SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-    } else {
-      for (HWND h : m_pageCtrls[i])
-        ShowWindow(h, SW_HIDE);
-    }
-  }
-  m_nActivePage = page;
-  wchar_t buf[8]; swprintf(buf, 8, L"%d", page);
-  WritePrivateProfileStringW(L"Displays", L"ActiveTab", buf, m_pEngine->GetConfigIniFile());
-}
-
-//----------------------------------------------------------------------
 // Build Controls — creates tab control, then delegates to page builders
 //----------------------------------------------------------------------
 
@@ -92,51 +46,25 @@ void DisplaysWindow::DoBuildControls() {
   HWND hw = m_hWnd;
   if (!hw) return;
 
-  // Reset page tracking
-  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) m_pageCtrls[i].clear();
-  m_hTab = NULL;
-
   // Common: fonts, font +/- buttons, pin button
   auto L = BuildBaseControls();
-  int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, rw = L.rw, clientW = L.clientW;
-  HFONT hFont = m_hFont;
+  int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, clientW = L.clientW;
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
   int clientH = rcWnd.bottom;
 
-  // ── Tab control ──
-  m_hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_OWNERDRAWFIXED,
-    0, y, clientW, clientH - y, hw, (HMENU)(INT_PTR)IDC_MW_DISP_TAB,
-    GetModuleHandle(NULL), NULL);
-  SendMessage(m_hTab, WM_SETFONT, (WPARAM)hFont, TRUE);
-  SetWindowSubclass(m_hTab, DisplaysTabSubclassProc, 1, (DWORD_PTR)m_pEngine);
-  TrackControl(m_hTab);
-
+  // ── Tab control (base handles creation, subclass, dark theme) ──
   const wchar_t* tabNames[] = { L"Display Outputs", L"Video Input" };
-  for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) {
-    TCITEMW ti = {};
-    ti.mask = TCIF_TEXT;
-    ti.pszText = (LPWSTR)tabNames[i];
-    SendMessageW(m_hTab, TCM_INSERTITEMW, i, (LPARAM)&ti);
-  }
-
-  // Compute tab content area
-  RECT rcTab = { 0, y, clientW, clientH };
-  TabCtrl_AdjustRect(m_hTab, FALSE, &rcTab);
+  RECT rcTab = BuildTabControl(IDC_MW_DISP_TAB, tabNames, DISPLAYS_NUM_PAGES,
+                                0, y, clientW, clientH - y);
   int tabTop = rcTab.top + 4;
   int tabRW = rcTab.right - rcTab.left - x;
 
-  // Build both pages (controls created hidden by ShowPage)
+  // Build both pages (controls created hidden by SelectInitialTab)
   BuildOutputsPage(rcTab.left + x, tabTop, tabRW, lineH, gap);
   BuildVideoInputPage(rcTab.left + x, tabTop, tabRW, lineH, gap);
-
-  // Restore last active tab
-  int startTab = GetPrivateProfileIntW(L"Displays", L"ActiveTab", 0, m_pEngine->GetConfigIniFile());
-  if (startTab < 0 || startTab >= DISPLAYS_NUM_PAGES) startTab = 0;
-  TabCtrl_SetCurSel(m_hTab, startTab);
-  ShowPage(startTab);
+  SelectInitialTab();
 
   // Populate display list
   m_pEngine->RefreshDisplaysTab();
@@ -153,7 +81,7 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
   Engine* p = m_pEngine;
 
   // Track in both base (for dark theme + destroy) and page (for show/hide)
-  #define PAGE_TC(page, expr) do { HWND _h = (expr); if (_h) { TrackControl(_h); m_pageCtrls[page].push_back(_h); } } while(0)
+  #define PAGE_TC(page, expr) TrackPageControl(page, (expr))
 
   PAGE_TC(0, CreateLabel(hw, L"Display Outputs", x, y, rw, lineH, hFontBold));
   y += lineH + gap;
@@ -246,7 +174,7 @@ void DisplaysWindow::BuildVideoInputPage(int x, int y, int rw, int lineH, int ga
   HFONT hFontBold = m_hFontBold;
   Engine* p = m_pEngine;
 
-  #define PAGE_TC(page, expr) do { HWND _h = (expr); if (_h) { TrackControl(_h); m_pageCtrls[page].push_back(_h); } } while(0)
+  #define PAGE_TC(page, expr) TrackPageControl(page, (expr))
 
   PAGE_TC(1, CreateLabel(hw, L"Video Input", x, y, rw, lineH, hFontBold));
   y += lineH + gap;
@@ -434,13 +362,6 @@ LRESULT DisplaysWindow::DoHScroll(HWND hWnd, int id, int pos) {
 
 LRESULT DisplaysWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
   Engine* p = m_pEngine;
-
-  // Tab control selection change
-  if (pnm->idFrom == IDC_MW_DISP_TAB && pnm->code == TCN_SELCHANGE) {
-    int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
-    ShowPage(sel);
-    return 0;
-  }
 
   // Opacity spin control
   if (pnm->idFrom == IDC_MW_DISP_OPACITY_SPIN && pnm->code == UDN_DELTAPOS) {

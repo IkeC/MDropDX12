@@ -45,8 +45,9 @@ void Engine::SetFPSCap(int fps) {
   WritePrivateProfileIntW(fps, L"max_fps_fs", ini, L"Settings");
   WritePrivateProfileIntW(fps, L"max_fps_dm", ini, L"Settings");
   WritePrivateProfileIntW(fps, L"max_fps_w", ini, L"Settings");
-  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
-    HWND hCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_FPS_CAP);
+  HWND hSettingsWnd = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  if (hSettingsWnd && IsWindow(hSettingsWnd)) {
+    HWND hCombo = GetDlgItem(hSettingsWnd, IDC_MW_FPS_CAP);
     if (hCombo) {
       const int vals[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
       for (int i = 0; i < 9; i++)
@@ -644,8 +645,10 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
   case WM_SIZE:
     // If render window went fullscreen, move settings window to another monitor
-    if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
-      EnsureSettingsVisible();
+    if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED) {
+      if (m_settingsWindow && m_settingsWindow->IsOpen())
+        m_settingsWindow->EnsureVisible();
+    }
     break; // let base class handle resize too
 
   case WM_MW_IPC_MESSAGE:
@@ -913,17 +916,20 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
   case WM_DROPFILES:
     LoadPresetFilesViaDragAndDrop(wParam);
     // Refresh settings window if open
-    if (m_hSettingsWnd) {
-      SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR), m_szPresetDir);
-      HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_LIST);
-      if (hList) {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (int i = 0; i < m_nPresets; i++) {
-          if (m_presets[i].szFilename.empty()) continue;
-          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+    {
+      HWND hSW = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+      if (hSW) {
+        SetWindowTextW(GetDlgItem(hSW, IDC_MW_PRESET_DIR), m_szPresetDir);
+        HWND hList = GetDlgItem(hSW, IDC_MW_PRESET_LIST);
+        if (hList) {
+          SendMessage(hList, LB_RESETCONTENT, 0, 0);
+          for (int i = 0; i < m_nPresets; i++) {
+            if (m_presets[i].szFilename.empty()) continue;
+            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+          }
+          if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
+            SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
         }
-        if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
-          SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
       }
     }
     return 0;
@@ -969,24 +975,29 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       return 0;
     }
 
+    // Data-driven configurable hotkey lookup (local scope, UI_REGULAR only)
+    if (m_UI_mode == UI_REGULAR) {
+      UINT mods = 0;
+      if (GetKeyState(VK_CONTROL) & 0x8000) mods |= MOD_CONTROL;
+      if (GetKeyState(VK_SHIFT) & 0x8000)   mods |= MOD_SHIFT;
+      if (GetKeyState(VK_MENU) & 0x8000)    mods |= MOD_ALT;
+      if (LookupLocalHotkey((UINT)wParam, mods)) return 0;
+    }
+
     switch (wParam) {
-      //case VK_F9:
-      //m_bShowSongTitle = !m_bShowSongTitle; // we processed (or absorbed) the key
-      //m_bShowSongTime = !m_bShowSongTime;
-      //m_bShowSongLen  = !m_bShowSongLen;
-      //m_bShowPresetInfo = !m_bShowPresetInfo; //I didn't need this.
-      //return 0; // we processed (or absorbed) the key
     case VK_F2:
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
         // Ctrl+F2: kill switch — disable all display outputs + reset open windows
         EnqueueRenderCmd(RenderCmd::DisableAllOutputs);
         AddNotification(L"All display outputs disabled");
-        if (m_hSettingsWnd && IsWindow(m_hSettingsWnd))
-          PostMessage(m_hSettingsWnd, WM_MW_RESET_WINDOW, 0, 0);
+        if (m_settingsWindow && m_settingsWindow->IsOpen())
+          PostMessage(m_settingsWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
         if (m_displaysWindow && m_displaysWindow->IsOpen())
           PostMessage(m_displaysWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
         if (m_songInfoWindow && m_songInfoWindow->IsOpen())
           PostMessage(m_songInfoWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
+        if (m_hotkeysWindow && m_hotkeysWindow->IsOpen())
+          PostMessage(m_hotkeysWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
       }
       return 0;
     case VK_F3:

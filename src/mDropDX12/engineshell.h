@@ -73,6 +73,7 @@ typedef struct {
 } td_soundinfo;                             // ...range is 0 Hz to 22050 Hz, evenly spaced.
 
 class EngineShell {
+  friend class SettingsWindow;   // SettingsWindow methods access protected Engine state
 public:
   // GET METHODS
   // ------------------------------------------------------------

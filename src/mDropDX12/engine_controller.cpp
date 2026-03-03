@@ -616,7 +616,7 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
     if (hExisting) { DestroyWindow(hExisting); }
 
     ControllerHelpData* data = new ControllerHelpData();
-    data->darkTheme = m_bSettingsDarkTheme;
+    data->darkTheme = IsDarkTheme();
     data->fontSize = abs(m_nSettingsFontSize);
     if (data->fontSize < 12) data->fontSize = 16;
 
@@ -650,9 +650,9 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
 
     if (hPopup) {
         // Apply dark mode title bar
-        BOOL bDark = m_bSettingsDarkTheme ? TRUE : FALSE;
+        BOOL bDark = IsDarkTheme() ? TRUE : FALSE;
         DwmSetWindowAttribute(hPopup, 20, &bDark, sizeof(bDark));
-        if (m_bSettingsDarkTheme) {
+        if (IsDarkTheme()) {
             DwmSetWindowAttribute(hPopup, 35, &m_colSettingsBg, sizeof(m_colSettingsBg));
             DwmSetWindowAttribute(hPopup, 34, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
             DwmSetWindowAttribute(hPopup, 36, &m_colSettingsText, sizeof(m_colSettingsText));

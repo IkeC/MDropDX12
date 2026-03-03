@@ -42,8 +42,15 @@ namespace mdrop {
 extern Engine g_engine;
 extern int ToggleFPSNumPressed;
 
-const wchar_t* SETTINGS_WND_CLASS = L"MDropDX12SettingsWnd";
-bool g_bSettingsWndClassRegistered = false;
+// SettingsWindow constructor (ToolWindow subclass)
+SettingsWindow::SettingsWindow(Engine* pEngine) : ToolWindow(pEngine, 620, 850) {}
+
+DWORD SettingsWindow::GetCommonControlFlags() const {
+  return ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS;
+}
+
+void SettingsWindow::OnAlreadyOpen() { EnsureVisible(); }
+void SettingsWindow::OnResize() { LayoutControls(); }
 
 // Format sprite section name: [img00]-[img99] for backward compat, [img100]+ for extended
 static void FormatSpriteSection(wchar_t* buf, int bufSize, int index) {
@@ -383,7 +390,8 @@ void Engine::OpenFolderPickerForPresetDir() {
     }
 
     DebugLogW(L"OpenFolderPicker: about to call Show()...", LOG_VERBOSE);
-    hr = pfd->Show(m_hSettingsWnd ? m_hSettingsWnd : NULL);
+    HWND hOwner = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+    hr = pfd->Show(hOwner);
     {
       wchar_t dbg[128];
       swprintf(dbg, 128, L"OpenFolderPicker: Show returned hr=0x%08X", (unsigned)hr);
@@ -419,34 +427,6 @@ void Engine::OpenFolderPickerForPresetDir() {
   if (SUCCEEDED(hrCom))
     CoUninitialize();
   DebugLogW(L"OpenFolderPicker: done", LOG_VERBOSE);
-}
-
-//----------------------------------------------------------------------
-// Win32 Settings Window
-//----------------------------------------------------------------------
-
-// Tab control subclass: paints dark background via WM_ERASEBKGND
-static LRESULT CALLBACK SettingsTabSubclassProc(
-  HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-  UINT_PTR /*subclassId*/, DWORD_PTR refData)
-{
-  switch (msg) {
-  case WM_ERASEBKGND: {
-    Engine* p = (Engine*)refData;
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      RECT rc;
-      GetClientRect(hwnd, &rc);
-      FillRect(hdc, &rc, p->m_hBrSettingsBg);
-      return 1;
-    }
-    break;
-  }
-  case WM_NCDESTROY:
-    RemoveWindowSubclass(hwnd, SettingsTabSubclassProc, 1);
-    break;
-  }
-  return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 // Try to convert an absolute path to a relative path (relative to content base or milkdrop2 dir).
@@ -533,10 +513,10 @@ static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       Engine* p = data->plugin;
       bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
       if (bIsRadio) {
-        DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerRadio(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
       } else {
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
       }
       return TRUE;
@@ -546,7 +526,7 @@ static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
       return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
@@ -554,7 +534,7 @@ static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -562,7 +542,7 @@ static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+    if (data && data->plugin && data->plugin->IsDarkTheme()) {
       RECT rc; GetClientRect(hWnd, &rc);
       HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
       FillRect((HDC)wParam, &rc, hBr);
@@ -700,7 +680,7 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlg
   const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
   for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
   SendMessageW(hBlend, CB_SETCURSEL, data.nBlendMode, 0);
-  if (plugin->m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
+  if (plugin->IsDarkTheme()) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
   y += lineH + gap;
 
   // Layer
@@ -713,7 +693,7 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlg
   SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
   SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
   SendMessageW(hLayer, CB_SETCURSEL, data.nLayer, 0);
-  if (plugin->m_bSettingsDarkTheme) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
+  if (plugin->IsDarkTheme()) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
   y += lineH + gap;
 
   // Position: X, Y
@@ -822,174 +802,148 @@ static std::wstring MakeRelativeSpritePath(const wchar_t* szAbsPath,
   return szAbsPath;
 }
 
-LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-  // Set GWLP_USERDATA on first message so dark theme painting works during creation
-  if (uMsg == WM_NCCREATE) {
-    CREATESTRUCTW* pcs = (CREATESTRUCTW*)lParam;
-    if (pcs && pcs->lpCreateParams)
-      SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)pcs->lpCreateParams);
-  }
-  Engine* p = (Engine*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+void SettingsWindow::DoDestroy() {
+  KillTimer(m_hWnd, IDT_IPC_MONITOR);
+  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
+  m_pEngine->m_hSpriteList = NULL;
+  m_pEngine->CleanupSettingsThemeBrushes();
+}
 
+void SettingsWindow::RebuildFonts() {
+  if (!m_hWnd) return;
+  // Clean up sprite resources before rebuild (base handles tab save/restore)
+  m_pEngine->m_hSpriteList = NULL;
+  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
+  ToolWindow::RebuildFonts();
+}
+
+LRESULT SettingsWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
+  // Idle timer timeout spin control
+  if (pnm->idFrom == IDC_MW_IDLE_TIMEOUT_SPIN && pnm->code == UDN_DELTAPOS) {
+    NMUPDOWN* pud = (NMUPDOWN*)pnm;
+    int newVal = pud->iPos + pud->iDelta;
+    if (newVal < 1) newVal = 1;
+    if (newVal > 60) newVal = 60;
+    m_pEngine->m_nIdleTimeoutMinutes = newVal;
+    m_pEngine->SaveIdleTimerSettings();
+  }
+  // Sprite ListView selection change
+  if (pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
+    NMLISTVIEW* pnmv = (NMLISTVIEW*)pnm;
+    if ((pnmv->uNewState & LVIS_SELECTED) && !(pnmv->uOldState & LVIS_SELECTED)) {
+      if (m_pEngine->m_nSpriteSelected >= 0)
+        m_pEngine->SaveCurrentSpriteProperties();
+      m_pEngine->m_nSpriteSelected = pnmv->iItem;
+      m_pEngine->UpdateSpriteProperties(pnmv->iItem);
+    }
+  }
+  return 0;
+}
+
+LRESULT SettingsWindow::DoHScroll(HWND hWnd, int id, int pos) {
+  switch (id) {
+  case IDC_MW_OPACITY: {
+    m_pEngine->fOpacity = pos / 100.0f;
+    wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
+    HWND hw = m_pEngine->GetPluginWindow();
+    if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+    break;
+  }
+  case IDC_MW_RENDER_QUALITY: {
+    m_pEngine->m_fRenderQuality = pos / 100.0f;
+    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_fRenderQuality);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
+    HWND hw = m_pEngine->GetPluginWindow();
+    if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+    break;
+  }
+  case IDC_MW_COL_HUE: {
+    m_pEngine->m_ColShiftHue = (pos - 100) / 100.0f;
+    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftHue);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
+    break;
+  }
+  case IDC_MW_COL_SAT: {
+    m_pEngine->m_ColShiftSaturation = (pos - 100) / 100.0f;
+    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftSaturation);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
+    break;
+  }
+  case IDC_MW_COL_BRIGHT: {
+    m_pEngine->m_ColShiftBrightness = (pos - 100) / 100.0f;
+    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftBrightness);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
+    break;
+  }
+  case IDC_MW_COL_GAMMA: {
+    float gamma = pos / 10.0f;
+    m_pEngine->m_pState->m_fGammaAdj = gamma;
+    wchar_t buf[32]; swprintf(buf, 32, L"%.1f", gamma);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
+    break;
+  }
+  default:
+    return -1;
+  }
+  return 0;
+}
+
+LRESULT SettingsWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   switch (uMsg) {
-  case WM_CLOSE:
-    DestroyWindow(hWnd);
-    return 0;
-
-  case WM_DESTROY:
-    KillTimer(hWnd, IDT_IPC_MONITOR);
-    if (p) {
-      // Persist position and size before clearing HWND
-      RECT rc;
-      if (GetWindowRect(hWnd, &rc)) {
-        p->m_nSettingsWndW = rc.right - rc.left;
-        p->m_nSettingsWndH = rc.bottom - rc.top;
-        p->m_nSettingsPosX = rc.left;
-        p->m_nSettingsPosY = rc.top;
-      }
-      p->m_hSettingsWnd = NULL;
-      p->m_hSettingsTab = NULL;
-      for (int i = 0; i < SETTINGS_NUM_PAGES; i++) p->m_settingsPageCtrls[i].clear();
-      if (p->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)p->m_hSpriteImageList); p->m_hSpriteImageList = NULL; }
-      p->m_hSpriteList = NULL;
-      if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
-      if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
-      if (p->m_hSettingsPinFont) { DeleteObject(p->m_hSettingsPinFont); p->m_hSettingsPinFont = NULL; }
-      p->CleanupSettingsThemeBrushes();
-    }
-    PostQuitMessage(0);  // exit the settings thread's message loop
-    return 0;
-
-  case WM_MW_PRESET_CHANGED:
+  case WM_MW_PRESET_CHANGED: {
     // Render thread changed the active preset — sync the Settings listbox
-    if (p) {
+    HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+    if (hList && m_pEngine->m_nCurrentPreset >= 0 && m_pEngine->m_nCurrentPreset < m_pEngine->m_nPresets)
+      SendMessage(hList, LB_SETCURSEL, m_pEngine->m_nCurrentPreset, 0);
+    return 0;
+  }
+  case WM_TIMER:
+    if (wParam == 9999) {
+      KillTimer(hWnd, 9999);
+      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      return 0;
+    }
+    if (wParam == IDT_IPC_MONITOR) {
+      int seq = g_lastIPCMessageSeq.load();
+      if (seq != m_lastSeenIPCSeq) {
+        m_lastSeenIPCSeq = seq;
+        // Only update display if an IPC window is selected in list
+        HWND hList = GetDlgItem(hWnd, IDC_MW_IPC_LIST);
+        int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+        if (sel != LB_ERR) {
+          wchar_t header[64];
+          swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
+          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
+          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
+        }
+      }
+      return 0;
+    }
+    break;
+  case WM_DROPFILES:
+    LoadPresetFilesViaDragAndDrop(wParam);
+    // Refresh settings UI after potential directory change
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), m_pEngine->m_szPresetDir);
+    {
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList && p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
-        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
-    }
-    return 0;
-
-  case WM_MW_REBUILD_FONTS:
-    // Another ToolWindow changed the shared font size — rebuild our fonts
-    if (p) p->RebuildSettingsFonts();
-    return 0;
-
-  case WM_NOTIFY:
-  {
-    NMHDR* pnm = (NMHDR*)lParam;
-    if (pnm->idFrom == IDC_MW_TAB && pnm->code == TCN_SELCHANGE) {
-      int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
-      if (p) p->ShowSettingsPage(sel);
-    }
-    // Idle timer timeout spin control
-    if (p && pnm->idFrom == IDC_MW_IDLE_TIMEOUT_SPIN && pnm->code == UDN_DELTAPOS) {
-      NMUPDOWN* pud = (NMUPDOWN*)lParam;
-      int newVal = pud->iPos + pud->iDelta;
-      if (newVal < 1) newVal = 1;
-      if (newVal > 60) newVal = 60;
-      p->m_nIdleTimeoutMinutes = newVal;
-      p->SaveIdleTimerSettings();
-    }
-    // Sprite ListView selection change
-    if (p && pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
-      NMLISTVIEW* pnmv = (NMLISTVIEW*)lParam;
-      if ((pnmv->uNewState & LVIS_SELECTED) && !(pnmv->uOldState & LVIS_SELECTED)) {
-        if (p->m_nSpriteSelected >= 0)
-          p->SaveCurrentSpriteProperties();
-        p->m_nSpriteSelected = pnmv->iItem;
-        p->UpdateSpriteProperties(pnmv->iItem);
+      if (hList) {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < m_pEngine->m_nPresets; i++) {
+          if (m_pEngine->m_presets[i].szFilename.empty()) continue;
+          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_pEngine->m_presets[i].szFilename.c_str());
+        }
+        if (m_pEngine->m_nCurrentPreset >= 0 && m_pEngine->m_nCurrentPreset < m_pEngine->m_nPresets)
+          SendMessage(hList, LB_SETCURSEL, m_pEngine->m_nCurrentPreset, 0);
       }
     }
     return 0;
   }
+  return -1;
+}
 
-  case WM_SIZE:
-  {
-    if (wParam == SIZE_MINIMIZED) break;
-    if (p) {
-      RECT rc;
-      GetWindowRect(hWnd, &rc);
-      p->m_nSettingsWndW = rc.right - rc.left;
-      p->m_nSettingsWndH = rc.bottom - rc.top;
-      p->LayoutSettingsControls();
-    }
-    return 0;
-  }
-
-  case WM_GETMINMAXINFO:
-  {
-    MINMAXINFO* mmi = (MINMAXINFO*)lParam;
-    mmi->ptMinTrackSize.x = 500;
-    mmi->ptMinTrackSize.y = 450;
-    // Cap max to current monitor's work area to prevent oversized window
-    HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi = { sizeof(mi) };
-    if (GetMonitorInfo(hMon, &mi)) {
-      mmi->ptMaxTrackSize.x = mi.rcWork.right - mi.rcWork.left;
-      mmi->ptMaxTrackSize.y = mi.rcWork.bottom - mi.rcWork.top;
-    }
-    return 0;
-  }
-
-  case WM_HSCROLL:
-  {
-    HWND hTrack = (HWND)lParam;
-    int id = GetDlgCtrlID(hTrack);
-    int pos = (int)SendMessage(hTrack, TBM_GETPOS, 0, 0);
-    if (!p) break;
-
-    switch (id) {
-    case IDC_MW_OPACITY: {
-      p->fOpacity = pos / 100.0f;
-      wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
-      break;
-    }
-    case IDC_MW_RENDER_QUALITY: {
-      p->m_fRenderQuality = pos / 100.0f;
-      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_fRenderQuality);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
-      break;
-    }
-    case IDC_MW_COL_HUE: {
-      p->m_ColShiftHue = (pos - 100) / 100.0f;
-      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftHue);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
-      break;
-    }
-    case IDC_MW_COL_SAT: {
-      p->m_ColShiftSaturation = (pos - 100) / 100.0f;
-      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftSaturation);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
-      break;
-    }
-    case IDC_MW_COL_BRIGHT: {
-      p->m_ColShiftBrightness = (pos - 100) / 100.0f;
-      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftBrightness);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
-      break;
-    }
-    case IDC_MW_COL_GAMMA: {
-      float gamma = pos / 10.0f;
-      p->m_pState->m_fGammaAdj = gamma;
-      wchar_t buf[32]; swprintf(buf, 32, L"%.1f", gamma);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
-      break;
-    }
-    }
-    return 0;
-  }
-
-  case WM_COMMAND:
-  {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
-
-    if (!p) break;
+LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
+  Engine* p = m_pEngine;
 
     // Browse button
     if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
@@ -1054,9 +1008,9 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         if (p->m_presets[sel].szFilename.c_str()[0] == L'*') {
           // Directory entry
           if (wcscmp(p->m_presets[sel].szFilename.c_str(), L"*..") == 0)
-            p->NavigatePresetDirUp(hWnd);
+            NavigatePresetDirUp();
           else
-            p->NavigatePresetDirInto(hWnd, sel);
+            NavigatePresetDirInto(sel);
         } else {
           // Regular preset — load it
           p->m_nCurrentPreset = sel;
@@ -1110,7 +1064,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
     // Directory nav: go up to parent directory
     if (id == IDC_MW_PRESET_UP && code == BN_CLICKED) {
-      p->NavigatePresetDirUp(hWnd);
+      NavigatePresetDirUp();
       return 0;
     }
 
@@ -1118,7 +1072,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (id == IDC_MW_PRESET_INTO && code == BN_CLICKED) {
       HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
       int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
-      p->NavigatePresetDirInto(hWnd, sel);
+      NavigatePresetDirInto(sel);
       return 0;
     }
 
@@ -1227,7 +1181,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     }
 
     if (id == IDC_MW_RESET_ALL && code == BN_CLICKED) {
-      p->ResetToFactory(hWnd);
+      ResetToFactory();
       return 0;
     }
 
@@ -1237,32 +1191,11 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     }
 
     if (id == IDC_MW_USER_RESET && code == BN_CLICKED) {
-      p->ResetToUserDefaults(hWnd);
+      ResetToUserDefaults();
       return 0;
     }
 
-    if (id == IDC_MW_RESET_WINDOW && code == BN_CLICKED) {
-      p->ResetSettingsWindow();
-      return 0;
-    }
-
-    if (id == IDC_MW_FONT_PLUS && code == BN_CLICKED) {
-      if (p->m_nSettingsFontSize > -24) {
-        p->m_nSettingsFontSize -= 2;
-        p->RebuildSettingsFonts();
-        p->BroadcastFontSync(hWnd);
-      }
-      return 0;
-    }
-
-    if (id == IDC_MW_FONT_MINUS && code == BN_CLICKED) {
-      if (p->m_nSettingsFontSize < -12) {
-        p->m_nSettingsFontSize += 2;
-        p->RebuildSettingsFonts();
-        p->BroadcastFontSync(hWnd);
-      }
-      return 0;
-    }
+    // (IDC_MW_RESET_WINDOW, IDC_MW_FONT_PLUS, IDC_MW_FONT_MINUS handled by BaseWndProc)
 
     if (id == IDC_MW_OPEN_DISPLAYS && code == BN_CLICKED) {
       p->OpenDisplaysWindow();
@@ -1410,6 +1343,20 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Theme mode combo box (Dark / Light / Follow System)
+    if (id == IDC_MW_DARK_THEME && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 2) {
+        p->m_nThemeMode = (Engine::ThemeMode)sel;
+        wchar_t buf[8]; swprintf(buf, 8, L"%d", sel);
+        WritePrivateProfileStringW(L"SettingsTheme", L"ThemeMode", buf, p->GetConfigIniFile());
+        p->LoadSettingsThemeFromINI();
+        ApplyDarkTheme();
+        p->BroadcastFontSync(m_hWnd);
+      }
+      return 0;
+    }
+
     // Idle timer action combo box
     if (id == IDC_MW_IDLE_ACTION && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
@@ -1543,68 +1490,9 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
-    // Hotkey Set button
-    if (id == IDC_MW_HOTKEY_SET && code == BN_CLICKED) {
-      HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
-      HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
-      int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-      if (sel < 0 || sel >= HK_COUNT - 1) {
-        p->AddNotification(L"Select a hotkey action from the list first");
-        return 0;
-      }
-      if (!hHotkey) return 0;
-      DWORD hk = (DWORD)SendMessage(hHotkey, HKM_GETHOTKEY, 0, 0);
-      UINT vk = LOBYTE(LOWORD(hk));
-      UINT hkMod = HIBYTE(LOWORD(hk));
-      if (vk == 0) {
-        p->AddNotification(L"Press a key combination in the hotkey field first");
-        return 0;
-      }
-      // Convert HOTKEYF_* to MOD_*
-      UINT mod = 0;
-      if (hkMod & HOTKEYF_ALT)     mod |= MOD_ALT;
-      if (hkMod & HOTKEYF_CONTROL) mod |= MOD_CONTROL;
-      if (hkMod & HOTKEYF_SHIFT)   mod |= MOD_SHIFT;
-      // Save binding and ask render thread to re-register hotkeys
-      p->m_hotkeys[sel].modifiers = mod;
-      p->m_hotkeys[sel].vk = vk;
-      p->SaveHotkeySettings();
-      HWND hRender = p->GetPluginWindow();
-      if (hRender)
-        PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
-      // Refresh list
-      std::wstring entry = p->m_hotkeys[sel].szAction;
-      entry += L": ";
-      entry += p->FormatHotkeyDisplay(mod, vk);
-      SendMessageW(hList, LB_DELETESTRING, sel, 0);
-      SendMessageW(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
-      SendMessageW(hList, LB_SETCURSEL, sel, 0);
-      std::wstring notif = L"Hotkey set: " + p->FormatHotkeyDisplay(mod, vk);
-      p->AddNotification((wchar_t*)notif.c_str());
-      return 0;
-    }
-
-    // Hotkey Clear button
-    if (id == IDC_MW_HOTKEY_CLEAR && code == BN_CLICKED) {
-      HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
-      int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < HK_COUNT - 1) {
-        p->m_hotkeys[sel].vk = 0;
-        p->m_hotkeys[sel].modifiers = 0;
-        p->SaveHotkeySettings();
-        HWND hRender = p->GetPluginWindow();
-        if (hRender)
-          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
-        // Refresh list
-        std::wstring entry = p->m_hotkeys[sel].szAction;
-        entry += L": (none)";
-        SendMessageW(hList, LB_DELETESTRING, sel, 0);
-        SendMessageW(hList, LB_INSERTSTRING, sel, (LPARAM)entry.c_str());
-        SendMessageW(hList, LB_SETCURSEL, sel, 0);
-        // Clear the hotkey edit control
-        HWND hHotkey = GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT);
-        if (hHotkey) SendMessageW(hHotkey, HKM_SETHOTKEY, 0, 0);
-      }
+    // Open Hotkeys window
+    if (id == IDC_MW_OPEN_HOTKEYS && code == BN_CLICKED) {
+      p->OpenHotkeysWindow();
       return 0;
     }
 
@@ -1614,14 +1502,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
-    // Pin button: toggle settings window always-on-top
-    if (id == IDC_MW_SETTINGS_PIN && code == BN_CLICKED) {
-      p->m_bSettingsOnTop = !p->m_bSettingsOnTop;
-      SetWindowPos(hWnd, p->m_bSettingsOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
-        0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      InvalidateRect((HWND)lParam, NULL, TRUE);
-      return 0;
-    }
+    // (IDC_MW_SETTINGS_PIN handled by BaseWndProc)
 
     // Checkbox toggles — save immediately
     // Owner-drawn checkboxes: toggle the "Checked" property on click
@@ -1714,20 +1595,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_AUTO_HUE:
         p->m_AutoHue = bChecked;
         return 0;
-      case IDC_MW_HOTKEY_ENABLE: {
-        p->m_bGlobalHotkeysEnabled = bChecked;
-        // Ask render thread to register/unregister hotkeys
-        HWND hRender = p->GetPluginWindow();
-        if (hRender)
-          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
-        // Enable/disable hotkey config controls
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_SET), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_CLEAR), bChecked);
-        p->SaveHotkeySettings();
-        return 0;
-      }
       case IDC_MW_IDLE_ENABLE: {
         p->m_bIdleTimerEnabled = bChecked;
         if (!bChecked) p->m_bIdleActivated = false;  // Reset activation state
@@ -1767,13 +1634,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->SaveControllerSettings();
         return 0;
       }
-      case IDC_MW_DARK_THEME:
-        p->m_bSettingsDarkTheme = bChecked;
-        WritePrivateProfileStringW(L"SettingsTheme", L"DarkTheme",
-            bChecked ? L"1" : L"0", p->GetConfigIniFile());
-        p->LoadSettingsThemeFromINI();
-        p->ApplySettingsDarkTheme();
-        return 0;
+      // IDC_MW_DARK_THEME handled as CBN_SELCHANGE combo above
       case IDC_MW_MSG_AUTOPLAY:
         p->m_bMsgAutoplay = bChecked;
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), bChecked ? L"Stop" : L"Play");
@@ -2006,7 +1867,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (hw) PostMessage(hw, WM_MW_RESTART_IPC, 0, 0);
       // Give IPC thread a moment to restart, then refresh list
       Sleep(200);
-      p->RefreshIPCList(hWnd);
+      RefreshIPCList();
       return 0;
     }
 
@@ -2613,209 +2474,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       } // end sprite BN_CLICKED switch
     }
 
-    break;
+    return -1;  // not handled
   }
-
-  case WM_TIMER:
-    if (wParam == 9999) {
-      KillTimer(hWnd, 9999);
-      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      return 0;
-    }
-    if (wParam == IDT_IPC_MONITOR && p) {
-      int seq = g_lastIPCMessageSeq.load();
-      if (seq != p->m_lastSeenIPCSeq) {
-        p->m_lastSeenIPCSeq = seq;
-        // Only update display if an IPC window is selected in list
-        HWND hList = GetDlgItem(hWnd, IDC_MW_IPC_LIST);
-        int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-        if (sel != LB_ERR) {
-          wchar_t header[64];
-          swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
-          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
-          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
-        }
-      }
-      return 0;
-    }
-    break;
-
-  // Dark theme color handling for settings window controls
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORLISTBOX:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, p->m_colSettingsText);
-      SetBkColor((HDC)wParam, p->m_colSettingsCtrlBg);
-      return (LRESULT)p->m_hBrSettingsCtrlBg;
-    }
-    break;
-
-  case WM_CTLCOLORSTATIC:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      // Check if the static control is a disabled edit (ES_READONLY sends CTLCOLORSTATIC)
-      HWND hCtrl = (HWND)lParam;
-      wchar_t szClass[32];
-      GetClassNameW(hCtrl, szClass, 32);
-      if (_wcsicmp(szClass, L"Edit") == 0) {
-        SetTextColor(hdc, p->m_colSettingsText);
-        SetBkColor(hdc, p->m_colSettingsCtrlBg);
-        return (LRESULT)p->m_hBrSettingsCtrlBg;
-      }
-      SetTextColor(hdc, p->m_colSettingsText);
-      SetBkColor(hdc, p->m_colSettingsBg);
-      SetBkMode(hdc, TRANSPARENT);
-      return (LRESULT)p->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_CTLCOLORBTN:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, p->m_colSettingsText);
-      SetBkColor((HDC)wParam, p->m_colSettingsBg);
-      return (LRESULT)p->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_CTLCOLORDLG:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      return (LRESULT)p->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_DRAWITEM:
-    if (p) {
-      DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-      if (pDIS && pDIS->CtlType == ODT_TAB) {
-        // Owner-draw tab header items with 3D beveled edges
-        bool bSelected = (pDIS->itemState & ODS_SELECTED) != 0;
-        HDC hdc = pDIS->hDC;
-        RECT rc = pDIS->rcItem;
-        if (p->m_bSettingsDarkTheme) {
-          // Fill tab background
-          COLORREF bg = bSelected ? p->m_colSettingsCtrlBg : p->m_colSettingsBtnFace;
-          HBRUSH hBr = CreateSolidBrush(bg);
-          FillRect(hdc, &rc, hBr);
-          DeleteObject(hBr);
-
-          if (bSelected) {
-            // 3D raised edges on top and sides (no bottom — merges with content)
-            HPEN hiPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnHi);
-            HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
-            HPEN oldPen = (HPEN)SelectObject(hdc, hiPen);
-            // Top highlight
-            MoveToEx(hdc, rc.left, rc.top, NULL);
-            LineTo(hdc, rc.right - 1, rc.top);
-            // Left highlight
-            MoveToEx(hdc, rc.left, rc.top, NULL);
-            LineTo(hdc, rc.left, rc.bottom);
-            // Right shadow
-            SelectObject(hdc, shPen);
-            MoveToEx(hdc, rc.right - 1, rc.top, NULL);
-            LineTo(hdc, rc.right - 1, rc.bottom);
-            SelectObject(hdc, oldPen);
-            DeleteObject(hiPen);
-            DeleteObject(shPen);
-          } else {
-            // Unselected: subtle bottom edge only
-            HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
-            HPEN oldPen = (HPEN)SelectObject(hdc, shPen);
-            MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
-            LineTo(hdc, rc.right, rc.bottom - 1);
-            SelectObject(hdc, oldPen);
-            DeleteObject(shPen);
-          }
-
-          SetBkMode(hdc, TRANSPARENT);
-          SetTextColor(hdc, bSelected ? p->m_colSettingsHighlightText : p->m_colSettingsText);
-        } else {
-          FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
-          SetBkMode(hdc, TRANSPARENT);
-          SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
-        }
-        wchar_t szText[64] = {};
-        TCITEMW tci = {};
-        tci.mask = TCIF_TEXT;
-        tci.pszText = szText;
-        tci.cchTextMax = 64;
-        SendMessageW(pDIS->hwndItem, TCM_GETITEMW, pDIS->itemID, (LPARAM)&tci);
-        DrawTextW(hdc, szText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        return TRUE;
-      }
-      if (pDIS && pDIS->CtlType == ODT_BUTTON) {
-        bool bIsPinBtn = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn");
-        if (bIsPinBtn) {
-          // Draw pin icon — highlighted when pinned, dimmed when unpinned
-          HDC hdc = pDIS->hDC;
-          RECT rc = pDIS->rcItem;
-          bool pressed = (pDIS->itemState & ODS_SELECTED) != 0;
-          bool pinned = p->m_bSettingsOnTop;
-          // Fill background to match tab header
-          COLORREF bg = p->m_bSettingsDarkTheme ? p->m_colSettingsBg : GetSysColor(COLOR_BTNFACE);
-          HBRUSH hBr = CreateSolidBrush(bg);
-          FillRect(hdc, &rc, hBr);
-          DeleteObject(hBr);
-          // Draw the pin glyph
-          SetBkMode(hdc, TRANSPARENT);
-          COLORREF pinCol = pinned
-            ? (p->m_bSettingsDarkTheme ? RGB(100, 180, 255) : RGB(0, 100, 200))
-            : (p->m_bSettingsDarkTheme ? RGB(120, 120, 120) : RGB(160, 160, 160));
-          SetTextColor(hdc, pinCol);
-          HFONT hOld = p->m_hSettingsPinFont ? (HFONT)SelectObject(hdc, p->m_hSettingsPinFont) : NULL;
-          RECT textRc = rc;
-          if (pressed) OffsetRect(&textRc, 1, 1);
-          DrawTextW(hdc, L"\xE718", 1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-          if (hOld) SelectObject(hdc, hOld);
-          return TRUE;
-        }
-        bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
-        bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
-        if (bIsCheckbox) {
-          DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
-            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-        } else if (bIsRadio) {
-          DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
-            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-        } else {
-          DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
-            p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-        }
-        return TRUE;
-      }
-    }
-    break;
-
-  case WM_ERASEBKGND:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      RECT rc;
-      GetClientRect(hWnd, &rc);
-      FillRect(hdc, &rc, p->m_hBrSettingsBg);
-      return 1;
-    }
-    break;
-
-  case WM_DROPFILES:
-    LoadPresetFilesViaDragAndDrop(wParam);
-    // Refresh settings UI after potential directory change
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), p->m_szPresetDir);
-    {
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList) {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (int i = 0; i < p->m_nPresets; i++) {
-          if (p->m_presets[i].szFilename.empty()) continue;
-          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-        }
-        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
-          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
-      }
-    }
-    return 0;
-
-  }
-  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
-}
 
 // Enumerate audio devices into a combo box. Returns the index of the current device, or -1.
 static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice) {
@@ -2892,95 +2552,14 @@ static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice
   return curIdx;
 }
 
+// Thin wrappers so existing callers (engine.cpp, engine_input.cpp) still compile
 void Engine::OpenSettingsWindow() {
-  // If already open, bring to front (and move off fullscreen monitor if needed)
-  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
-    EnsureSettingsVisible();
-    return;
-  }
-  if (m_bSettingsThreadRunning.load()) return;
-
-  // Join any previous thread
-  if (m_settingsThread.joinable())
-    m_settingsThread.join();
-
-  m_settingsThread = std::thread(&Engine::CreateSettingsWindowOnThread, this);
+  if (!m_settingsWindow) m_settingsWindow = std::make_unique<SettingsWindow>(this);
+  m_settingsWindow->Open();
 }
 
-void Engine::CreateSettingsWindowOnThread() {
-  m_bSettingsThreadRunning.store(true);
-  CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-
-  // Register window class (idempotent)
-  WNDCLASSEXW wc = {};
-  wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = SettingsWndProc;
-  wc.hInstance = GetModuleHandle(NULL);
-  wc.lpszClassName = SETTINGS_WND_CLASS;
-  // Use dark background if dark theme enabled; WM_ERASEBKGND handles the rest
-  wc.hbrBackground = m_bSettingsDarkTheme ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_BTNFACE + 1);
-  wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-  wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-  RegisterClassExW(&wc);
-
-  // Init common controls for trackbar and tab support
-  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS };
-  InitCommonControlsEx(&icex);
-
-  // Create theme brushes BEFORE window creation so WM_ERASEBKGND works during CreateWindowEx
-  LoadSettingsThemeFromINI();
-
-  int wndW = m_nSettingsWndW, wndH = m_nSettingsWndH;
-  int posX, posY;
-  if (m_nSettingsPosX >= 0 && m_nSettingsPosY >= 0) {
-    posX = m_nSettingsPosX;
-    posY = m_nSettingsPosY;
-  } else {
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
-    posX = (screenW - wndW) / 2;
-    posY = (screenH - wndH) / 2;
-  }
-
-  DWORD exStyle = WS_EX_TOOLWINDOW;
-  if (m_bSettingsOnTop) exStyle |= WS_EX_TOPMOST;
-
-  m_hSettingsWnd = CreateWindowExW(
-    exStyle,
-    SETTINGS_WND_CLASS, L"MDropDX12 Settings",
-    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
-    posX, posY, wndW, wndH,
-    NULL, NULL, GetModuleHandle(NULL), (LPVOID)this);
-
-  if (!m_hSettingsWnd) {
-    CoUninitialize();
-    m_bSettingsThreadRunning.store(false);
-    return;
-  }
-  DragAcceptFiles(m_hSettingsWnd, TRUE);
-  BuildSettingsControls();
-  ApplySettingsDarkTheme();
-
-  ShowWindow(m_hSettingsWnd, SW_SHOW);
-  UpdateWindow(m_hSettingsWnd);
-
-  // Own message pump on this thread
-  MSG msg;
-  while (GetMessage(&msg, NULL, 0, 0)) {
-    // Escape closes settings window
-    if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
-      PostMessage(m_hSettingsWnd, WM_CLOSE, 0, 0);
-      continue;
-    }
-    if (!IsDialogMessage(m_hSettingsWnd, &msg)) {
-      TranslateMessage(&msg);
-      DispatchMessage(&msg);
-    }
-  }
-
-  m_hSettingsWnd = NULL;
-  CoUninitialize();
-  m_bSettingsThreadRunning.store(false);
+void Engine::CloseSettingsWindow() {
+  if (m_settingsWindow) m_settingsWindow->Close();
 }
 
 void Engine::CleanupSettingsThemeBrushes() {
@@ -2988,121 +2567,77 @@ void Engine::CleanupSettingsThemeBrushes() {
   if (m_hBrSettingsCtrlBg) { DeleteObject(m_hBrSettingsCtrlBg); m_hBrSettingsCtrlBg = NULL; }
 }
 
+bool Engine::IsDarkTheme() const {
+  if (m_nThemeMode == THEME_DARK)  return true;
+  if (m_nThemeMode == THEME_LIGHT) return false;
+  // THEME_SYSTEM: read Windows personalization registry
+  DWORD value = 1;  // default to light if key missing
+  DWORD size = sizeof(value);
+  RegGetValueW(HKEY_CURRENT_USER,
+    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+    L"AppsUseLightTheme", RRF_RT_DWORD, NULL, &value, &size);
+  return value == 0;  // 0 = dark mode
+}
+
 void Engine::LoadSettingsThemeFromINI() {
   // Brushes are (re)created from the current color values
   CleanupSettingsThemeBrushes();
-  if (m_bSettingsDarkTheme) {
+  if (IsDarkTheme()) {
     m_hBrSettingsBg     = CreateSolidBrush(m_colSettingsBg);
     m_hBrSettingsCtrlBg = CreateSolidBrush(m_colSettingsCtrlBg);
   }
 }
 
-void Engine::ApplySettingsDarkTheme() {
-  HWND hw = m_hSettingsWnd;
+// (Engine::ApplySettingsDarkTheme deleted — handled by ToolWindow::ApplyDarkTheme)
+
+void SettingsWindow::DoBuildControls() {
+  HWND hw = m_hWnd;
   if (!hw) return;
 
-  LoadSettingsThemeFromINI();
-
-  BOOL bDark = m_bSettingsDarkTheme ? TRUE : FALSE;
-
-  // Title bar via DWM (works reliably on Win11+)
-  DwmSetWindowAttribute(hw, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
-  if (m_bSettingsDarkTheme) {
-    DwmSetWindowAttribute(hw, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
-    DwmSetWindowAttribute(hw, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
-    DwmSetWindowAttribute(hw, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
-  } else {
-    // Reset to system defaults by removing custom colors
-    COLORREF defNone = 0xFFFFFFFF; // DWMWA_COLOR_DEFAULT
-    DwmSetWindowAttribute(hw, 35, &defNone, sizeof(defNone));
-    DwmSetWindowAttribute(hw, 34, &defNone, sizeof(defNone));
-    DwmSetWindowAttribute(hw, 36, &defNone, sizeof(defNone));
-  }
-
-  // Tab control: strip all visual styles (owner-drawn via TCS_OWNERDRAWFIXED)
-  if (m_hSettingsTab) {
-    SetWindowTheme(m_hSettingsTab, m_bSettingsDarkTheme ? L"" : NULL, m_bSettingsDarkTheme ? L"" : NULL);
-  }
-  // Child controls: use DarkMode_Explorer for native dark scrollbars on listboxes/combos
-  for (int page = 0; page < SETTINGS_NUM_PAGES; page++) {
-    for (HWND hChild : m_settingsPageCtrls[page]) {
-      if (!hChild || !IsWindow(hChild)) continue;
-      SetWindowTheme(hChild, m_bSettingsDarkTheme ? L"DarkMode_Explorer" : NULL, NULL);
-    }
-  }
-
-  // Force full redraw
-  RedrawWindow(hw, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
-}
-
-void Engine::BuildSettingsControls() {
-  HWND hw = m_hSettingsWnd;
-  if (!hw) return;
-
-  // Clear previous page control lists
-  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) m_settingsPageCtrls[i].clear();
-  m_hSpriteList = NULL;
-  if (m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_hSpriteImageList); m_hSpriteImageList = NULL; }
+  m_pEngine->m_hSpriteList = NULL;
+  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
   int clientW = rcWnd.right;
   int clientH = rcWnd.bottom;
 
-  // Create fonts (cached for LayoutSettingsControls)
-  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
-  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  // Create fonts from shared font size (Settings manages its own — doesn't use BuildBaseControls)
+  if (m_hFont) DeleteObject(m_hFont);
+  m_hFont = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
-  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
-  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+  if (m_hFontBold) DeleteObject(m_hFontBold);
+  m_hFontBold = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
-  HFONT hFont = m_hSettingsFont;
-  HFONT hFontBold = m_hSettingsFontBold;
+  HFONT hFont = m_hFont;
+  HFONT hFontBold = m_hFontBold;
 
-  // Create tab control (TCS_OWNERDRAWFIXED lets us paint tab headers in dark theme)
-  m_hSettingsTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_OWNERDRAWFIXED,
-    0, 0, clientW, clientH, hw, (HMENU)(INT_PTR)IDC_MW_TAB,
-    GetModuleHandle(NULL), NULL);
-  SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)hFont, TRUE);
-  SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
-
-  // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
+  // Tab control (base handles creation, subclass, dark theme)
   const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"System", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"About" };
-  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
-    TCITEMW ti = {};
-    ti.mask = TCIF_TEXT;
-    ti.pszText = (LPWSTR)tabNames[i];
-    SendMessageW(m_hSettingsTab, TCM_INSERTITEMW, i, (LPARAM)&ti);
-  }
-
-  // Get the display area below tab headers
-  RECT rcDisplay = { 0, 0, clientW, clientH };
-  TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  RECT rcDisplay = BuildTabControl(IDC_MW_TAB, tabNames, SETTINGS_NUM_PAGES,
+                                    0, 0, clientW, clientH);
   int tabTop = rcDisplay.top;
 
-  // Pin button (always-on-top toggle) — top-right of tab header area
+  // Pin button in the tab header area (right-aligned, sized to match tab header height)
   {
-    if (m_hSettingsPinFont) DeleteObject(m_hSettingsPinFont);
-    m_hSettingsPinFont = CreateFontW(tabTop - 8, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    if (m_hPinFont) DeleteObject(m_hPinFont);
+    int pinSize = tabTop - 2;
+    m_hPinFont = CreateFontW(-pinSize + 4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe MDL2 Assets");
 
-    int pinSize = tabTop - 2;
     int pinX = clientW - pinSize - 2;
-    int pinY = 1;
     HWND hPin = CreateWindowExW(0, L"BUTTON", L"\xE718",
       WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-      pinX, pinY, pinSize, pinSize, hw,
+      pinX, 1, pinSize, pinSize, hw,
       (HMENU)(INT_PTR)IDC_MW_SETTINGS_PIN, GetModuleHandle(NULL), NULL);
     if (hPin) {
-      if (m_hSettingsPinFont) SendMessage(hPin, WM_SETFONT, (WPARAM)m_hSettingsPinFont, TRUE);
+      if (m_hPinFont) SendMessage(hPin, WM_SETFONT, (WPARAM)m_hPinFont, TRUE);
       SetPropW(hPin, L"IsPinBtn", (HANDLE)(intptr_t)1);
-      // Tooltip
       HWND hTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
         WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -3116,9 +2651,10 @@ void Engine::BuildSettingsControls() {
         SendMessageW(hTip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
       }
     }
+    TrackControl(hPin);
   }
 
-  int lineH = GetSettingsLineHeight();
+  int lineH = GetLineHeight();
   int gap = 6, x = 16;
   int lw = MulDiv(160, lineH, 26);
   int rw = clientW - 36;
@@ -3127,8 +2663,84 @@ void Engine::BuildSettingsControls() {
   int y;
 
   // Helper: track control for a page. All controls are children of hw (main window).
-  // Pages 1-3 are created hidden; ShowSettingsPage(0) is called at the end.
-  #define PAGE_CTRL(page, expr) do { HWND _h = (expr); if (_h) m_settingsPageCtrls[page].push_back(_h); } while(0)
+  // Pages 1-3 are created hidden; ShowPage(0) is called at the end.
+  #define PAGE_CTRL(page, expr) TrackPageControl(page, (expr))
+
+  // Convenience alias so existing code that accessed Engine members directly still compiles
+  Engine* const _e = m_pEngine;
+  // Macro aliases for engine member access (reduces diff noise)
+  #define m_szCurrentPresetFile _e->m_szCurrentPresetFile
+  #define m_szPresetDir _e->m_szPresetDir
+  #define m_nPresets _e->m_nPresets
+  #define m_presets _e->m_presets
+  #define m_nCurrentPreset _e->m_nCurrentPreset
+  #define m_fAudioSensitivity _e->m_fAudioSensitivity
+  #define m_fBlendTimeAuto _e->m_fBlendTimeAuto
+  #define m_fTimeBetweenPresets _e->m_fTimeBetweenPresets
+  #define m_bHardCutsDisabled _e->m_bHardCutsDisabled
+  #define m_bPresetLockOnAtStartup _e->m_bPresetLockOnAtStartup
+  #define m_bSequentialPresetOrder _e->m_bSequentialPresetOrder
+  #define m_nSpriteMessagesMode _e->m_nSpriteMessagesMode
+  #define m_bShowFPS _e->m_bShowFPS
+  #define m_bAlwaysOnTop _e->m_bAlwaysOnTop
+  #define m_WindowBorderless _e->m_WindowBorderless
+  #define IsDarkTheme _e->IsDarkTheme
+  #define m_nThemeMode _e->m_nThemeMode
+  #define m_nPresetFilter _e->m_nPresetFilter
+  #define fOpacity _e->fOpacity
+  #define m_fRenderQuality _e->m_fRenderQuality
+  #define bQualityAuto _e->bQualityAuto
+  #define m_timeFactor _e->m_timeFactor
+  #define m_frameFactor _e->m_frameFactor
+  #define m_fpsFactor _e->m_fpsFactor
+  #define m_VisIntensity _e->m_VisIntensity
+  #define m_VisShift _e->m_VisShift
+  #define m_VisVersion _e->m_VisVersion
+  #define m_nMaxShapeInstances _e->m_nMaxShapeInstances
+  #define m_bScaleInstancesByResolution _e->m_bScaleInstancesByResolution
+  #define m_nInstanceScaleBaseWidth _e->m_nInstanceScaleBaseWidth
+  #define m_bSkipHeavyPresets _e->m_bSkipHeavyPresets
+  #define m_nHeavyPresetMaxInstances _e->m_nHeavyPresetMaxInstances
+  #define m_bEnableVSync _e->m_bEnableVSync
+  #define m_max_fps_fs _e->m_max_fps_fs
+  #define m_ColShiftHue _e->m_ColShiftHue
+  #define m_ColShiftSaturation _e->m_ColShiftSaturation
+  #define m_ColShiftBrightness _e->m_ColShiftBrightness
+  #define m_pState _e->m_pState
+  #define m_AutoHue _e->m_AutoHue
+  #define m_AutoHueSeconds _e->m_AutoHueSeconds
+  #define m_szAudioDevice _e->m_szAudioDevice
+  #define m_bIdleTimerEnabled _e->m_bIdleTimerEnabled
+  #define m_nIdleTimeoutMinutes _e->m_nIdleTimeoutMinutes
+  #define m_nIdleAction _e->m_nIdleAction
+  #define m_bIdleAutoRestore _e->m_bIdleAutoRestore
+  #define m_bControllerEnabled _e->m_bControllerEnabled
+  #define m_szControllerJSONText _e->m_szControllerJSONText
+  #define m_szWindowTitle _e->m_szWindowTitle
+  #define m_szRemoteWindowTitle _e->m_szRemoteWindowTitle
+  #define m_szBaseDir _e->m_szBaseDir
+  #define m_LogLevel _e->m_LogLevel
+  #define m_szContentBasePath _e->m_szContentBasePath
+  #define m_fallbackPaths _e->m_fallbackPaths
+  #define m_szRandomTexDir _e->m_szRandomTexDir
+  #define m_nFallbackTexStyle _e->m_nFallbackTexStyle
+  #define m_szFallbackTexFile _e->m_szFallbackTexFile
+  #define m_bMsgAutoplay _e->m_bMsgAutoplay
+  #define m_bMsgSequential _e->m_bMsgSequential
+  #define m_bMessageAutoSize _e->m_bMessageAutoSize
+  #define m_fMsgAutoplayInterval _e->m_fMsgAutoplayInterval
+  #define m_fMsgAutoplayJitter _e->m_fMsgAutoplayJitter
+  #define m_hSpriteList _e->m_hSpriteList
+  #define m_hSpriteImageList _e->m_hSpriteImageList
+  #define m_spriteEntries _e->m_spriteEntries
+  #define m_colSettingsCtrlBg _e->m_colSettingsCtrlBg
+  #define m_colSettingsText _e->m_colSettingsText
+  #define m_script _e->m_script
+  #define GetConfigIniFile _e->GetConfigIniFile
+  #define EnumerateControllers _e->EnumerateControllers
+  #define PopulateMsgListBox _e->PopulateMsgListBox
+  #define LoadSpritesFromINI _e->LoadSpritesFromINI
+  #define PopulateSpriteListView _e->PopulateSpriteListView
 
   // ====== PAGE 0: General ======
   y = tabTop + 10;
@@ -3226,7 +2838,20 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Dark Theme",              IDC_MW_DARK_THEME,   x, y, rw, lineH, hFont, m_bSettingsDarkTheme));
+  {
+    int themeLblW = MulDiv(55, lineH, 26);
+    PAGE_CTRL(0, CreateLabel(hw, L"Theme:", x, y, themeLblW, lineH, hFont, false));
+    HWND hThemeCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x + themeLblW + 4, y, rw - themeLblW - 4, 200, hw,
+      (HMENU)(INT_PTR)IDC_MW_DARK_THEME, GetModuleHandle(NULL), NULL);
+    if (hThemeCombo && hFont) SendMessage(hThemeCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Dark");
+    SendMessageW(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Light");
+    SendMessageW(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Follow System");
+    SendMessage(hThemeCombo, CB_SETCURSEL, (WPARAM)m_nThemeMode, 0);
+    PAGE_CTRL(0, hThemeCombo);
+  }
   y += lineH + gap + 4;
   {
     int bx = x, bg = 4;
@@ -3433,57 +3058,11 @@ void Engine::BuildSettingsControls() {
   }
   y += lineH + gap + 8;
 
-  // Global Hotkeys
-  PAGE_CTRL(3, CreateLabel(hw, L"Global Hotkeys", x, y, rw / 2 - 4, lineH, hFontBold, false));
-  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_HOTKEY_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bGlobalHotkeysEnabled));
-  y += lineH + gap;
-
-  // ListBox showing hotkey bindings
+  // Keyboard Shortcuts
   {
-    int listH = lineH * 4;
-    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
-      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_HOTKEY_LIST, GetModuleHandle(NULL), NULL);
-    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    // Populate hotkey list
-    for (int i = 0; i < HK_COUNT - 1; i++) {
-      std::wstring entry = m_hotkeys[i].szAction;
-      entry += L": ";
-      entry += FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
-      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry.c_str());
-    }
-    SendMessage(hList, LB_SETCURSEL, 0, 0);  // Auto-select first item
-    PAGE_CTRL(3, hList);
-    y += listH + gap;
-  }
-
-  // Hotkey capture control + Set/Clear buttons
-  PAGE_CTRL(3, CreateLabel(hw, L"Press new key combo below, then click Set:", x, y, rw, lineH, hFont, false));
-  y += lineH + 2;
-  {
-    int editW = rw - MulDiv(140, lineH, 26);
-    int btnW = MulDiv(60, lineH, 26);
-    int btnGap = 8;
-
-    HWND hHotkey = CreateWindowExW(0, HOTKEY_CLASSW, NULL,
-      WS_CHILD | WS_TABSTOP | WS_BORDER,
-      x, y, editW, lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_HOTKEY_EDIT, GetModuleHandle(NULL), NULL);
-    if (hHotkey && hFont) SendMessage(hHotkey, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(3, hHotkey);
-
-    int bx = x + editW + btnGap;
-    PAGE_CTRL(3, CreateBtn(hw, L"Set", IDC_MW_HOTKEY_SET, bx, y, btnW, lineH, hFont));
-    bx += btnW + btnGap;
-    PAGE_CTRL(3, CreateBtn(hw, L"Clear", IDC_MW_HOTKEY_CLEAR, bx, y, btnW, lineH, hFont));
-
-    // Disable hotkey controls if global hotkeys are not enabled
-    if (!m_bGlobalHotkeysEnabled) {
-      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_LIST), FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_EDIT), FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_SET), FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_CLEAR), FALSE);
-    }
+    int btnW = MulDiv(100, lineH, 26);
+    PAGE_CTRL(3, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - 8, lineH, hFontBold, false));
+    PAGE_CTRL(3, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
   }
   y += lineH + gap + 8;
 
@@ -3822,14 +3401,14 @@ void Engine::BuildSettingsControls() {
   {
     HWND hLbl = CreateLabel(hw, L"Interval (s):", x, y, 90, lineH, hFont, false);
     if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_INTERVAL_LBL);
-    if (hLbl) m_settingsPageCtrls[5].push_back(hLbl);
+    if (hLbl) { m_pageCtrls[5].push_back(hLbl); TrackControl(hLbl); }
   }
   swprintf(buf, 64, L"%.1f", m_fMsgAutoplayInterval);
   PAGE_CTRL(5, CreateEdit(hw, buf, IDC_MW_MSG_INTERVAL, x + 94, y, 60, lineH, hFont, 0));
   {
     HWND hLbl = CreateLabel(hw, L"+/- (s):", x + 170, y, 60, lineH, hFont, false);
     if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_JITTER_LBL);
-    if (hLbl) m_settingsPageCtrls[5].push_back(hLbl);
+    if (hLbl) { m_pageCtrls[5].push_back(hLbl); TrackControl(hLbl); }
   }
   swprintf(buf, 64, L"%.1f", m_fMsgAutoplayJitter);
   PAGE_CTRL(5, CreateEdit(hw, buf, IDC_MW_MSG_JITTER, x + 234, y, 60, lineH, hFont, 0));
@@ -3876,7 +3455,7 @@ void Engine::BuildSettingsControls() {
 
     if (hFont) SendMessage(m_hSpriteList, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-    if (m_bSettingsDarkTheme) {
+    if (IsDarkTheme()) {
       SetWindowTheme(m_hSpriteList, L"", L"");
       ListView_SetBkColor(m_hSpriteList, m_colSettingsCtrlBg);
       ListView_SetTextBkColor(m_hSpriteList, m_colSettingsCtrlBg);
@@ -3942,7 +3521,7 @@ void Engine::BuildSettingsControls() {
     if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
     const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
     for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
-    if (m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
+    if (IsDarkTheme()) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
     PAGE_CTRL(6, hBlend);
 
     PAGE_CTRL(6, CreateLabel(hw, L"Layer:", propCol2, y, propComboLblW, lineH, hFont, false));
@@ -3953,7 +3532,7 @@ void Engine::BuildSettingsControls() {
     if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
     SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
-    if (m_bSettingsDarkTheme) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
+    if (IsDarkTheme()) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
     PAGE_CTRL(6, hLayer);
   }
   y += lineH + 2;
@@ -4233,24 +3812,92 @@ void Engine::BuildSettingsControls() {
   }
 
   // Populate IPC list with current state
-  RefreshIPCList(hw);
+  RefreshIPCList();
 
   // Start IPC message monitor timer (500ms polling)
   SetTimer(hw, IDT_IPC_MONITOR, 500, NULL);
 
   #undef PAGE_CTRL
 
-  // Restore last active tab from INI, or default to page 0
-  {
-    int startTab = GetPrivateProfileIntW(L"Settings", L"ActiveTab", 0, GetConfigIniFile());
-    if (startTab < 0 || startTab >= SETTINGS_NUM_PAGES) startTab = 0;
-    TabCtrl_SetCurSel(m_hSettingsTab, startTab);
-    ShowSettingsPage(startTab);
-  }
+  // Undef all engine-member macros
+  #undef m_szCurrentPresetFile
+  #undef m_szPresetDir
+  #undef m_nPresets
+  #undef m_presets
+  #undef m_nCurrentPreset
+  #undef m_fAudioSensitivity
+  #undef m_fBlendTimeAuto
+  #undef m_fTimeBetweenPresets
+  #undef m_bHardCutsDisabled
+  #undef m_bPresetLockOnAtStartup
+  #undef m_bSequentialPresetOrder
+  #undef m_nSpriteMessagesMode
+  #undef m_bShowFPS
+  #undef m_bAlwaysOnTop
+  #undef m_WindowBorderless
+  #undef IsDarkTheme
+  #undef m_nThemeMode
+  #undef m_nPresetFilter
+  #undef fOpacity
+  #undef m_fRenderQuality
+  #undef bQualityAuto
+  #undef m_timeFactor
+  #undef m_frameFactor
+  #undef m_fpsFactor
+  #undef m_VisIntensity
+  #undef m_VisShift
+  #undef m_VisVersion
+  #undef m_nMaxShapeInstances
+  #undef m_bScaleInstancesByResolution
+  #undef m_nInstanceScaleBaseWidth
+  #undef m_bSkipHeavyPresets
+  #undef m_nHeavyPresetMaxInstances
+  #undef m_bEnableVSync
+  #undef m_max_fps_fs
+  #undef m_ColShiftHue
+  #undef m_ColShiftSaturation
+  #undef m_ColShiftBrightness
+  #undef m_pState
+  #undef m_AutoHue
+  #undef m_AutoHueSeconds
+  #undef m_szAudioDevice
+  #undef m_bIdleTimerEnabled
+  #undef m_nIdleTimeoutMinutes
+  #undef m_nIdleAction
+  #undef m_bIdleAutoRestore
+  #undef m_bControllerEnabled
+  #undef m_szControllerJSONText
+  #undef m_szWindowTitle
+  #undef m_szRemoteWindowTitle
+  #undef m_szBaseDir
+  #undef m_LogLevel
+  #undef m_szContentBasePath
+  #undef m_fallbackPaths
+  #undef m_szRandomTexDir
+  #undef m_nFallbackTexStyle
+  #undef m_szFallbackTexFile
+  #undef m_bMsgAutoplay
+  #undef m_bMsgSequential
+  #undef m_bMessageAutoSize
+  #undef m_fMsgAutoplayInterval
+  #undef m_fMsgAutoplayJitter
+  #undef m_hSpriteList
+  #undef m_hSpriteImageList
+  #undef m_spriteEntries
+  #undef m_colSettingsCtrlBg
+  #undef m_colSettingsText
+  #undef m_script
+  #undef GetConfigIniFile
+  #undef EnumerateControllers
+  #undef PopulateMsgListBox
+  #undef LoadSpritesFromINI
+  #undef PopulateSpriteListView
+
+  SelectInitialTab();
 }
 
-void Engine::RefreshIPCList(HWND hSettingsWnd) {
-  HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_IPC_LIST);
+void SettingsWindow::RefreshIPCList() {
+  HWND hList = GetDlgItem(m_hWnd, IDC_MW_IPC_LIST);
   if (!hList) return;
 
   SendMessage(hList, LB_RESETCONTENT, 0, 0);
@@ -4264,58 +3911,25 @@ void Engine::RefreshIPCList(HWND hSettingsWnd) {
   }
 }
 
-void Engine::ShowSettingsPage(int page) {
-  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
-    if (i == page) {
-      // Show + bring to top z-order so controls above resized siblings receive clicks
-      for (HWND h : m_settingsPageCtrls[i])
-        SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-    } else {
-      for (HWND h : m_settingsPageCtrls[i])
-        ShowWindow(h, SW_HIDE);
-    }
-  }
-  m_nSettingsActivePage = page;
-
-  // Persist active tab to INI
-  wchar_t tabBuf[8]; swprintf(tabBuf, 8, L"%d", page);
-  WritePrivateProfileStringW(L"Settings", L"ActiveTab", tabBuf, GetConfigIniFile());
-
-  // (Displays tab is now a separate window — no dynamic refresh needed here)
-}
-
-int Engine::GetSettingsLineHeight() {
-  if (!m_hSettingsFont || !m_hSettingsWnd) return 26;
-  HDC hdc = GetDC(m_hSettingsWnd);
-  if (!hdc) return 26;
-  HFONT hOld = (HFONT)SelectObject(hdc, m_hSettingsFont);
-  TEXTMETRIC tm = {};
-  GetTextMetrics(hdc, &tm);
-  SelectObject(hdc, hOld);
-  ReleaseDC(m_hSettingsWnd, hdc);
-  int h = tm.tmHeight + tm.tmExternalLeading + 6;
-  return max(h, 20);
-}
-
-void Engine::LayoutSettingsControls() {
-  if (!m_hSettingsWnd || !m_hSettingsTab) return;
+void SettingsWindow::LayoutControls() {
+  if (!m_hWnd || !m_hTab) return;
 
   RECT rc;
-  GetClientRect(m_hSettingsWnd, &rc);
-  MoveWindow(m_hSettingsTab, 0, 0, rc.right, rc.bottom, TRUE);
+  GetClientRect(m_hWnd, &rc);
+  MoveWindow(m_hTab, 0, 0, rc.right, rc.bottom, TRUE);
 
   // Get the content area inside the tab control
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
-  TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  TabCtrl_AdjustRect(m_hTab, FALSE, &rcDisplay);
 
   // Reposition pin button to top-right of tab header area
-  HWND hPin = GetDlgItem(m_hSettingsWnd, IDC_MW_SETTINGS_PIN);
+  HWND hPin = GetDlgItem(m_hWnd, IDC_MW_SETTINGS_PIN);
   if (hPin) {
     int pinSize = rcDisplay.top - 2;
     MoveWindow(hPin, rc.right - pinSize - 2, 1, pinSize, pinSize, TRUE);
   }
 
-  int lineH = GetSettingsLineHeight();
+  int lineH = GetLineHeight();
   int rw = rc.right - 36;  // 16px left + 20px right margin
   int lw = MulDiv(160, lineH, 26);
   int newSliderW = rw - lw - 60;
@@ -4325,48 +3939,48 @@ void Engine::LayoutSettingsControls() {
   // Note: r.left is the edit's x, not the window margin. Button must be positioned
   // relative to the content area (xMargin + rw), not relative to the edit.
   int xMargin = 16;
-  HWND hCur = GetDlgItem(m_hSettingsWnd, IDC_MW_CURRENT_PRESET);
+  HWND hCur = GetDlgItem(m_hWnd, IDC_MW_CURRENT_PRESET);
   if (hCur) {
     RECT r; GetWindowRect(hCur, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hCur, r.left, r.top, xMargin + rw - 70 - r.left, r.bottom - r.top, TRUE);
-    HWND hBrw = GetDlgItem(m_hSettingsWnd, IDC_MW_BROWSE_PRESET);
+    HWND hBrw = GetDlgItem(m_hWnd, IDC_MW_BROWSE_PRESET);
     if (hBrw) MoveWindow(hBrw, xMargin + rw - 65, r.top, 65, r.bottom - r.top, TRUE);
   }
-  HWND hDir = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR);
+  HWND hDir = GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR);
   if (hDir) {
     RECT r; GetWindowRect(hDir, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hDir, r.left, r.top, xMargin + rw - 80 - r.left, r.bottom - r.top, TRUE);
-    HWND hBrw = GetDlgItem(m_hSettingsWnd, IDC_MW_BROWSE_DIR);
+    HWND hBrw = GetDlgItem(m_hWnd, IDC_MW_BROWSE_DIR);
     if (hBrw) MoveWindow(hBrw, xMargin + rw - 75, r.top, 75, r.bottom - r.top, TRUE);
   }
 
   // Stretch preset listbox
-  HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_LIST);
+  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
   if (hList) {
     RECT r; GetWindowRect(hList, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hList, r.left, r.top, rw, r.bottom - r.top, TRUE);
   }
 
   // Stretch audio combo
-  HWND hAudio = GetDlgItem(m_hSettingsWnd, IDC_MW_AUDIO_DEVICE);
+  HWND hAudio = GetDlgItem(m_hWnd, IDC_MW_AUDIO_DEVICE);
   if (hAudio) {
     RECT r; GetWindowRect(hAudio, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hAudio, r.left, r.top, rw, 200, TRUE);
   }
 
   // Stretch controller device combo + reposition Scan button
   {
-    HWND hCtrlCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_DEVICE);
-    HWND hScan = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_SCAN);
+    HWND hCtrlCombo = GetDlgItem(m_hWnd, IDC_MW_CTRL_DEVICE);
+    HWND hScan = GetDlgItem(m_hWnd, IDC_MW_CTRL_SCAN);
     if (hCtrlCombo && hScan) {
       RECT rc; GetWindowRect(hCtrlCombo, &rc);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rc, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&rc, 2);
       RECT rs; GetWindowRect(hScan, &rs);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rs, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&rs, 2);
       int scanW = rs.right - rs.left;
       int rightEdge = rcDisplay.left + 16 + rw;
       int comboW = rightEdge - rc.left - scanW - 4;
@@ -4376,10 +3990,10 @@ void Engine::LayoutSettingsControls() {
   }
 
   // Stretch controller JSON edit
-  HWND hJsonEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_JSON_EDIT);
+  HWND hJsonEdit = GetDlgItem(m_hWnd, IDC_MW_CTRL_JSON_EDIT);
   if (hJsonEdit) {
     RECT r; GetWindowRect(hJsonEdit, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hJsonEdit, r.left, r.top, rw, r.bottom - r.top, TRUE);
   }
 
@@ -4387,21 +4001,21 @@ void Engine::LayoutSettingsControls() {
   int sliderIDs[] = { IDC_MW_OPACITY, IDC_MW_RENDER_QUALITY, IDC_MW_COL_HUE, IDC_MW_COL_SAT, IDC_MW_COL_BRIGHT };
   int labelIDs[] = { IDC_MW_OPACITY_LABEL, IDC_MW_QUALITY_LABEL, IDC_MW_COL_HUE_LABEL, IDC_MW_COL_SAT_LABEL, IDC_MW_COL_BRIGHT_LABEL };
   for (int i = 0; i < 5; i++) {
-    HWND hSlider = GetDlgItem(m_hSettingsWnd, sliderIDs[i]);
-    HWND hLabel = GetDlgItem(m_hSettingsWnd, labelIDs[i]);
+    HWND hSlider = GetDlgItem(m_hWnd, sliderIDs[i]);
+    HWND hLabel = GetDlgItem(m_hWnd, labelIDs[i]);
     if (hSlider) {
       RECT r; GetWindowRect(hSlider, &r);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
       MoveWindow(hSlider, r.left, r.top, newSliderW, r.bottom - r.top, TRUE);
       if (hLabel) MoveWindow(hLabel, r.left + newSliderW + 4, r.top, 50, r.bottom - r.top, TRUE);
     }
   }
 
   // Stretch Files tab ListBox and reposition buttons + description below it
-  HWND hFileList = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_LIST);
+  HWND hFileList = GetDlgItem(m_hWnd, IDC_MW_FILE_LIST);
   if (hFileList) {
     RECT r; GetWindowRect(hFileList, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     int gap = 6;
     // buttons + desc + randtex + fallback tex combo + custom file edit + custom file buttons
     int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH + gap + 4 + lineH + 2 + lineH + 6 + (lineH + 4) + 6 + lineH;
@@ -4410,21 +4024,21 @@ void Engine::LayoutSettingsControls() {
     MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
 
     int btnY = listBottom + 4;
-    HWND hAdd = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_ADD);
-    HWND hRem = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_REMOVE);
+    HWND hAdd = GetDlgItem(m_hWnd, IDC_MW_FILE_ADD);
+    HWND hRem = GetDlgItem(m_hWnd, IDC_MW_FILE_REMOVE);
     int fbw = MulDiv(70, lineH, 26), fbg = 4;
     if (hAdd) MoveWindow(hAdd, r.left, btnY, fbw, lineH, TRUE);
     if (hRem) MoveWindow(hRem, r.left + fbw + fbg, btnY, fbw, lineH, TRUE);
 
-    HWND hDesc = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_DESC);
+    HWND hDesc = GetDlgItem(m_hWnd, IDC_MW_FILE_DESC);
     if (hDesc) MoveWindow(hDesc, r.left, btnY + lineH + gap, rw, lineH * 2, TRUE);
 
     // Random textures directory controls - keep grouped tightly
     int randY = btnY + lineH + gap + lineH * 2 + gap;
-    HWND hRandLabel = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_LABEL);
-    HWND hRandEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_EDIT);
-    HWND hRandBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_BROWSE);
-    HWND hRandClear = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_CLEAR);
+    HWND hRandLabel = GetDlgItem(m_hWnd, IDC_MW_RANDTEX_LABEL);
+    HWND hRandEdit = GetDlgItem(m_hWnd, IDC_MW_RANDTEX_EDIT);
+    HWND hRandBrowse = GetDlgItem(m_hWnd, IDC_MW_RANDTEX_BROWSE);
+    HWND hRandClear = GetDlgItem(m_hWnd, IDC_MW_RANDTEX_CLEAR);
     if (hRandLabel) MoveWindow(hRandLabel, r.left, randY, rw, lineH, TRUE);
     if (hRandEdit) MoveWindow(hRandEdit, r.left, randY + lineH + 2, rw, lineH + 4, TRUE);
     int rbw1 = MulDiv(80, lineH, 26), rbw2 = MulDiv(60, lineH, 26);
@@ -4433,28 +4047,28 @@ void Engine::LayoutSettingsControls() {
 
     // Fallback texture style controls
     int fbTexY = randY + lineH + 2 + lineH + 6 + lineH + gap + 4;
-    HWND hFbLabel = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX_LABEL);
-    HWND hFbCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_TEX);
+    HWND hFbLabel = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_TEX_LABEL);
+    HWND hFbCombo = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_TEX);
     if (hFbLabel) MoveWindow(hFbLabel, r.left, fbTexY, rw, lineH, TRUE);
     int comboW = MulDiv(260, lineH, 26);
     if (hFbCombo) MoveWindow(hFbCombo, r.left, fbTexY + lineH + 2, comboW, lineH + 8 * lineH, TRUE);
 
     // Custom fallback file controls (below combo)
     int cfY = fbTexY + lineH + 2 + lineH + 6;
-    HWND hCfEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_EDIT);
+    HWND hCfEdit = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_FILE_EDIT);
     if (hCfEdit) MoveWindow(hCfEdit, r.left, cfY, rw, lineH + 4, TRUE);
     int cfBtnY = cfY + lineH + 6;
-    HWND hCfBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_BROWSE);
-    HWND hCfClear = GetDlgItem(m_hSettingsWnd, IDC_MW_FALLBACK_FILE_CLEAR);
+    HWND hCfBrowse = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_FILE_BROWSE);
+    HWND hCfClear = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_FILE_CLEAR);
     if (hCfBrowse) MoveWindow(hCfBrowse, r.left, cfBtnY, rbw1, lineH, TRUE);
     if (hCfClear) MoveWindow(hCfClear, r.left + rbw1 + 4, cfBtnY, rbw2, lineH, TRUE);
   }
 
   // Stretch Messages tab ListBox and reposition all controls below it
-  HWND hMsgList = GetDlgItem(m_hSettingsWnd, IDC_MW_MSG_LIST);
+  HWND hMsgList = GetDlgItem(m_hWnd, IDC_MW_MSG_LIST);
   if (hMsgList) {
     RECT r; GetWindowRect(hMsgList, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     int gap = 6;
     // Reserve: gap + buttons + gap + reload + gap+4 + autoplay + 2 + sequential + gap + interval + gap + preview
     int reserveBelow = 4 + (lineH + gap) + (lineH + gap + 4) + (lineH + 2) + (lineH + gap) + (lineH + gap) + lineH * 3;
@@ -4470,7 +4084,7 @@ void Engine::LayoutSettingsControls() {
     int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
     int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
     auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
-      HWND h = GetDlgItem(m_hSettingsWnd, id);
+      HWND h = GetDlgItem(m_hWnd, id);
       if (h) MoveWindow(h, cx, cy, cw, ch, TRUE);
     };
     moveCtrl(IDC_MW_MSG_PUSH, bx, y, pushW, lineH); bx += pushW + btnGap;
@@ -4510,30 +4124,30 @@ void Engine::LayoutSettingsControls() {
   }
 
   // Stretch Sprites tab ListView to fill width
-  if (m_hSpriteList) {
-    RECT r; GetWindowRect(m_hSpriteList, &r);
-    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    MoveWindow(m_hSpriteList, r.left, r.top, rw, r.bottom - r.top, TRUE);
+  if (m_pEngine->m_hSpriteList) {
+    RECT r; GetWindowRect(m_pEngine->m_hSpriteList, &r);
+    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
+    MoveWindow(m_pEngine->m_hSpriteList, r.left, r.top, rw, r.bottom - r.top, TRUE);
     // Resize the Path column to fill remaining width
-    int col0w = (int)SendMessageW(m_hSpriteList, LVM_GETCOLUMNWIDTH, 0, 0);
-    int col1w = (int)SendMessageW(m_hSpriteList, LVM_GETCOLUMNWIDTH, 1, 0);
+    int col0w = (int)SendMessageW(m_pEngine->m_hSpriteList, LVM_GETCOLUMNWIDTH, 0, 0);
+    int col1w = (int)SendMessageW(m_pEngine->m_hSpriteList, LVM_GETCOLUMNWIDTH, 1, 0);
     int col2w = rw - col0w - col1w - 4;
     if (col2w > 50)
-      SendMessageW(m_hSpriteList, LVM_SETCOLUMNWIDTH, 2, col2w);
+      SendMessageW(m_pEngine->m_hSpriteList, LVM_SETCOLUMNWIDTH, 2, col2w);
   }
   // Stretch sprite image path edit to fill width
   {
-    HWND hPath = GetDlgItem(m_hSettingsWnd, IDC_MW_SPR_IMG_PATH);
-    HWND hBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_SPR_IMG_BROWSE);
+    HWND hPath = GetDlgItem(m_hWnd, IDC_MW_SPR_IMG_PATH);
+    HWND hBrowse = GetDlgItem(m_hWnd, IDC_MW_SPR_IMG_BROWSE);
     if (hPath && hBrowse) {
       RECT rp; GetWindowRect(hPath, &rp);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rp, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&rp, 2);
       int browseW = 65;
       int pathW = rw - (rp.left - rcDisplay.left) - browseW - 4;
       if (pathW > 50) {
         MoveWindow(hPath, rp.left, rp.top, pathW, rp.bottom - rp.top, TRUE);
         RECT rb; GetWindowRect(hBrowse, &rb);
-        MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rb, 2);
+        MapWindowPoints(NULL, m_hWnd, (POINT*)&rb, 2);
         MoveWindow(hBrowse, rp.left + pathW + 4, rb.top, browseW, rb.bottom - rb.top, TRUE);
       }
     }
@@ -4541,10 +4155,10 @@ void Engine::LayoutSettingsControls() {
   // Stretch sprite code editors to fill width
   {
     auto stretchEdit = [&](int id) {
-      HWND h = GetDlgItem(m_hSettingsWnd, id);
+      HWND h = GetDlgItem(m_hWnd, id);
       if (!h) return;
       RECT r; GetWindowRect(h, &r);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
       MoveWindow(h, r.left, r.top, rw, r.bottom - r.top, TRUE);
     };
     stretchEdit(IDC_MW_SPR_INIT_CODE);
@@ -4555,10 +4169,10 @@ void Engine::LayoutSettingsControls() {
   {
     int lw = MulDiv(160, lineH, 26);
     auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
-      HWND h = GetDlgItem(m_hSettingsWnd, id);
+      HWND h = GetDlgItem(m_hWnd, id);
       if (!h) return;
       RECT r; GetWindowRect(h, &r);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
       if (cx < 0) cx = r.left;
       if (cy < 0) cy = r.top;
       if (cw < 0) cw = r.right - r.left;
@@ -4572,106 +4186,103 @@ void Engine::LayoutSettingsControls() {
     moveCtrl(IDC_MW_IPC_LIST, rcDisplay.left + 16, -1, rw, -1);
     moveCtrl(IDC_MW_IPC_MSG_GROUP, rcDisplay.left + 16, -1, rw, -1);
     // Stretch message text inside group box
-    HWND hGroup = GetDlgItem(m_hSettingsWnd, IDC_MW_IPC_MSG_GROUP);
+    HWND hGroup = GetDlgItem(m_hWnd, IDC_MW_IPC_MSG_GROUP);
     if (hGroup) {
       RECT rg; GetWindowRect(hGroup, &rg);
-      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rg, 2);
+      MapWindowPoints(NULL, m_hWnd, (POINT*)&rg, 2);
       int pad = 8;
       moveCtrl(IDC_MW_IPC_MSG_TEXT, rg.left + pad, rg.top + lineH + 2,
                rg.right - rg.left - pad * 2, rg.bottom - rg.top - lineH - pad - 2);
     }
   }
 
-  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
-}
-
-void Engine::CloseSettingsWindow() {
-  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
-    PostMessage(m_hSettingsWnd, WM_CLOSE, 0, 0);
-  }
-  if (m_settingsThread.joinable())
-    m_settingsThread.join();
+  InvalidateRect(m_hWnd, NULL, TRUE);
 }
 
 // ====== User Defaults & Fallback Paths ======
 
-void Engine::UpdateVisualUI(HWND hWnd) {
+void SettingsWindow::UpdateVisualUI() {
+  Engine* p = m_pEngine;
+  HWND hWnd = m_hWnd;
   wchar_t buf[32];
-  SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, (int)(fOpacity * 100));
-  swprintf(buf, 32, L"%d%%", (int)(fOpacity * 100));
+  SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, (int)(p->fOpacity * 100));
+  swprintf(buf, 32, L"%d%%", (int)(p->fOpacity * 100));
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, (int)(m_fRenderQuality * 100));
-  swprintf(buf, 32, L"%.2f", m_fRenderQuality);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, (int)(p->m_fRenderQuality * 100));
+  swprintf(buf, 32, L"%.2f", p->m_fRenderQuality);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, bQualityAuto ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%.2f", m_timeFactor);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, p->bQualityAuto ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%.2f", p->m_timeFactor);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", m_frameFactor);
+  swprintf(buf, 32, L"%.2f", p->m_frameFactor);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", m_fpsFactor);
+  swprintf(buf, 32, L"%.2f", p->m_fpsFactor);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FPS_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", m_VisIntensity);
+  swprintf(buf, 32, L"%.2f", p->m_VisIntensity);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), buf);
-  swprintf(buf, 32, L"%.2f", m_VisShift);
+  swprintf(buf, 32, L"%.2f", p->m_VisShift);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), buf);
-  swprintf(buf, 32, L"%.0f", m_VisVersion);
+  swprintf(buf, 32, L"%.0f", p->m_VisVersion);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), buf);
   // GPU Protection controls
-  swprintf(buf, 32, L"%d", m_nMaxShapeInstances);
+  swprintf(buf, 32, L"%d", p->m_nMaxShapeInstances);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, m_bScaleInstancesByResolution ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%d", m_nInstanceScaleBaseWidth);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, p->m_bScaleInstancesByResolution ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", p->m_nInstanceScaleBaseWidth);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%d", m_nHeavyPresetMaxInstances);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, p->m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%d", p->m_nHeavyPresetMaxInstances);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, m_bEnableVSync ? BST_CHECKED : BST_UNCHECKED, 0);
-  HWND hw = GetPluginWindow();
+  SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, p->m_bEnableVSync ? BST_CHECKED : BST_UNCHECKED, 0);
+  HWND hw = p->GetPluginWindow();
   if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
   if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
 }
 
-void Engine::UpdateColorsUI(HWND hWnd) {
+void SettingsWindow::UpdateColorsUI() {
+  Engine* p = m_pEngine;
+  HWND hWnd = m_hWnd;
   wchar_t buf[32];
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, (int)(m_ColShiftHue * 100) + 100);
-  swprintf(buf, 32, L"%.2f", m_ColShiftHue);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, (int)(p->m_ColShiftHue * 100) + 100);
+  swprintf(buf, 32, L"%.2f", p->m_ColShiftHue);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, (int)(m_ColShiftSaturation * 100) + 100);
-  swprintf(buf, 32, L"%.2f", m_ColShiftSaturation);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, (int)(p->m_ColShiftSaturation * 100) + 100);
+  swprintf(buf, 32, L"%.2f", p->m_ColShiftSaturation);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, (int)(m_ColShiftBrightness * 100) + 100);
-  swprintf(buf, 32, L"%.2f", m_ColShiftBrightness);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, (int)(p->m_ColShiftBrightness * 100) + 100);
+  swprintf(buf, 32, L"%.2f", p->m_ColShiftBrightness);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
-  float gamma = m_pState ? m_pState->m_fGammaAdj.eval(-1) : 2.0f;
+  float gamma = p->m_pState ? p->m_pState->m_fGammaAdj.eval(-1) : 2.0f;
   SendMessage(GetDlgItem(hWnd, IDC_MW_COL_GAMMA), TBM_SETPOS, TRUE, (int)(gamma * 10));
   swprintf(buf, 32, L"%.1f", gamma);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, m_AutoHue ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%.3f", m_AutoHueSeconds);
+  SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, p->m_AutoHue ? BST_CHECKED : BST_UNCHECKED, 0);
+  swprintf(buf, 32, L"%.3f", p->m_AutoHueSeconds);
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), buf);
 }
 
-void Engine::ResetToFactory(HWND hWnd) {
+void SettingsWindow::ResetToFactory() {
+  Engine* p = m_pEngine;
   // Visual defaults
-  fOpacity = 1.0f;
-  m_fRenderQuality = 1.0f;
-  bQualityAuto = false;
-  m_timeFactor = 1.0f;
-  m_frameFactor = 1.0f;
-  m_fpsFactor = 1.0f;
-  m_VisIntensity = 1.0f;
-  m_VisShift = 0.0f;
-  m_VisVersion = 1.0f;
+  p->fOpacity = 1.0f;
+  p->m_fRenderQuality = 1.0f;
+  p->bQualityAuto = false;
+  p->m_timeFactor = 1.0f;
+  p->m_frameFactor = 1.0f;
+  p->m_fpsFactor = 1.0f;
+  p->m_VisIntensity = 1.0f;
+  p->m_VisShift = 0.0f;
+  p->m_VisVersion = 1.0f;
   // Color defaults
-  m_ColShiftHue = 0.0f;
-  m_ColShiftSaturation = 0.0f;
-  m_ColShiftBrightness = 0.0f;
-  if (m_pState) m_pState->m_fGammaAdj = 2.0f;
-  m_AutoHue = false;
-  m_AutoHueSeconds = 0.02f;
+  p->m_ColShiftHue = 0.0f;
+  p->m_ColShiftSaturation = 0.0f;
+  p->m_ColShiftBrightness = 0.0f;
+  if (p->m_pState) p->m_pState->m_fGammaAdj = 2.0f;
+  p->m_AutoHue = false;
+  p->m_AutoHueSeconds = 0.02f;
   // Update UI
-  UpdateVisualUI(hWnd);
-  UpdateColorsUI(hWnd);
+  UpdateVisualUI();
+  UpdateColorsUI();
 }
 
 void Engine::SaveUserDefaults() {
@@ -4732,31 +4343,32 @@ void Engine::LoadUserDefaults() {
   #undef READ_UD_FLOAT
 }
 
-void Engine::ResetToUserDefaults(HWND hWnd) {
-  if (!m_bUserDefaultsSaved) {
-    ResetToFactory(hWnd);
+void SettingsWindow::ResetToUserDefaults() {
+  Engine* p = m_pEngine;
+  if (!p->m_bUserDefaultsSaved) {
+    ResetToFactory();
     return;
   }
   // Visual
-  fOpacity = m_udOpacity;
-  m_fRenderQuality = m_udRenderQuality;
-  bQualityAuto = false;
-  m_timeFactor = m_udTimeFactor;
-  m_frameFactor = m_udFrameFactor;
-  m_fpsFactor = m_udFpsFactor;
-  m_VisIntensity = m_udVisIntensity;
-  m_VisShift = m_udVisShift;
-  m_VisVersion = m_udVisVersion;
+  p->fOpacity = p->m_udOpacity;
+  p->m_fRenderQuality = p->m_udRenderQuality;
+  p->bQualityAuto = false;
+  p->m_timeFactor = p->m_udTimeFactor;
+  p->m_frameFactor = p->m_udFrameFactor;
+  p->m_fpsFactor = p->m_udFpsFactor;
+  p->m_VisIntensity = p->m_udVisIntensity;
+  p->m_VisShift = p->m_udVisShift;
+  p->m_VisVersion = p->m_udVisVersion;
   // Colors
-  m_ColShiftHue = m_udHue;
-  m_ColShiftSaturation = m_udSaturation;
-  m_ColShiftBrightness = m_udBrightness;
-  if (m_pState) m_pState->m_fGammaAdj = m_udGamma;
-  m_AutoHue = false;
-  m_AutoHueSeconds = 0.02f;
+  p->m_ColShiftHue = p->m_udHue;
+  p->m_ColShiftSaturation = p->m_udSaturation;
+  p->m_ColShiftBrightness = p->m_udBrightness;
+  if (p->m_pState) p->m_pState->m_fGammaAdj = p->m_udGamma;
+  p->m_AutoHue = false;
+  p->m_AutoHueSeconds = 0.02f;
   // Update UI
-  UpdateVisualUI(hWnd);
-  UpdateColorsUI(hWnd);
+  UpdateVisualUI();
+  UpdateColorsUI();
 }
 
 void Engine::SaveFallbackPaths() {
@@ -4825,59 +4437,9 @@ static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
   return TRUE;
 }
 
-void Engine::ResetSettingsWindow() {
-  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
-
-  m_nSettingsWndW = 620;
-  m_nSettingsWndH = 850;
-  m_bSettingsOnTop = false;
-
-  // Center on primary display
-  int screenW = GetSystemMetrics(SM_CXSCREEN);
-  int screenH = GetSystemMetrics(SM_CYSCREEN);
-  int posX = (screenW - m_nSettingsWndW) / 2;
-  int posY = (screenH - m_nSettingsWndH) / 2;
-  SetWindowPos(m_hSettingsWnd, HWND_NOTOPMOST, posX, posY, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
-  LayoutSettingsControls();
-}
-
-static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
-  SendMessage(hChild, WM_SETFONT, (WPARAM)lParam, TRUE);
-  return TRUE;
-}
-
-void Engine::RebuildSettingsFonts() {
-  if (!m_hSettingsWnd) return;
-
-  // Save current tab selection
-  int curTab = m_hSettingsTab ? TabCtrl_GetCurSel(m_hSettingsTab) : 0;
-
-  // Destroy all child windows (tab, controls, etc.)
-  HWND hChild = GetWindow(m_hSettingsWnd, GW_CHILD);
-  while (hChild) {
-    HWND hNext = GetWindow(hChild, GW_HWNDNEXT);
-    DestroyWindow(hChild);
-    hChild = hNext;
-  }
-  m_hSettingsTab = NULL;
-  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) m_settingsPageCtrls[i].clear();
-  m_hSpriteList = NULL;
-  if (m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_hSpriteImageList); m_hSpriteImageList = NULL; }
-
-  // Rebuild all controls at the new font size
-  // (BuildSettingsControls recreates fonts, tab, and all controls)
-  BuildSettingsControls();
-  ApplySettingsDarkTheme();
-
-  // Restore tab selection
-  if (m_hSettingsTab && curTab > 0) {
-    TabCtrl_SetCurSel(m_hSettingsTab, curTab);
-    ShowSettingsPage(curTab);
-  }
-}
-
-void Engine::NavigatePresetDirUp(HWND hSettingsWnd) {
-  wchar_t* pDir = GetPresetDir();
+void SettingsWindow::NavigatePresetDirUp() {
+  Engine* p = m_pEngine;
+  wchar_t* pDir = p->GetPresetDir();
   int dirLen = lstrlenW(pDir);
 
   // Strip trailing backslash, find previous one, truncate after it
@@ -4890,60 +4452,57 @@ void Engine::NavigatePresetDirUp(HWND hSettingsWnd) {
   } else {
     return;  // nowhere to go
   }
-  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
-  UpdatePresetList(false, true, false);
-  m_nCurrentPreset = -1;
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
+  p->UpdatePresetList(false, true, false);
+  p->m_nCurrentPreset = -1;
 
-  if (hSettingsWnd) {
-    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
-    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
-    if (hList) {
-      SendMessage(hList, LB_RESETCONTENT, 0, 0);
-      for (int i = 0; i < m_nPresets; i++) {
-        if (m_presets[i].szFilename.empty()) continue;
-        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
-      }
+  SetWindowTextW(GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR), pDir);
+  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
+  if (hList) {
+    SendMessage(hList, LB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < p->m_nPresets; i++) {
+      if (p->m_presets[i].szFilename.empty()) continue;
+      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
     }
   }
 }
 
-void Engine::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
-  if (sel < 0 || sel >= m_nPresets) return;
-  if (m_presets[sel].szFilename.c_str()[0] != L'*') return;
+void SettingsWindow::NavigatePresetDirInto(int sel) {
+  Engine* p = m_pEngine;
+  if (sel < 0 || sel >= p->m_nPresets) return;
+  if (p->m_presets[sel].szFilename.c_str()[0] != L'*') return;
 
-  wchar_t* pDir = GetPresetDir();
-  lstrcatW(pDir, &m_presets[sel].szFilename.c_str()[1]);
+  wchar_t* pDir = p->GetPresetDir();
+  lstrcatW(pDir, &p->m_presets[sel].szFilename.c_str()[1]);
   lstrcatW(pDir, L"\\");
-  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, GetConfigIniFile());
-  UpdatePresetList(false, true, false);
-  m_nCurrentPreset = -1;
+  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
+  p->UpdatePresetList(false, true, false);
+  p->m_nCurrentPreset = -1;
 
-  if (hSettingsWnd) {
-    SetWindowTextW(GetDlgItem(hSettingsWnd, IDC_MW_PRESET_DIR), pDir);
-    HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_PRESET_LIST);
-    if (hList) {
-      SendMessage(hList, LB_RESETCONTENT, 0, 0);
-      for (int i = 0; i < m_nPresets; i++) {
-        if (m_presets[i].szFilename.empty()) continue;
-        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
-      }
+  SetWindowTextW(GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR), pDir);
+  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
+  if (hList) {
+    SendMessage(hList, LB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < p->m_nPresets; i++) {
+      if (p->m_presets[i].szFilename.empty()) continue;
+      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
     }
   }
 }
 
-void Engine::EnsureSettingsVisible() {
-  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd) || !IsWindowVisible(m_hSettingsWnd))
+void SettingsWindow::EnsureVisible() {
+  if (!m_hWnd || !IsWindow(m_hWnd) || !IsWindowVisible(m_hWnd))
     return;
 
-  HWND hRender = GetPluginWindow();
+  HWND hRender = m_pEngine->GetPluginWindow();
   if (!hRender) return;
 
   HMONITOR hRenderMon = MonitorFromWindow(hRender, MONITOR_DEFAULTTONEAREST);
-  HMONITOR hSettingsMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);
+  HMONITOR hSettingsMon = MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
 
   // Only act if both windows are on the same monitor AND render is fullscreen
-  if (hRenderMon != hSettingsMon || !IsBorderlessFullscreen(hRender)) {
-    SetForegroundWindow(m_hSettingsWnd);
+  if (hRenderMon != hSettingsMon || !m_pEngine->IsBorderlessFullscreen(hRender)) {
+    SetForegroundWindow(m_hWnd);
     return;
   }
 
@@ -4957,12 +4516,12 @@ void Engine::EnsureSettingsVisible() {
     // Move settings window to center of the alternate monitor's work area
     int monW = emd.rcResult.right - emd.rcResult.left;
     int monH = emd.rcResult.bottom - emd.rcResult.top;
-    int wx = emd.rcResult.left + (monW - m_nSettingsWndW) / 2;
-    int wy = emd.rcResult.top + (monH - m_nSettingsWndH) / 2;
-    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, wx, wy, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
+    int wx = emd.rcResult.left + (monW - m_nWndW) / 2;
+    int wy = emd.rcResult.top + (monH - m_nWndH) / 2;
+    SetWindowPos(m_hWnd, HWND_TOPMOST, wx, wy, m_nWndW, m_nWndH, SWP_SHOWWINDOW);
   } else {
     // Single monitor — just bring to foreground
-    SetForegroundWindow(m_hSettingsWnd);
+    SetForegroundWindow(m_hWnd);
   }
 }
 
@@ -4984,7 +4543,7 @@ void Engine::OpenResourceViewer() {
     wc.lpfnWndProc = ResourceViewerWndProc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = m_bSettingsDarkTheme ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_3DFACE + 1);
+    wc.hbrBackground = IsDarkTheme() ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_3DFACE + 1);
     wc.lpszClassName = L"MDropDX12ResourceViewer";
     RegisterClassExW(&wc);
     g_bResourceViewerClassRegistered = true;
@@ -4996,7 +4555,7 @@ void Engine::OpenResourceViewer() {
     L"Resource Viewer",
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE,
     CW_USEDEFAULT, CW_USEDEFAULT, 750, 420,
-    m_hSettingsWnd,
+    m_settingsWindow ? m_settingsWindow->GetHWND() : NULL,
     NULL,
     GetModuleHandle(NULL),
     NULL);
@@ -5048,14 +4607,15 @@ void Engine::OpenResourceViewer() {
     0, 0, 70, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_REFRESH, GetModuleHandle(NULL), NULL);
 
   // Set font on ListView and buttons
-  if (m_hSettingsFont) {
-    SendMessage(m_hResourceList, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
-    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
-    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+  HFONT hSettingsFont = m_settingsWindow ? m_settingsWindow->GetFont() : NULL;
+  if (hSettingsFont) {
+    SendMessage(m_hResourceList, WM_SETFONT, (WPARAM)hSettingsFont, TRUE);
+    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH), WM_SETFONT, (WPARAM)hSettingsFont, TRUE);
+    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH), WM_SETFONT, (WPARAM)hSettingsFont, TRUE);
   }
 
   // Apply dark theme to resource viewer
-  if (m_bSettingsDarkTheme) {
+  if (IsDarkTheme()) {
     BOOL bDark = TRUE;
     DwmSetWindowAttribute(m_hResourceWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
     DwmSetWindowAttribute(m_hResourceWnd, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
@@ -5100,7 +4660,7 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
   case WM_NOTIFY: {
     NMHDR* pnm = (NMHDR*)lParam;
     // Custom-draw the ListView header (column headers) for dark theme
-    if (p && p->m_bSettingsDarkTheme && pnm->code == NM_CUSTOMDRAW) {
+    if (p && p->IsDarkTheme() && pnm->code == NM_CUSTOMDRAW) {
       // The header control is a child of the ListView
       HWND hHeader = ListView_GetHeader(p->m_hResourceList);
       if (pnm->hwndFrom == hHeader) {
@@ -5145,7 +4705,7 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
   }
 
   case WM_ERASEBKGND:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+    if (p && p->IsDarkTheme() && p->m_hBrSettingsBg) {
       HDC hdc = (HDC)wParam;
       RECT rc;
       GetClientRect(hWnd, &rc);
@@ -5155,7 +4715,7 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
     break;
 
   case WM_CTLCOLORBTN:
-    if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
+    if (p && p->IsDarkTheme() && p->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, p->m_colSettingsText);
       SetBkColor((HDC)wParam, p->m_colSettingsBg);
       return (LRESULT)p->m_hBrSettingsBg;
@@ -5166,7 +4726,7 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
     if (p) {
       DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
       if (pDIS && pDIS->CtlType == ODT_BUTTON) {
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
         return TRUE;
       }
@@ -5730,7 +5290,7 @@ void Engine::PopulateSpriteListView() {
 }
 
 void Engine::UpdateSpriteProperties(int sel) {
-  HWND hw = m_hSettingsWnd;
+  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   if (!hw || sel < 0 || sel >= (int)m_spriteEntries.size()) return;
 
   auto& e = m_spriteEntries[sel];
@@ -5816,7 +5376,7 @@ void Engine::UpdateSpriteProperties(int sel) {
 }
 
 void Engine::SaveCurrentSpriteProperties() {
-  HWND hw = m_hSettingsWnd;
+  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   if (!hw || m_nSpriteSelected < 0 || m_nSpriteSelected >= (int)m_spriteEntries.size()) return;
 
   auto& e = m_spriteEntries[m_nSpriteSelected];
@@ -5988,8 +5548,8 @@ void Engine::OpenWindowTitleParserPopup(HWND hParent) {
   ctx->nActiveSel = m_nActiveWindowTitleProfile;
   if (ctx->nActiveSel < 0 || ctx->nActiveSel >= (int)ctx->profiles.size())
     ctx->nActiveSel = 0;
-  ctx->hFont = m_hSettingsFont;
-  ctx->hFontBold = m_hSettingsFontBold;
+  ctx->hFont = m_settingsWindow ? m_settingsWindow->GetFont() : NULL;
+  ctx->hFontBold = m_settingsWindow ? m_settingsWindow->GetFontBold() : NULL;
 
   // Create window — resizable
   int dpi = 96;
@@ -6293,13 +5853,13 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       bool bIsCheck = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheck");
       bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
       if (bIsCheck)
-        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
       else if (bIsRadio)
-        DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerRadio(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
       else
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
       return TRUE;
     }

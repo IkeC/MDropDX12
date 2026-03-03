@@ -411,13 +411,15 @@ public:
   void UpdateDisplaysTabSelection(int sel);
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
 
-  // Global hotkeys
-  bool m_bGlobalHotkeysEnabled = false;    // Off by default; user enables in Settings → System
-  HotkeyBinding m_hotkeys[HK_COUNT - 1];  // HK_TOGGLE_FULLSCREEN=1, so index 0..1
+  // Configurable hotkeys (local + global)
+  HotkeyBinding m_hotkeys[NUM_HOTKEYS];
+  void ResetHotkeyDefaults();
   void LoadHotkeySettings();
   void SaveHotkeySettings();
   void RegisterGlobalHotkeys(HWND hwnd);
   void UnregisterGlobalHotkeys(HWND hwnd);
+  bool DispatchHotkeyAction(int actionId);
+  bool LookupLocalHotkey(UINT vk, UINT modifiers);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
 
   // Idle timer (screensaver mode)
@@ -1010,36 +1012,11 @@ public:
   void        AdjustSetting(int id, int direction);
   void        SaveSettingToINI(int id);
   void        OpenFolderPickerForPresetDir();
-  // Settings window (Win32 dialog on dedicated thread)
-  HWND        m_hSettingsWnd = NULL;
-  HWND        m_hSettingsTab = NULL;       // Tab control
-  int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[SETTINGS_NUM_PAGES]; // HWNDs per tab
-  HFONT       m_hSettingsFont = NULL;
-  HFONT       m_hSettingsFontBold = NULL;
-  HFONT       m_hSettingsPinFont = NULL;  // Segoe MDL2 Assets for pin icon
-  bool        m_bSettingsOnTop = false;   // Settings window always-on-top state (persisted)
-  int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
-  int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
-  int         m_nSettingsWndW = 620;
-  int         m_nSettingsWndH = 850;
-  int         m_nSettingsPosX = -1;        // persisted position (-1 = center on screen)
-  int         m_nSettingsPosY = -1;
-  std::thread m_settingsThread;
-  std::atomic<bool> m_bSettingsThreadRunning{false};
+  // Settings window (ToolWindow subclass, own thread)
+  std::unique_ptr<SettingsWindow> m_settingsWindow;
+  int         m_nSettingsFontSize = -16;     // Shared font size for all tool windows (negative = pixel height)
   void        OpenSettingsWindow();
   void        CloseSettingsWindow();
-  void        CreateSettingsWindowOnThread();
-  void        BuildSettingsControls();
-  void        ShowSettingsPage(int page);
-  void        LayoutSettingsControls();
-  void        EnsureSettingsVisible();
-  void        ResetSettingsWindow();
-  void        RebuildSettingsFonts();
-  int         GetSettingsLineHeight();
-  void        NavigatePresetDirUp(HWND hSettingsWnd);
-  void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
-  static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
   // Spout / Displays window (ToolWindow subclass, own thread)
   std::unique_ptr<DisplaysWindow> m_displaysWindow;
@@ -1051,11 +1028,14 @@ public:
   void OpenSongInfoWindow();
   void CloseSongInfoWindow();
 
+  // Hotkeys window (ToolWindow subclass, own thread)
+  std::unique_ptr<HotkeysWindow> m_hotkeysWindow;
+  void OpenHotkeysWindow();
+  void CloseHotkeysWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 
-  // Remote tab
-  void        RefreshIPCList(HWND hSettingsWnd);
   // Messages tab
   bool        ShowMsgOverridesDialog(HWND hParent);
   void        PopulateMsgListBox(HWND hList);
@@ -1093,8 +1073,10 @@ public:
   struct PendingSprite { int nSpriteNum; int nSlot; };
   std::vector<PendingSprite> m_pendingSpriteLoads;
 
-  // Settings window dark theme
-  bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
+  // Settings window theme
+  enum ThemeMode { THEME_DARK = 0, THEME_LIGHT = 1, THEME_SYSTEM = 2 };
+  ThemeMode   m_nThemeMode = THEME_DARK;
+  bool        IsDarkTheme() const;  // resolves THEME_SYSTEM → actual dark/light
   COLORREF    m_colSettingsBg       = RGB(30, 30, 30);       // Main window background (matches MilkVision)
   COLORREF    m_colSettingsCtrlBg   = RGB(45, 45, 45);       // Edit/combo/list background
   COLORREF    m_colSettingsText     = RGB(0, 220, 0);        // Text color (green, matches MilkVision)
@@ -1107,7 +1089,6 @@ public:
   HBRUSH      m_hBrSettingsBg      = NULL;
   HBRUSH      m_hBrSettingsCtrlBg  = NULL;
   void        LoadSettingsThemeFromINI();
-  void        ApplySettingsDarkTheme();
   void        CleanupSettingsThemeBrushes();
 
   // User "safe" defaults (persisted to INI [UserDefaults] section)
@@ -1126,17 +1107,15 @@ public:
   float m_udGamma = 2.0f;
   void  SaveUserDefaults();
   void  LoadUserDefaults();
-  void  ResetToFactory(HWND hWnd);
-  void  ResetToUserDefaults(HWND hWnd);
-  void  UpdateVisualUI(HWND hWnd);
-  void  UpdateColorsUI(HWND hWnd);
+  void  SaveFallbackPaths();
+  void  LoadFallbackPaths();
 
   // Fallback search paths (Files tab)
   std::vector<std::wstring> m_fallbackPaths;
   wchar_t m_szRandomTexDir[MAX_PATH] = {};    // Dedicated random textures directory
   wchar_t m_szContentBasePath[MAX_PATH] = {};  // Base path for textures, sprites, etc.
-  void  SaveFallbackPaths();
-  void  LoadFallbackPaths();
+  // (ResetToFactory, ResetToUserDefaults, UpdateVisualUI, UpdateColorsUI,
+  //  RefreshIPCList, NavigatePresetDirUp/Into moved to SettingsWindow)
 
   // Message autoplay (Messages tab)
   bool    m_bMsgAutoplay = false;

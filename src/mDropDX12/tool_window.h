@@ -32,6 +32,11 @@ protected:
   int         m_nPosX = -1, m_nPosY = -1; // persisted position (-1 = center on screen)
   std::vector<HWND> m_childCtrls;      // all child HWNDs (for rebuild + dark theme)
 
+  // ── Tab control support (optional — used by tabbed subclasses) ──
+  HWND        m_hTab = NULL;
+  int         m_nActivePage = 0;
+  std::vector<std::vector<HWND>> m_pageCtrls;  // per-page control tracking
+
   // ── Subclass must override these ──
 
   // Window identity
@@ -48,6 +53,20 @@ protected:
   virtual int GetMinWidth() const { return 400; }
   virtual int GetMinHeight() const { return 350; }
 
+  // Called on WM_SIZE — default destroys/rebuilds all controls.
+  // Settings overrides to reposition controls without rebuild.
+  virtual void OnResize() { RebuildFonts(); }
+
+  // ICC flags for InitCommonControlsEx. Override to add ICC_LISTVIEW_CLASSES etc.
+  virtual DWORD GetCommonControlFlags() const;
+
+  // Whether window accepts drag-and-drop files (DragAcceptFiles)
+  virtual bool AcceptsDragDrop() const { return false; }
+
+  // Called when Open() finds window already visible. Default: SetForegroundWindow.
+  // Settings overrides to move off fullscreen monitor.
+  virtual void OnAlreadyOpen();
+
   // Build all child controls (called after window creation and on rebuild)
   virtual void DoBuildControls() = 0;
 
@@ -59,6 +78,9 @@ protected:
 
   // Handle WM_NOTIFY. Return 0 if handled, -1 if not.
   virtual LRESULT DoNotify(HWND hWnd, NMHDR* pnm) { return -1; }
+
+  // Catch-all for messages BaseWndProc doesn't handle (WM_TIMER, WM_DROPFILES, etc.)
+  virtual LRESULT DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) { return -1; }
 
   // Called from WM_DESTROY before cleanup (subclass releases its resources)
   virtual void DoDestroy() {}
@@ -80,7 +102,7 @@ public:
   HWND GetHWND() const { return m_hWnd; }
 
   // Destroy all children and rebuild controls at the current font size
-  void RebuildFonts();
+  virtual void RebuildFonts();
 
   // Reset to default size, centered on primary display
   void ResetPosition();
@@ -93,6 +115,20 @@ public:
 
   // Helper for subclasses to track child controls for dark theme + rebuild
   void TrackControl(HWND h) { if (h) m_childCtrls.push_back(h); }
+
+  // Track control on a specific tab page (adds to m_pageCtrls[page] + m_childCtrls)
+  void TrackPageControl(int page, HWND h);
+
+  // Create TCS_OWNERDRAWFIXED tab control with dark theme subclass.
+  // Returns the content area rect (below tab headers).
+  RECT BuildTabControl(int tabCtrlID, const wchar_t* const* tabNames, int numPages,
+                       int x, int y, int w, int h);
+
+  // Show/hide page controls + persist active tab to INI
+  void ShowPage(int page);
+
+  // Restore persisted active tab from INI (call at end of DoBuildControls)
+  void SelectInitialTab();
 
   // Access fonts for control creation
   HFONT GetFont() const { return m_hFont; }
@@ -111,6 +147,9 @@ private:
 
   // The single shared WndProc dispatches to virtual methods
   static LRESULT CALLBACK BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  // Tab control dark background subclass (shared by all tabbed windows)
+  static LRESULT CALLBACK TabSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 };
 
 // ── Concrete subclass: Spout / Displays window ──
@@ -135,11 +174,6 @@ protected:
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
 
 private:
-  HWND m_hTab = NULL;
-  int  m_nActivePage = 0;
-  std::vector<HWND> m_pageCtrls[DISPLAYS_NUM_PAGES];
-
-  void ShowPage(int page);
   void BuildOutputsPage(int x, int y, int rw, int lineH, int gap);
   void BuildVideoInputPage(int x, int y, int rw, int lineH, int gap);
 };
@@ -162,6 +196,71 @@ protected:
 
   void DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+};
+
+// ── Concrete subclass: Settings window ──
+
+class SettingsWindow : public ToolWindow {
+public:
+  SettingsWindow(Engine* pEngine);
+  void EnsureVisible();  // called from Engine on WM_SIZE
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"MDropDX12 Settings"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12SettingsWnd"; }
+  const wchar_t* GetINISection() const override  { return L"Settings"; }
+  int GetPinControlID() const override       { return IDC_MW_SETTINGS_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_FONT_MINUS; }
+  int GetMinWidth() const override  { return 500; }
+  int GetMinHeight() const override { return 450; }
+
+  DWORD GetCommonControlFlags() const override;
+  bool  AcceptsDragDrop() const override { return true; }
+  void  OnAlreadyOpen() override;
+  void  OnResize() override;
+  void  RebuildFonts() override;
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+  LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  int  m_lastSeenIPCSeq = 0;
+
+  void LayoutControls();
+  void NavigatePresetDirUp();
+  void NavigatePresetDirInto(int sel);
+  void RefreshIPCList();
+  void UpdateVisualUI();
+  void UpdateColorsUI();
+  void ResetToFactory();
+  void ResetToUserDefaults();
+};
+
+// ── Concrete subclass: Hotkeys window ──
+
+class HotkeysWindow : public ToolWindow {
+public:
+  HotkeysWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Hotkeys"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12HotkeysWnd"; }
+  const wchar_t* GetINISection() const override  { return L"HotkeysWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_HOTKEYS_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_HOTKEYS_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_HOTKEYS_FONT_MINUS; }
+  int GetMinWidth() const override  { return 480; }
+  int GetMinHeight() const override { return 400; }
+
+  DWORD GetCommonControlFlags() const override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
 };
 
 } // namespace mdrop

@@ -1688,8 +1688,8 @@ void Engine::OnFinishedLoadingPreset() {
   SendPresetChangedInfoToMDropDX12Remote();
 
   // Notify Settings window so its preset listbox stays in sync
-  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd))
-    PostMessage(m_hSettingsWnd, WM_MW_PRESET_CHANGED, 0, 0);
+  if (m_settingsWindow && m_settingsWindow->IsOpen())
+    PostMessage(m_settingsWindow->GetHWND(), WM_MW_PRESET_CHANGED, 0, 0);
 
   // Auto-refresh resource viewer if open
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))

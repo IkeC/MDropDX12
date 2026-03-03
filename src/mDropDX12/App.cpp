@@ -1435,6 +1435,49 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_HOTKEY:
   {
     int id = (int)wParam;
+    // Window-open actions: delegate to engine dispatch
+    if (id == HK_OPEN_SETTINGS || id == HK_OPEN_DISPLAYS ||
+        id == HK_OPEN_SONGINFO || id == HK_OPEN_HOTKEYS) {
+      g_engine.DispatchHotkeyAction(id);
+      break;
+    }
+    // Toggle actions: handle inline (need local hWnd/fullscreen state)
+    switch (id) {
+    case HK_TOGGLE_FULLSCREEN:
+      ToggleFullScreen(hWnd);
+      SetForegroundWindow(hWnd);
+      break;
+    case HK_TOGGLE_STRETCH:
+      if (g_engine.m_bMirrorModeForAltS) {
+        if (!g_engine.m_bMirrorsActive) {
+          auto result = g_engine.TryActivateMirrors(hWnd);
+          if (result != Engine::MirrorCancelled) {
+            if (!fullscreen) ToggleFullScreen(hWnd);
+          }
+          if (result == Engine::MirrorActivated) {
+            g_engine.m_bMirrorsActive = true;
+            g_engine.AddNotification(L"Mirror outputs active");
+          } else if (result == Engine::MirrorFullscreenOnly) {
+            g_engine.AddNotification(L"Fullscreen (no mirrors)");
+          }
+        } else {
+          g_engine.m_bMirrorsActive = false;
+          if (fullscreen) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs disabled");
+        }
+      } else {
+        ToggleStretch(hWnd);
+      }
+      SetForegroundWindow(hWnd);
+      break;
+    }
+    break;
+  }
+
+  case WM_MW_HOTKEY_ACTION:
+  {
+    // Dispatched from DispatchHotkeyAction() for toggle actions that need App.cpp locals
+    int id = (int)wParam;
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
       ToggleFullScreen(hWnd);

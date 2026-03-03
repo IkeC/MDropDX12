@@ -629,7 +629,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         Engine* p = data->plugin;
         bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
         if (bIsCheckbox) {
-          DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+          DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
             p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
           return TRUE;
         }
@@ -651,7 +651,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       }
       if (data && data->plugin) {
         Engine* p = data->plugin;
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
         return TRUE;
       }
@@ -661,7 +661,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
       return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
@@ -669,7 +669,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     break;
 
   case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -677,7 +677,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     break;
 
   case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+    if (data && data->plugin && data->plugin->IsDarkTheme()) {
       RECT rc; GetClientRect(hWnd, &rc);
       HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
       FillRect((HDC)wParam, &rc, hBr);
@@ -1112,10 +1112,10 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       Engine* p = data->plugin;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
       if (bIsCheckbox) {
-        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
       } else {
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
       }
       return TRUE;
@@ -1125,7 +1125,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
       return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
@@ -1133,7 +1133,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -1141,7 +1141,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_CTLCOLORBTN:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -1149,7 +1149,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+    if (data && data->plugin && data->plugin->IsDarkTheme()) {
       RECT rc; GetClientRect(hWnd, &rc);
       HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
       FillRect((HDC)wParam, &rc, hBr);
