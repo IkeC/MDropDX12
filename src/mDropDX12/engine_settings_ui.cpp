@@ -839,6 +839,14 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
   case WM_DESTROY:
     KillTimer(hWnd, IDT_IPC_MONITOR);
     if (p) {
+      // Persist position and size before clearing HWND
+      RECT rc;
+      if (GetWindowRect(hWnd, &rc)) {
+        p->m_nSettingsWndW = rc.right - rc.left;
+        p->m_nSettingsWndH = rc.bottom - rc.top;
+        p->m_nSettingsPosX = rc.left;
+        p->m_nSettingsPosY = rc.top;
+      }
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
       for (int i = 0; i < SETTINGS_NUM_PAGES; i++) p->m_settingsPageCtrls[i].clear();
@@ -1019,19 +1027,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         // Update current preset display
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CURRENT_PRESET), p->m_szCurrentPresetFile);
       }
-      return 0;
-    }
-
-    // Show Now button: force display current track info
-    if (id == IDC_MW_SONG_SHOW_NOW && code == BN_CLICKED) {
-      extern MDropDX12 mdropdx12;
-      mdropdx12.doPollExplicit = true;
-      return 0;
-    }
-
-    // "Edit Parser..." button: opens the Window Title Parser config popup
-    if (id == IDC_MW_WT_EDIT_PARSER && code == BN_CLICKED) {
-      p->OpenWindowTitleParserPopup(hWnd);
       return 0;
     }
 
@@ -1252,29 +1247,30 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     }
 
     if (id == IDC_MW_FONT_PLUS && code == BN_CLICKED) {
-      if (p->m_nSettingsFontSize > -24) {  // max font pixel height
-        p->m_nSettingsFontSize -= 2;       // more negative = larger
+      if (p->m_nSettingsFontSize > -24) {
+        p->m_nSettingsFontSize -= 2;
         p->RebuildSettingsFonts();
-        // Sync other ToolWindows
-        if (p->m_displaysWindow && p->m_displaysWindow->IsOpen())
-          PostMessage(p->m_displaysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+        p->BroadcastFontSync(hWnd);
       }
       return 0;
     }
 
     if (id == IDC_MW_FONT_MINUS && code == BN_CLICKED) {
-      if (p->m_nSettingsFontSize < -12) {  // min font pixel height
-        p->m_nSettingsFontSize += 2;       // less negative = smaller
+      if (p->m_nSettingsFontSize < -12) {
+        p->m_nSettingsFontSize += 2;
         p->RebuildSettingsFonts();
-        // Sync other ToolWindows
-        if (p->m_displaysWindow && p->m_displaysWindow->IsOpen())
-          PostMessage(p->m_displaysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+        p->BroadcastFontSync(hWnd);
       }
       return 0;
     }
 
     if (id == IDC_MW_OPEN_DISPLAYS && code == BN_CLICKED) {
       p->OpenDisplaysWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_SONGINFO && code == BN_CLICKED) {
+      p->OpenSongInfoWindow();
       return 0;
     }
 
@@ -1410,53 +1406,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->SaveSettingToINI(SET_SPRITES_MESSAGES);
         CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_MESSAGES, (sel & 1) ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_SPRITES, (sel & 2) ? BST_CHECKED : BST_UNCHECKED);
-      }
-      return 0;
-    }
-
-    // Song Info source combo box
-    if (id == IDC_MW_SONG_SOURCE && code == CBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel <= 2) {
-        p->m_nTrackInfoSource = sel;
-        WritePrivateProfileIntW(sel, L"TrackInfoSource", p->GetConfigIniFile(), L"Milkwave");
-        bool showWT = (sel == Engine::TRACK_SOURCE_WINDOW);
-        int sw = showWT ? SW_SHOW : SW_HIDE;
-        HWND h;
-        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_LABEL)))     ShowWindow(h, sw);
-        if ((h = GetDlgItem(hWnd, IDC_MW_WT_PROFILE)))         ShowWindow(h, sw);
-        if ((h = GetDlgItem(hWnd, IDC_MW_WT_EDIT_PARSER)))     ShowWindow(h, sw);
-        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_PREVIEW)))    ShowWindow(h, sw);
-        if (showWT && !p->m_windowTitleProfiles.empty()) {
-          int idx = p->m_nActiveWindowTitleProfile;
-          if (idx >= 0 && idx < (int)p->m_windowTitleProfiles.size() && p->m_windowTitleProfiles[idx].szWindowRegex[0])
-            UpdateWindowTitlePreview(hWnd, p->m_windowTitleProfiles[idx].szWindowRegex);
-        }
-      }
-      return 0;
-    }
-
-    // Window Title profile selector: user selected a different profile
-    if (id == IDC_MW_WT_PROFILE && code == CBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < (int)p->m_windowTitleProfiles.size()) {
-        p->m_nActiveWindowTitleProfile = sel;
-        WritePrivateProfileIntW(sel, L"WindowTitleProfile", p->GetConfigIniFile(), L"Milkwave");
-        // Update preview
-        if (p->m_windowTitleProfiles[sel].szWindowRegex[0])
-          UpdateWindowTitlePreview(hWnd, p->m_windowTitleProfiles[sel].szWindowRegex);
-        else
-          SetDlgItemTextW(hWnd, IDC_MW_SONG_WT_PREVIEW, L"(no window match regex)");
-      }
-      return 0;
-    }
-
-    // Song Info display corner combo box
-    if (id == IDC_MW_SONG_CORNER && code == CBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel <= 3) {
-        p->m_SongInfoDisplayCorner = sel + 1;  // 0-indexed combo -> 1-indexed corner
-        WritePrivateProfileIntW(p->m_SongInfoDisplayCorner, L"SongInfoDisplayCorner", p->GetConfigIniFile(), L"Milkwave");
       }
       return 0;
     }
@@ -1735,34 +1684,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_SEQ_ORDER:
         p->m_bSequentialPresetOrder = bChecked;
         p->SaveSettingToINI(SET_SEQ_ORDER);
-        return 0;
-      case IDC_MW_SONG_TITLE:
-        p->m_bSongTitleAnims = bChecked;
-        p->SaveSettingToINI(SET_SONG_TITLE_ANIMS);
-        return 0;
-      case IDC_MW_CHANGE_SONG:
-        p->m_ChangePresetWithSong = bChecked;
-        p->SaveSettingToINI(SET_CHANGE_WITH_SONG);
-        return 0;
-      case IDC_MW_SONG_OVERLAY:
-        p->m_bSongInfoOverlay = bChecked;
-        WritePrivateProfileIntW(bChecked, L"SongInfoOverlay", p->GetConfigIniFile(), L"Milkwave");
-        return 0;
-      case IDC_MW_SONG_COVER:
-        p->m_DisplayCover = bChecked;
-        WritePrivateProfileIntW(bChecked, L"DisplayCover", p->GetConfigIniFile(), L"Milkwave");
-        return 0;
-      case IDC_MW_SONG_ALWAYS_SHOW:
-        p->m_bSongInfoAlwaysShow = bChecked;
-        WritePrivateProfileIntW(bChecked, L"SongInfoAlwaysShow", p->GetConfigIniFile(), L"Milkwave");
-        if (!bChecked) {
-          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
-          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
-          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
-        } else {
-          extern MDropDX12 mdropdx12;
-          mdropdx12.doPollExplicit = true;
-        }
         return 0;
       case IDC_MW_SHOW_FPS:
         p->m_bShowFPS = bChecked;
@@ -2337,14 +2258,6 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_AutoHueSeconds = (float)_wtof(buf);
         if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
         return 0;
-      case IDC_MW_SONG_DISPLAY_SEC:
-        p->m_SongInfoDisplaySeconds = (float)_wtof(buf);
-        if (p->m_SongInfoDisplaySeconds < 0.5f) p->m_SongInfoDisplaySeconds = 0.5f;
-        if (p->m_SongInfoDisplaySeconds > 60.0f) p->m_SongInfoDisplaySeconds = 60.0f;
-        { wchar_t sb[32]; swprintf(sb, 32, L"%.1f", p->m_SongInfoDisplaySeconds);
-          WritePrivateProfileStringW(L"Milkwave", L"SongInfoDisplaySeconds", sb, p->GetConfigIniFile()); }
-        return 0;
-      // IDC_MW_SONG_WINDOW_TITLE removed — profiles managed via Edit Parser popup
       case IDC_MW_MSG_INTERVAL: {
         float val = (float)_wtof(buf);
         if (val < 1.0f) val = 1.0f;
@@ -3018,13 +2931,22 @@ void Engine::CreateSettingsWindowOnThread() {
   LoadSettingsThemeFromINI();
 
   int wndW = m_nSettingsWndW, wndH = m_nSettingsWndH;
-  int screenW = GetSystemMetrics(SM_CXSCREEN);
-  int screenH = GetSystemMetrics(SM_CYSCREEN);
-  int posX = (screenW - wndW) / 2;
-  int posY = (screenH - wndH) / 2;
+  int posX, posY;
+  if (m_nSettingsPosX >= 0 && m_nSettingsPosY >= 0) {
+    posX = m_nSettingsPosX;
+    posY = m_nSettingsPosY;
+  } else {
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    posX = (screenW - wndW) / 2;
+    posY = (screenH - wndH) / 2;
+  }
+
+  DWORD exStyle = WS_EX_TOOLWINDOW;
+  if (m_bSettingsOnTop) exStyle |= WS_EX_TOPMOST;
 
   m_hSettingsWnd = CreateWindowExW(
-    WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+    exStyle,
     SETTINGS_WND_CLASS, L"MDropDX12 Settings",
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
     posX, posY, wndW, wndH,
@@ -3285,108 +3207,6 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder)); y += lineH + 2;
 
-  // ── Song Info ──
-  PAGE_CTRL(0, CreateLabel(hw, L"Song Info", x, y, rw, lineH, hFontBold));
-  y += lineH + 2;
-
-  PAGE_CTRL(0, CreateLabel(hw, L"Source:", x, y, lw, lineH, hFont));
-  {
-    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-      x + lw + 4, y, rw - lw - 4, lineH + 4 * lineH, hw, (HMENU)(INT_PTR)IDC_MW_SONG_SOURCE,
-      GetModuleHandle(NULL), NULL);
-    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"SMTC (Windows)");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"IPC (Remote)");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Window Title");
-    SendMessageW(hCombo, CB_SETCURSEL, m_nTrackInfoSource, 0);
-    PAGE_CTRL(0, hCombo);
-  }
-  y += lineH + 2;
-
-  // Window Title profile selector + "Edit Parser..." button (only visible when source = Window Title)
-  {
-    bool showWT = (m_nTrackInfoSource == TRACK_SOURCE_WINDOW);
-    DWORD vis = showWT ? WS_VISIBLE : 0;
-
-    // "Profile:" label
-    HWND hWTLabel = CreateWindowExW(0, L"STATIC", L"Profile:",
-      WS_CHILD | vis, x, y, lw, lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_SONG_WT_LABEL, GetModuleHandle(NULL), NULL);
-    if (hWTLabel && hFont) SendMessage(hWTLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(0, hWTLabel);
-
-    // Profile dropdown (CBS_DROPDOWNLIST — not editable)
-    int editBtnW = MulDiv(100, lineH, 26);
-    int comboW = rw - lw - 4 - editBtnW - 4;
-    HWND hProfileCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | vis | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-      x + lw + 4, y, comboW, lineH + 10 * lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_WT_PROFILE, GetModuleHandle(NULL), NULL);
-    if (hProfileCombo && hFont) SendMessage(hProfileCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    // Populate profile names
-    for (int i = 0; i < (int)m_windowTitleProfiles.size(); i++) {
-      const wchar_t* name = m_windowTitleProfiles[i].szName;
-      SendMessageW(hProfileCombo, CB_ADDSTRING, 0, (LPARAM)(name[0] ? name : L"(unnamed)"));
-    }
-    if (!m_windowTitleProfiles.empty())
-      SendMessageW(hProfileCombo, CB_SETCURSEL, m_nActiveWindowTitleProfile, 0);
-    PAGE_CTRL(0, hProfileCombo);
-
-    // "Edit" button — opens Artist-Title Match Editor popup
-    HWND hEditBtn = CreateBtn(hw, L"Edit", IDC_MW_WT_EDIT_PARSER,
-      x + lw + 4 + comboW + 4, y, editBtnW, lineH, hFont, showWT);
-    PAGE_CTRL(0, hEditBtn);
-    y += lineH + 2;
-
-    // Preview label showing parsed artist/title from active profile
-    HWND hPreview = CreateWindowExW(0, L"STATIC", L"",
-      WS_CHILD | vis | SS_LEFT | SS_NOPREFIX,
-      x + lw + 4, y, rw - lw - 4, lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_SONG_WT_PREVIEW, GetModuleHandle(NULL), NULL);
-    if (hPreview && hFont) SendMessage(hPreview, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(0, hPreview);
-    // Update preview from active profile
-    if (showWT && !m_windowTitleProfiles.empty()) {
-      int idx = m_nActiveWindowTitleProfile;
-      if (idx >= 0 && idx < (int)m_windowTitleProfiles.size() && m_windowTitleProfiles[idx].szWindowRegex[0])
-        UpdateWindowTitlePreview(hw, m_windowTitleProfiles[idx].szWindowRegex);
-    }
-  }
-  y += lineH + 2;
-
-  PAGE_CTRL(0, CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,        x, y, rw, lineH, hFont, m_bSongTitleAnims)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Overlay Notifications",   IDC_MW_SONG_OVERLAY,      x, y, rw, lineH, hFont, m_bSongInfoOverlay)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,       x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Show Cover Art",          IDC_MW_SONG_COVER,        x, y, rw, lineH, hFont, m_DisplayCover)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Always Show Track Info",  IDC_MW_SONG_ALWAYS_SHOW,  x, y, rw, lineH, hFont, m_bSongInfoAlwaysShow)); y += lineH + 2;
-
-  PAGE_CTRL(0, CreateLabel(hw, L"Display Corner:", x, y, lw, lineH, hFont));
-  {
-    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-      x + lw + 4, y, rw - lw - 4, lineH + 5 * lineH, hw, (HMENU)(INT_PTR)IDC_MW_SONG_CORNER,
-      GetModuleHandle(NULL), NULL);
-    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Top-Left");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Top-Right");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Bottom-Left");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Bottom-Right");
-    SendMessageW(hCombo, CB_SETCURSEL, m_SongInfoDisplayCorner - 1, 0);
-    PAGE_CTRL(0, hCombo);
-  }
-  y += lineH + 2;
-
-  PAGE_CTRL(0, CreateLabel(hw, L"Display Seconds:", x, y, lw, lineH, hFont));
-  swprintf(buf, 64, L"%.1f", m_SongInfoDisplaySeconds);
-  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_SONG_DISPLAY_SEC, x + lw + 4, y, 100, lineH, hFont));
-  {
-    int showBtnX = x + lw + 4 + 100 + 8;
-    int showBtnW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"Show Now", IDC_MW_SONG_SHOW_NOW, showBtnX, y, showBtnW, lineH, hFont));
-  }
-  y += lineH + gap + 4;
-
   // ── Other ──
   PAGE_CTRL(0, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
   {
@@ -3426,8 +3246,10 @@ void Engine::BuildSettingsControls() {
   }
   y += lineH + gap;
   {
-    int bw = MulDiv(160, lineH, 26);
+    int bw = MulDiv(160, lineH, 26), bg = 4;
     PAGE_CTRL(0, CreateBtn(hw, L"Spout / Displays...", IDC_MW_OPEN_DISPLAYS, x, y, bw, lineH, hFont));
+    int bw2 = MulDiv(120, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Song Info...", IDC_MW_OPEN_SONGINFO, x + bw + bg, y, bw2, lineH, hFont));
   }
 
   // ====== PAGE 1: Visual (created hidden) ======
@@ -5008,19 +4830,14 @@ void Engine::ResetSettingsWindow() {
 
   m_nSettingsWndW = 620;
   m_nSettingsWndH = 850;
+  m_bSettingsOnTop = false;
 
-  // Center on the monitor the settings window is currently on
-  HMONITOR hMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = { sizeof(mi) };
-  if (GetMonitorInfo(hMon, &mi)) {
-    int monW = mi.rcWork.right - mi.rcWork.left;
-    int monH = mi.rcWork.bottom - mi.rcWork.top;
-    int posX = mi.rcWork.left + (monW - m_nSettingsWndW) / 2;
-    int posY = mi.rcWork.top + (monH - m_nSettingsWndH) / 2;
-    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, posX, posY, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
-  } else {
-    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, 0, 0, m_nSettingsWndW, m_nSettingsWndH, SWP_NOMOVE | SWP_SHOWWINDOW);
-  }
+  // Center on primary display
+  int screenW = GetSystemMetrics(SM_CXSCREEN);
+  int screenH = GetSystemMetrics(SM_CYSCREEN);
+  int posX = (screenW - m_nSettingsWndW) / 2;
+  int posY = (screenH - m_nSettingsWndH) / 2;
+  SetWindowPos(m_hSettingsWnd, HWND_NOTOPMOST, posX, posY, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
   LayoutSettingsControls();
 }
 

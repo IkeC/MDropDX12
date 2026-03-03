@@ -96,69 +96,14 @@ void DisplaysWindow::DoBuildControls() {
   for (int i = 0; i < DISPLAYS_NUM_PAGES; i++) m_pageCtrls[i].clear();
   m_hTab = NULL;
 
-  // Create fonts from shared font size
-  if (m_hFont) DeleteObject(m_hFont);
-  m_hFont = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  if (m_hFontBold) DeleteObject(m_hFontBold);
-  m_hFontBold = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
+  // Common: fonts, font +/- buttons, pin button
+  auto L = BuildBaseControls();
+  int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, rw = L.rw, clientW = L.clientW;
   HFONT hFont = m_hFont;
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
-  int clientW = rcWnd.right;
   int clientH = rcWnd.bottom;
-
-  int lineH = GetLineHeight();
-  int gap = 6, x = 16;
-  int rw = clientW - x * 2;
-  int y = 8;
-
-  // Font +/- buttons (top-left) — always visible, not page-tracked
-  {
-    int btnW = lineH;
-    TrackControl(CreateBtn(hw, L"\u2212", IDC_MW_DISP_FONT_MINUS, x, y, btnW, lineH, hFont));
-    TrackControl(CreateBtn(hw, L"+", IDC_MW_DISP_FONT_PLUS, x + btnW + 4, y, btnW, lineH, hFont));
-  }
-
-  // Pin button (top-right) — always visible, not page-tracked
-  {
-    if (m_hPinFont) DeleteObject(m_hPinFont);
-    int pinSize = lineH;
-    m_hPinFont = CreateFontW(-pinSize + 4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe MDL2 Assets");
-
-    int pinX = clientW - pinSize - x;
-    HWND hPin = CreateWindowExW(0, L"BUTTON", L"\xE718",
-      WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-      pinX, y, pinSize, pinSize, hw,
-      (HMENU)(INT_PTR)IDC_MW_DISPLAYS_PIN, GetModuleHandle(NULL), NULL);
-    if (hPin) {
-      if (m_hPinFont) SendMessage(hPin, WM_SETFONT, (WPARAM)m_hPinFont, TRUE);
-      SetPropW(hPin, L"IsPinBtn", (HANDLE)(intptr_t)1);
-      HWND hTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
-        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-        hw, NULL, GetModuleHandle(NULL), NULL);
-      if (hTip) {
-        TTTOOLINFOW ti = { sizeof(ti) };
-        ti.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
-        ti.hwnd = hw;
-        ti.uId = (UINT_PTR)hPin;
-        ti.lpszText = (LPWSTR)L"Always on top";
-        SendMessageW(hTip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
-      }
-    }
-    TrackControl(hPin);
-  }
-
-  y += lineH + gap + 4;
 
   // ── Tab control ──
   m_hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,

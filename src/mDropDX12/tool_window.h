@@ -23,12 +23,13 @@ protected:
   HWND        m_hWnd = NULL;
   std::thread m_thread;
   std::atomic<bool> m_bThreadRunning{false};
-  bool        m_bOnTop = true;
+  bool        m_bOnTop = false;
   HFONT       m_hFont = NULL;
   HFONT       m_hFontBold = NULL;
   HFONT       m_hPinFont = NULL;       // Segoe MDL2 Assets for pin icon
   int         m_nWndW, m_nWndH;        // current (persisted) size
   int         m_nDefaultW, m_nDefaultH; // default size if no INI
+  int         m_nPosX = -1, m_nPosY = -1; // persisted position (-1 = center on screen)
   std::vector<HWND> m_childCtrls;      // all child HWNDs (for rebuild + dark theme)
 
   // ── Subclass must override these ──
@@ -81,6 +82,9 @@ public:
   // Destroy all children and rebuild controls at the current font size
   void RebuildFonts();
 
+  // Reset to default size, centered on primary display
+  void ResetPosition();
+
   // Apply dark theme to the window and all children
   void ApplyDarkTheme();
 
@@ -93,6 +97,12 @@ public:
   // Access fonts for control creation
   HFONT GetFont() const { return m_hFont; }
   HFONT GetFontBold() const { return m_hFontBold; }
+
+  // Common control setup: creates fonts, font +/- buttons, pin button with tooltip.
+  // Returns the Y position below the header row for subclasses to continue from.
+  // Populates lineH, gap, x, rw, clientW for the caller.
+  struct BaseLayout { int y, lineH, gap, x, rw, clientW; };
+  BaseLayout BuildBaseControls();
 
 private:
   void CreateOnThread();
@@ -132,6 +142,26 @@ private:
   void ShowPage(int page);
   void BuildOutputsPage(int x, int y, int rw, int lineH, int gap);
   void BuildVideoInputPage(int x, int y, int rw, int lineH, int gap);
+};
+
+// ── Concrete subclass: Song Info window ──
+
+class SongInfoWindow : public ToolWindow {
+public:
+  SongInfoWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Song Info"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12SongInfoWnd"; }
+  const wchar_t* GetINISection() const override  { return L"SongInfo"; }
+  int GetPinControlID() const override       { return IDC_MW_SONGINFO_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_SONGINFO_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_SONGINFO_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 400; }
+
+  void DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
 };
 
 } // namespace mdrop

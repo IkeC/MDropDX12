@@ -978,9 +978,15 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       //return 0; // we processed (or absorbed) the key
     case VK_F2:
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-        // Ctrl+F2: kill switch — disable all display outputs
+        // Ctrl+F2: kill switch — disable all display outputs + reset open windows
         EnqueueRenderCmd(RenderCmd::DisableAllOutputs);
         AddNotification(L"All display outputs disabled");
+        if (m_hSettingsWnd && IsWindow(m_hSettingsWnd))
+          PostMessage(m_hSettingsWnd, WM_MW_RESET_WINDOW, 0, 0);
+        if (m_displaysWindow && m_displaysWindow->IsOpen())
+          PostMessage(m_displaysWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
+        if (m_songInfoWindow && m_songInfoWindow->IsOpen())
+          PostMessage(m_songInfoWindow->GetHWND(), WM_MW_RESET_WINDOW, 0, 0);
       }
       return 0;
     case VK_F3:

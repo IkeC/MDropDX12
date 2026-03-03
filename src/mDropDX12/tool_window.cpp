@@ -58,6 +58,19 @@ bool ToolWindow::IsOpen() const {
 }
 
 //----------------------------------------------------------------------
+// Font sync broadcast — notifies all windows except the sender
+//----------------------------------------------------------------------
+
+void Engine::BroadcastFontSync(HWND hSender) {
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd) && m_hSettingsWnd != hSender)
+    PostMessage(m_hSettingsWnd, WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_displaysWindow && m_displaysWindow->IsOpen() && m_displaysWindow->GetHWND() != hSender)
+    PostMessage(m_displaysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_songInfoWindow && m_songInfoWindow->IsOpen() && m_songInfoWindow->GetHWND() != hSender)
+    PostMessage(m_songInfoWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+}
+
+//----------------------------------------------------------------------
 // Thread + Window Creation
 //----------------------------------------------------------------------
 
@@ -66,19 +79,28 @@ void ToolWindow::LoadWindowPosition() {
   const wchar_t* sec = GetINISection();
   m_nWndW = GetPrivateProfileIntW(sec, L"WndW", m_nDefaultW, ini);
   m_nWndH = GetPrivateProfileIntW(sec, L"WndH", m_nDefaultH, ini);
-  m_bOnTop = GetPrivateProfileIntW(sec, L"OnTop", 1, ini) != 0;
+  m_nPosX = GetPrivateProfileIntW(sec, L"PosX", -1, ini);
+  m_nPosY = GetPrivateProfileIntW(sec, L"PosY", -1, ini);
+  m_bOnTop = GetPrivateProfileIntW(sec, L"OnTop", 0, ini) != 0;
   if (m_nWndW < GetMinWidth()) m_nWndW = GetMinWidth();
   if (m_nWndH < GetMinHeight()) m_nWndH = GetMinHeight();
 }
 
 void ToolWindow::SaveWindowPosition() {
+  if (!m_hWnd) return;
   const wchar_t* ini = m_pEngine->GetConfigIniFile();
   const wchar_t* sec = GetINISection();
   wchar_t buf[16];
-  swprintf(buf, 16, L"%d", m_nWndW);
+  RECT rc;
+  GetWindowRect(m_hWnd, &rc);
+  swprintf(buf, 16, L"%d", rc.right - rc.left);
   WritePrivateProfileStringW(sec, L"WndW", buf, ini);
-  swprintf(buf, 16, L"%d", m_nWndH);
+  swprintf(buf, 16, L"%d", rc.bottom - rc.top);
   WritePrivateProfileStringW(sec, L"WndH", buf, ini);
+  swprintf(buf, 16, L"%d", (int)rc.left);
+  WritePrivateProfileStringW(sec, L"PosX", buf, ini);
+  swprintf(buf, 16, L"%d", (int)rc.top);
+  WritePrivateProfileStringW(sec, L"PosY", buf, ini);
   WritePrivateProfileStringW(sec, L"OnTop", m_bOnTop ? L"1" : L"0", ini);
 }
 
@@ -109,10 +131,16 @@ void ToolWindow::CreateOnThread() {
   // Load persisted size/position
   LoadWindowPosition();
 
-  int screenW = GetSystemMetrics(SM_CXSCREEN);
-  int screenH = GetSystemMetrics(SM_CYSCREEN);
-  int posX = (screenW - m_nWndW) / 2;
-  int posY = (screenH - m_nWndH) / 2;
+  int posX, posY;
+  if (m_nPosX >= 0 && m_nPosY >= 0) {
+    posX = m_nPosX;
+    posY = m_nPosY;
+  } else {
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    posX = (screenW - m_nWndW) / 2;
+    posY = (screenH - m_nWndH) / 2;
+  }
 
   DWORD exStyle = WS_EX_TOOLWINDOW;
   if (m_bOnTop) exStyle |= WS_EX_TOPMOST;
@@ -203,6 +231,85 @@ int ToolWindow::GetLineHeight() {
   return max(h, 20);
 }
 
+ToolWindow::BaseLayout ToolWindow::BuildBaseControls() {
+  HWND hw = m_hWnd;
+
+  // Create fonts from shared font size
+  if (m_hFont) DeleteObject(m_hFont);
+  m_hFont = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  if (m_hFontBold) DeleteObject(m_hFontBold);
+  m_hFontBold = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  RECT rcWnd;
+  GetClientRect(hw, &rcWnd);
+  int clientW = rcWnd.right;
+
+  int lineH = GetLineHeight();
+  int gap = 6, x = 16;
+  int rw = clientW - x * 2;
+  int y = 8;
+
+  // Font +/- buttons (top-left)
+  {
+    int btnW = lineH;
+    TrackControl(CreateBtn(hw, L"\u2212", GetFontMinusControlID(), x, y, btnW, lineH, m_hFont));
+    TrackControl(CreateBtn(hw, L"+", GetFontPlusControlID(), x + btnW + 4, y, btnW, lineH, m_hFont));
+  }
+
+  // Pin button (top-right)
+  {
+    if (m_hPinFont) DeleteObject(m_hPinFont);
+    int pinSize = lineH;
+    m_hPinFont = CreateFontW(-pinSize + 4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe MDL2 Assets");
+
+    int pinX = clientW - pinSize - x;
+    HWND hPin = CreateWindowExW(0, L"BUTTON", L"\xE718",
+      WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+      pinX, y, pinSize, pinSize, hw,
+      (HMENU)(INT_PTR)GetPinControlID(), GetModuleHandle(NULL), NULL);
+    if (hPin) {
+      if (m_hPinFont) SendMessage(hPin, WM_SETFONT, (WPARAM)m_hPinFont, TRUE);
+      SetPropW(hPin, L"IsPinBtn", (HANDLE)(intptr_t)1);
+      HWND hTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        hw, NULL, GetModuleHandle(NULL), NULL);
+      if (hTip) {
+        TTTOOLINFOW ti = { sizeof(ti) };
+        ti.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
+        ti.hwnd = hw;
+        ti.uId = (UINT_PTR)hPin;
+        ti.lpszText = (LPWSTR)L"Always on top";
+        SendMessageW(hTip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+      }
+    }
+    TrackControl(hPin);
+  }
+
+  y += lineH + gap + 4;
+  return { y, lineH, gap, x, rw, clientW };
+}
+
+void ToolWindow::ResetPosition() {
+  if (!m_hWnd || !IsWindow(m_hWnd)) return;
+  int screenW = GetSystemMetrics(SM_CXSCREEN);
+  int screenH = GetSystemMetrics(SM_CYSCREEN);
+  int posX = (screenW - m_nDefaultW) / 2;
+  int posY = (screenH - m_nDefaultH) / 2;
+  m_nWndW = m_nDefaultW;
+  m_nWndH = m_nDefaultH;
+  m_bOnTop = false;
+  SetWindowPos(m_hWnd, HWND_NOTOPMOST, posX, posY, m_nDefaultW, m_nDefaultH, SWP_SHOWWINDOW);
+  RebuildFonts();
+}
+
 void ToolWindow::RebuildFonts() {
   if (!m_hWnd) return;
 
@@ -242,11 +349,6 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
   case WM_DESTROY:
     {
-      // Persist window position
-      RECT rc;
-      GetWindowRect(hWnd, &rc);
-      tw->m_nWndW = rc.right - rc.left;
-      tw->m_nWndH = rc.bottom - rc.top;
       tw->SaveWindowPosition();
 
       // Let subclass clean up
@@ -290,6 +392,10 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     tw->RebuildFonts();
     return 0;
 
+  case WM_MW_RESET_WINDOW:
+    tw->ResetPosition();
+    return 0;
+
   // ── Sliders ──
   case WM_HSCROLL:
   {
@@ -330,11 +436,7 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (p->m_nSettingsFontSize > -24) {
         p->m_nSettingsFontSize -= 2;
         tw->RebuildFonts();
-        // Sync other windows
-        if (p->m_hSettingsWnd && IsWindow(p->m_hSettingsWnd))
-          PostMessage(p->m_hSettingsWnd, WM_MW_REBUILD_FONTS, 0, 0);
-        // Notify all other ToolWindows via Engine
-        // (currently only Settings and this window; extend as needed)
+        p->BroadcastFontSync(hWnd);
       }
       return 0;
     }
@@ -344,8 +446,7 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (p->m_nSettingsFontSize < -12) {
         p->m_nSettingsFontSize += 2;
         tw->RebuildFonts();
-        if (p->m_hSettingsWnd && IsWindow(p->m_hSettingsWnd))
-          PostMessage(p->m_hSettingsWnd, WM_MW_REBUILD_FONTS, 0, 0);
+        p->BroadcastFontSync(hWnd);
       }
       return 0;
     }

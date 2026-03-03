@@ -1484,6 +1484,9 @@ void Engine::MyReadConfig() {
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
   m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 620, pIni);
   m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 850, pIni);
+  m_nSettingsPosX = GetPrivateProfileIntW(L"Milkwave", L"SettingsPosX", -1, pIni);
+  m_nSettingsPosY = GetPrivateProfileIntW(L"Milkwave", L"SettingsPosY", -1, pIni);
+  m_bSettingsOnTop = GetPrivateProfileIntW(L"Milkwave", L"SettingsOnTop", 0, pIni) != 0;
   m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
   if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
   if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
@@ -1702,6 +1705,9 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsPosX, L"SettingsPosX", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsPosY, L"SettingsPosY", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bSettingsOnTop, L"SettingsOnTop", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsFontSize, L"SettingsFontSize", pIni, L"Milkwave");
 
   // GPU Protection
@@ -1870,6 +1876,7 @@ void Engine::CleanUpMyNonDx9Stuff() {
   // Close settings window and tool windows if open
   CloseSettingsWindow();
   CloseDisplaysWindow();
+  CloseSongInfoWindow();
 
   // Join any in-flight preset load thread
   if (m_presetLoadThread.joinable())

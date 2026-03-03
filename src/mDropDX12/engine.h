@@ -1018,11 +1018,13 @@ public:
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   HFONT       m_hSettingsPinFont = NULL;  // Segoe MDL2 Assets for pin icon
-  bool        m_bSettingsOnTop = true;    // Settings window always-on-top state
+  bool        m_bSettingsOnTop = false;   // Settings window always-on-top state (persisted)
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
   int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
   int         m_nSettingsWndW = 620;
   int         m_nSettingsWndH = 850;
+  int         m_nSettingsPosX = -1;        // persisted position (-1 = center on screen)
+  int         m_nSettingsPosY = -1;
   std::thread m_settingsThread;
   std::atomic<bool> m_bSettingsThreadRunning{false};
   void        OpenSettingsWindow();
@@ -1043,6 +1045,14 @@ public:
   std::unique_ptr<DisplaysWindow> m_displaysWindow;
   void OpenDisplaysWindow();
   void CloseDisplaysWindow();
+
+  // Song Info window (ToolWindow subclass, own thread)
+  std::unique_ptr<SongInfoWindow> m_songInfoWindow;
+  void OpenSongInfoWindow();
+  void CloseSongInfoWindow();
+
+  // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
+  void BroadcastFontSync(HWND hSender);
 
   // Remote tab
   void        RefreshIPCList(HWND hSettingsWnd);
