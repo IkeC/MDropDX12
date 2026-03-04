@@ -788,8 +788,21 @@ void EngineShell::OnUserResizeWindow() {
         }
         SetVariableBackBuffer(newW, newH);
         UpdateBackBufferTracking(newW, newH);
+        // Check if device is still alive before attempting resize
+        HRESULT devReason = m_lpDX->m_device->GetDeviceRemovedReason();
+        if (devReason != S_OK) {
+          char dbg[256];
+          sprintf(dbg, "DX12: Device already removed (reason=0x%08X) before ResizeSwapChain — triggering recovery",
+                  (unsigned)devReason);
+          DebugLogA(dbg, LOG_ERROR);
+          m_lpDX->m_lastErr = devReason;
+          return;
+        }
         // DX12: resize the swap chain instead of resetting the device
-        m_lpDX->ResizeSwapChain(newW, newH);
+        if (!m_lpDX->ResizeSwapChain(newW, newH)) {
+          DebugLogA("DX12: ResizeSwapChain failed — triggering recovery", LOG_ERROR);
+          return;
+        }
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
       if (!AllocateDX9Stuff()) {

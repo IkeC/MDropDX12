@@ -3000,6 +3000,45 @@ int Engine::AllocateMyDX9Stuff() {
   else {
     LoadShaders(&m_shaders, m_pState, false, false);  // Also force-load the shaders - otherwise they'd only get compiled on a preset switch.
     CreateDX12PresetPSOs();
+
+    // Reset Shadertoy start frame so iFrame restarts at 0 after resize.
+    // Feedback buffers are fresh (recreated above), so the shader must
+    // re-run its initialization code (e.g. "if (iFrame < 2) clear").
+    if (m_bShadertoyMode)
+      m_nShadertoyStartFrame = GetFrame();
+  }
+
+  // After resize, flush GPU and clear feedback buffers immediately so the
+  // first Shadertoy frame doesn't sample uninitialised FLOAT32 VRAM.
+  if (m_bShadertoyMode && m_lpDX && m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()) {
+    m_lpDX->m_uploadAllocator->Reset();
+    m_lpDX->m_uploadCommandList->Reset(m_lpDX->m_uploadAllocator.Get(), nullptr);
+    float black[] = { 0.f, 0.f, 0.f, 0.f };
+    for (int i = 0; i < 2; i++) {
+      // Transition SRV → RT
+      D3D12_RESOURCE_BARRIER barrier = {};
+      barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+      barrier.Transition.pResource = m_dx12Feedback[i].resource.Get();
+      barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+      barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+      barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+      m_lpDX->m_uploadCommandList->ResourceBarrier(1, &barrier);
+      // Clear
+      m_lpDX->m_uploadCommandList->ClearRenderTargetView(
+          m_lpDX->GetRtvCpuHandle(m_dx12Feedback[i]), black, 0, nullptr);
+      // Transition RT → SRV
+      barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+      barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+      m_lpDX->m_uploadCommandList->ResourceBarrier(1, &barrier);
+    }
+    m_lpDX->m_uploadCommandList->Close();
+    ID3D12CommandList* lists[] = { m_lpDX->m_uploadCommandList.Get() };
+    m_lpDX->m_commandQueue->ExecuteCommandLists(1, lists);
+    m_lpDX->m_uploadFenceValue++;
+    m_lpDX->m_commandQueue->Signal(m_lpDX->m_uploadFence.Get(), m_lpDX->m_uploadFenceValue);
+    m_lpDX->m_uploadFence->SetEventOnCompletion(m_lpDX->m_uploadFenceValue, m_lpDX->m_uploadFenceEvent);
+    WaitForSingleObjectEx(m_lpDX->m_uploadFenceEvent, 5000, FALSE);
+    DebugLogA("DX12: Shadertoy feedback buffers cleared after resize");
   }
 
   // Re-wrap backbuffers for Spout if active (render targets were just recreated)

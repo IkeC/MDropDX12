@@ -518,13 +518,19 @@ bool DXContext::ResizeSwapChain(int newWidth, int newHeight)
         m_fenceValues[i] = m_fenceValues[m_frameIndex];
     }
 
+    UINT swapFlags = m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     HRESULT hr = m_swapChain->ResizeBuffers(
         DXC_FRAME_COUNT,
         (UINT)newWidth,
         (UINT)newHeight,
         k_BackBufferFormat,
-        0);
+        swapFlags);
     if (FAILED(hr)) {
+        HRESULT devReason = m_device->GetDeviceRemovedReason();
+        char buf[256];
+        sprintf(buf, "DX12: ResizeBuffers FAILED hr=0x%08X deviceRemovedReason=0x%08X",
+                (unsigned)hr, (unsigned)devReason);
+        DebugLogA(buf, LOG_ERROR);
         m_lastErr = DXC_ERR_RESIZEFAILED;
         return false;
     }
