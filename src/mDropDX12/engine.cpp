@@ -2520,6 +2520,7 @@ int Engine::AllocateMyDX9Stuff() {
     // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
     // mode.y = per-preset effect bitmask (bit0=brighten, bit1=darken, bit2=solarize, bit3=invert)
     //          Per-preset effects use DX9-compatible math (blend-state equivalent).
+    // mode.z = sRGB gamma (1=apply linear→sRGB for Shadertoy presets)
     if (m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
       static const char szInjectPS[] =
         "Texture2D<float4> tex : register(t0);\n"
@@ -2527,6 +2528,8 @@ int Engine::AllocateMyDX9Stuff() {
         "cbuffer cbInject : register(b0) { uint4 mode; }\n"
         "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
         "    float4 ret = tex.Sample(samp, uv);\n"
+        "    // sRGB gamma correction (Shadertoy presets output linear; display expects sRGB)\n"
+        "    if (mode.z == 1u) ret.rgb = pow(max(ret.rgb, 0.0), 1.0/2.2);\n"
         "    // Per-preset post-process effects (DX9 blend-state equivalent math)\n"
         "    if (mode.y & 1u) ret.rgb = ret.rgb * (2.0 - ret.rgb);\n"         // brighten = invert→square→invert
         "    if (mode.y & 2u) ret.rgb = ret.rgb * ret.rgb;\n"                  // darken = square

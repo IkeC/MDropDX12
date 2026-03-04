@@ -93,8 +93,13 @@ void Engine::RenderInjectEffect()
     if (m_pState->var_pf_invert   && *m_pState->var_pf_invert   > 0.5) presetFxMask |= 8u;
   }
 
+  // Shadertoy sRGB gamma: Shadertoy.com renders to sRGB framebuffer (automatic
+  // linear→sRGB). MDropDX12 uses R8G8B8A8_UNORM (no conversion), so apply gamma
+  // correction as a post-process to match Shadertoy's brightness.
+  UINT srgbGamma = m_bShadertoyMode ? 1u : 0u;
+
   // Skip if nothing to do
-  if (m_nInjectEffectMode == 0 && presetFxMask == 0) return;
+  if (m_nInjectEffectMode == 0 && presetFxMask == 0 && srgbGamma == 0) return;
   if (!m_pInjectEffectPSO || !m_injectEffectTex.IsValid()) return;
   if (!m_lpDX || !m_lpDX->m_ready) return;
 
@@ -150,8 +155,8 @@ void Engine::RenderInjectEffect()
   cl->SetDescriptorHeaps(_countof(heaps), heaps);
 
   // 10. Upload mode CBV (b0 = uint4 mode)
-  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask
-  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, 0, 0 } };
+  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask, mode.z = sRGB gamma
+  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, srgbGamma, 0 } };
   D3D12_GPU_VIRTUAL_ADDRESS cbva = m_lpDX->UploadConstantBuffer(&cbData, sizeof(cbData));
   if (cbva)
     cl->SetGraphicsRootConstantBufferView(0, cbva);

@@ -52,6 +52,7 @@ void NSEEL_VM_resetvars(NSEEL_VMCTX ctx);
 #define NUM_T_VAR 8
 
 #define MAX_BIGSTRING_LEN    32768
+#define MAX_SHADER_TEXT_LEN  131072  // 128KB for large Shadertoy shaders
 
 class CBlendableFloat {
 public:
@@ -371,8 +372,8 @@ public:
   char			m_szPerFrameExpr[MAX_BIGSTRING_LEN];
   char			m_szPerPixelExpr[MAX_BIGSTRING_LEN];
   char            m_szWarpShadersText[MAX_BIGSTRING_LEN]; // pixel shader code
-  char            m_szCompShadersText[MAX_BIGSTRING_LEN]; // pixel shader code
-  char            m_szBufferAShadersText[MAX_BIGSTRING_LEN]; // Shadertoy Buffer A shader code
+  char            m_szCompShadersText[MAX_SHADER_TEXT_LEN]; // pixel shader code (128KB for large Shadertoy)
+  char            m_szBufferAShadersText[MAX_SHADER_TEXT_LEN]; // Shadertoy Buffer A shader code
   int             m_nBufferAPSVersion = 0;             // 0 = no Buffer A shader
   void			FreeVarsAndCode(bool bFree = true);
   void			RegisterBuiltInVariables(int flags);

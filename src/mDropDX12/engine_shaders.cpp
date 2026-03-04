@@ -691,12 +691,34 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       return true;
   }
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaders: comp.ptr=%p comp.CT=%p nCompPSVersion=%d",
-            (void*)sh->comp.ptr, (void*)sh->comp.CT, pState->m_nCompPSVersion);
-    DebugLogA(dbg, LOG_VERBOSE);
+  // Buffer A shader (Shadertoy two-pass) — compile BEFORE comp so diag files don't collide
+  m_bHasBufferA = false;
+  if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly);
+    DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+    // Copy diag files to bufferA-specific names (RecompilePShader writes to diag_comp_*)
+    {
+      char srcPath[MAX_PATH], dstPath[MAX_PATH];
+      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferA_shader_error.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
+      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferA_shader.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
+    }
+    if (bOK) {
+      m_bHasBufferA = true;
+      m_bCompUsesFeedback = true;  // Buffer A always implies feedback
+      for (int i = 0; i < 16; i++) {
+        if (sh->bufferA.params.m_texcode[i] == TEX_FEEDBACK) {
+          DebugLogA("DX12: Buffer A shader uses sampler_feedback (self-referencing)");
+          break;
+        }
+      }
+    }
   }
+
+  // Comp (Image) shader — compiled after bufferA so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
     {
@@ -714,38 +736,11 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
     }
 
     // Check if comp shader uses sampler_feedback (Shadertoy temporal reprojection)
-    m_bCompUsesFeedback = false;
-    for (int i = 0; i < 16; i++) {
-      if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK) {
-        m_bCompUsesFeedback = true;
-        DebugLogA("DX12: Comp shader uses sampler_feedback (temporal feedback enabled)");
-        break;
-      }
-    }
-  }
-
-  // Buffer A shader (Shadertoy two-pass)
-  m_bHasBufferA = false;
-  if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
-    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly);
-    DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
-    // Save Buffer A error/shader to separate diag files before comp overwrites them
-    {
-      char srcPath[MAX_PATH], dstPath[MAX_PATH];
-      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferA_shader_error.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferA_shader.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-    }
-    if (bOK) {
-      m_bHasBufferA = true;
-      m_bCompUsesFeedback = true;  // Buffer A always implies feedback
-      // Check if Buffer A uses sampler_feedback (for self-referencing)
+    if (!m_bCompUsesFeedback) {
       for (int i = 0; i < 16; i++) {
-        if (sh->bufferA.params.m_texcode[i] == TEX_FEEDBACK) {
-          DebugLogA("DX12: Buffer A shader uses sampler_feedback (self-referencing)");
+        if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK) {
+          m_bCompUsesFeedback = true;
+          DebugLogA("DX12: Comp shader uses sampler_feedback (temporal feedback enabled)");
           break;
         }
       }
@@ -1283,40 +1278,23 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
   if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+    const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
     char dumpPath[MAX_PATH];
-    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir,
-            shaderType == SHADER_COMP ? "comp" : "warp");
+    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
     FILE* f = fopen(dumpPath, "w");
-    if (f) { fputs(szShaderText, f); fclose(f); }
-  }
-  // Also dump a numbered variant for multi-pass diagnostics (bufferA=0, comp=1, etc.)
-  {
-    static int s_dumpIdx = 0;
-    char dumpPath[MAX_PATH];
-    sprintf(dumpPath, "%lsdiag_comp_shader_%d.txt", m_szBaseDir, s_dumpIdx++);
-    FILE* f = fopen(dumpPath, "w");
-    if (f) { fputs(szShaderText, f); fclose(f); }
-    if (s_dumpIdx > 5) s_dumpIdx = 0;
+    if (f) {
+      fprintf(f, "// DIAG: type=%s profile=%s len=%d preset=%ls\n",
+              typeName, szProfile, lstrlen(szShaderText),
+              m_pState ? m_pState->m_szDesc : L"(unknown)");
+      fputs(szShaderText, f);
+      fclose(f);
+    }
   }
 
   // now really try to compile it.
 
   bool failed = false;
   int len = lstrlen(szShaderText);
-
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaderFromMemory: len=%d profile=%s fn=%s shaderType=%d", len, szProfile, szFn, shaderType);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
-
-  std::wstring wideShaderText = std::wstring(szShaderText, szShaderText + strlen(szShaderText));
-  wchar_t tempBuffer[32768]; // Ensure the buffer size is sufficient for the content.
-  wcsncpy(tempBuffer, wideShaderText.c_str(), 32767); // Copy the content safely.
-  tempBuffer[32767] = L'\0'; // Null-terminate to avoid overflow.
-  dumpmsg(tempBuffer, LOG_VERBOSE); // Full shader text — only at verbose level
-
-  DebugLogA("DX12: LoadShaderFromMemory: after dumpmsg, computing checksum...", LOG_VERBOSE);
 
   uint32_t checksum = crc32(szShaderText, len);
 
@@ -1405,11 +1383,17 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
         // Write D3DCompile error to diagnostic file for Shader Import window
         if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+          const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
           char errPath[MAX_PATH];
-          sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir,
-                  shaderType == SHADER_COMP ? "comp" : "warp");
+          sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
           FILE* ef = fopen(errPath, "w");
-          if (ef) { fputs(errorMsg, ef); fclose(ef); }
+          if (ef) {
+            fprintf(ef, "// DIAG: type=%s profile=%s shaderLen=%d preset=%ls\n",
+                    typeName, szProfile, len,
+                    m_pState ? m_pState->m_szDesc : L"(unknown)");
+            fputs(errorMsg, ef);
+            fclose(ef);
+          }
         }
 
         SafeRelease(m_pShaderCompileErrors);
@@ -1426,11 +1410,15 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
     // Clear stale error file on successful compilation
     if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+      const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
       char errPath[MAX_PATH];
-      sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir,
-              shaderType == SHADER_COMP ? "comp" : "warp");
+      sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
       FILE* ef = fopen(errPath, "w");
-      if (ef) fclose(ef);
+      if (ef) {
+        fprintf(ef, "// OK: type=%s len=%d preset=%ls\n",
+                typeName, len, m_pState ? m_pState->m_szDesc : L"(unknown)");
+        fclose(ef);
+      }
     }
 
     if (m_ShaderCaching) {

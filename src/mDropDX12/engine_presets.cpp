@@ -1605,14 +1605,14 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   // Store Image/comp shader
   if (!imageW.empty()) {
     std::string imageA = wideToNarrow(imageW);
-    strncpy_s(m_pState->m_szCompShadersText, MAX_BIGSTRING_LEN, imageA.c_str(), _TRUNCATE);
+    strncpy_s(m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageA.c_str(), _TRUNCATE);
     m_pState->m_nCompPSVersion = MD2_PS_5_0;
   }
 
   // Store Buffer A shader
   if (!bufferAW.empty()) {
     std::string bufferAA = wideToNarrow(bufferAW);
-    strncpy_s(m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, bufferAA.c_str(), _TRUNCATE);
+    strncpy_s(m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufferAA.c_str(), _TRUNCATE);
     m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
   }
 

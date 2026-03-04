@@ -1052,7 +1052,7 @@ int  CShape::Export(FILE* fOut, const wchar_t* szFile, int i) {
   return 1;
 }
 
-void ReadCode(FILE* f, char* pStr, char* prefix) {
+void ReadCode(FILE* f, char* pStr, char* prefix, int maxLen = MAX_BIGSTRING_LEN) {
   if (!pStr)
     return;
   pStr[0] = 0;
@@ -1073,7 +1073,7 @@ void ReadCode(FILE* f, char* pStr, char* prefix) {
     len = (int)strlen(szLine);
 
     if ((strcmp(szLine, "~!@#$") == 0) ||		// if the key was missing,
-      (len >= MAX_BIGSTRING_LEN - 1 - char_pos - 1))			// or if we're out of space
+      (len >= maxLen - 1 - char_pos - 1))			// or if we're out of space
     {
       bDone = true;
     }
@@ -1422,7 +1422,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   // comp shader
   if (ApplyFlags & STATE_COMP) {
     //m_szCompShadersText[0] = 0;
-    ReadCode(f, m_szCompShadersText, "comp_");
+    ReadCode(f, m_szCompShadersText, "comp_", MAX_SHADER_TEXT_LEN);
     {
       char dbg[512];
       int textLen = (int)strlen(m_szCompShadersText);
@@ -1445,7 +1445,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
 
   // Buffer A shader (Shadertoy two-pass)
   if (ApplyFlags & STATE_COMP) {
-    ReadCode(f, m_szBufferAShadersText, "bufA_");
+    ReadCode(f, m_szBufferAShadersText, "bufA_", MAX_SHADER_TEXT_LEN);
     if (m_szBufferAShadersText[0])
       m_nBufferAPSVersion = nCompPSVersionInFile;  // use same PS version as comp
     else
