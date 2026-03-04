@@ -591,14 +591,39 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_MESSAGES_WIN_FONT_PLUS   9061
 #define IDC_MW_MESSAGES_WIN_FONT_MINUS  9062
 
+// Shader Import window controls (9100-9119)
+#define IDC_MW_SHIMPORT_PIN          9100
+#define IDC_MW_SHIMPORT_FONT_PLUS    9101
+#define IDC_MW_SHIMPORT_FONT_MINUS   9102
+#define IDC_MW_SHIMPORT_GLSL_EDIT    9103  // Multiline EDIT: GLSL paste area
+#define IDC_MW_SHIMPORT_HLSL_EDIT    9104  // Multiline EDIT: converted HLSL
+#define IDC_MW_SHIMPORT_ERROR_EDIT   9105  // Multiline EDIT: errors (read-only)
+#define IDC_MW_SHIMPORT_CONVERT      9106  // Button: Convert GLSL→HLSL
+#define IDC_MW_SHIMPORT_APPLY        9107  // Button: Apply (live preview)
+#define IDC_MW_SHIMPORT_SAVE         9108  // Button: Save as .milk
+#define IDC_MW_SHIMPORT_CLEAR        9109  // Button: Clear all
+#define IDC_MW_SHIMPORT_PASTE        9110  // Button: Paste from clipboard
+#define IDC_MW_SHIMPORT_COPY         9111  // Button: Copy HLSL
+
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
 #define IDC_MW_OPEN_SPRITES       9081
 #define IDC_MW_OPEN_MESSAGES      9082
 #define IDC_MW_OPEN_BOARD         9083
+#define IDC_MW_OPEN_SHIMPORT      9084
+#define IDC_MW_TOOLS_LIST         9090  // ListView on Tools tab
 
-// Settings page count
-#define SETTINGS_NUM_PAGES      8
+// Settings tab page indices
+#define SP_GENERAL  0
+#define SP_TOOLS    1
+#define SP_VISUAL   2
+#define SP_COLORS   3
+#define SP_SYSTEM   4
+#define SP_FILES    5
+#define SP_REMOTE   6
+#define SP_SCRIPT   7
+#define SP_ABOUT    8
+#define SETTINGS_NUM_PAGES  9
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)

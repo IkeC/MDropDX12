@@ -25,6 +25,7 @@ enum class RenderCmd : uint8_t {
     PushSprite,          // LaunchSprite(iParam1=sprite#, iParam2=slot)
     KillSprite,          // KillSprite(iParam1=slot)
     LoadShaders,         // LoadShaders + CreateDX12PresetPSOs
+    RecompileCompShader, // Recompile comp shader from m_pState text + rebuild PSOs
     DisableAllOutputs,   // Ctrl+F2 kill switch
     Quit,                // Clean shutdown
 };

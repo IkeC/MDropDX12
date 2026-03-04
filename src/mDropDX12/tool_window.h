@@ -475,6 +475,43 @@ private:
   HMENU BuildActionSubMenu();
 };
 
+// ── Concrete subclass: Shader Import window ──
+
+class ShaderImportWindow : public ToolWindow {
+public:
+  ShaderImportWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Shader Import"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ShaderImportWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ShaderImport"; }
+  int GetPinControlID() const override       { return IDC_MW_SHIMPORT_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_SHIMPORT_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_SHIMPORT_FONT_MINUS; }
+  int GetMinWidth() const override  { return 600; }
+  int GetMinHeight() const override { return 700; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+
+private:
+  int m_nTopY = 0;
+  void LayoutControls();
+  void ConvertGLSLtoHLSL();
+  void ApplyShader();
+  void SaveAsPreset();
+
+  // Conversion helpers (ported from Milkwave Remote ShaderHelper.cs)
+  static std::string ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& input);
+  static int FindClosingBracket(const std::string& input, char open, char close, int startLevel);
+  static std::string FixMatrixMultiplication(const std::string& line);
+  static std::string FixFloatNumberOfArguments(const std::string& line, const std::string& fullContext);
+  static std::string FixAtan(const std::string& line);
+  static std::string BasicFormatShaderCode(const std::string& code);
+};
+
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.
 // Returns LRESULT to return from WndProc; sets *pHandled=true if the notification was handled.
 LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,

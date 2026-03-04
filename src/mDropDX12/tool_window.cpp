@@ -90,6 +90,8 @@ void Engine::BroadcastFontSync(HWND hSender) {
     PostMessage(m_spritesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
   if (m_messagesWindow && m_messagesWindow->IsOpen() && m_messagesWindow->GetHWND() != hSender)
     PostMessage(m_messagesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_shaderImportWindow && m_shaderImportWindow->IsOpen() && m_shaderImportWindow->GetHWND() != hSender)
+    PostMessage(m_shaderImportWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
 }
 
 //----------------------------------------------------------------------

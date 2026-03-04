@@ -324,8 +324,15 @@ void ToggleWindowOpacity(HWND hwnd, bool bDown) {
 }
 
 bool Engine::IsBorderlessFullscreen(HWND hWnd) {
-  // Check if the window is borderless fullscreen
-  RECT workArea;
+  // Check if the window is borderless fullscreen:
+  // must fill the work area AND have no standard window chrome (WS_OVERLAPPEDWINDOW).
+  // Without the style check, a normal maximized window also fills the work area
+  // and would incorrectly trigger watermark mode on startup.
+  LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE);
+  if (style & (WS_CAPTION | WS_THICKFRAME))
+    return false;  // has window chrome — it's just maximized, not borderless
+
+  RECT workArea = {};
   MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
   HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
   if (GetMonitorInfo(hMonitor, &monitorInfo)) {
@@ -2182,6 +2189,19 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
     case RenderCmd::LoadShaders:
       // Handled during preset load; placeholder for future use
       break;
+    case RenderCmd::RecompileCompShader:
+    {
+      ClearErrors(ERR_PRESET);
+      if (m_nMaxPSVersion > 0) {
+        m_shaders.comp.Clear();
+        if (!RecompilePShader(m_pState->m_szCompShadersText, &m_shaders.comp,
+                              SHADER_COMP, false, m_pState->m_nCompPSVersion, false)) {
+          m_shaders.comp = m_fallbackShaders_ps.comp;
+        }
+        CreateDX12PresetPSOs();
+      }
+      break;
+    }
     case RenderCmd::DisableAllOutputs:
       for (auto& out : m_displayOutputs) {
         out.config.bEnabled = false;

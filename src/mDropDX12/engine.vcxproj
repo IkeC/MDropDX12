@@ -363,6 +363,7 @@
     <ClCompile Include="json_utils.cpp" />
     <ClCompile Include="button_panel.cpp" />
     <ClCompile Include="engine_board_ui.cpp" />
+    <ClCompile Include="engine_shader_import_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
     <ClCompile Include="engine_sprites_ui.cpp" />
     <ClCompile Include="engine_messages_ui.cpp" />

@@ -1096,6 +1096,11 @@ public:
   void OpenBoardWindow();
   void CloseBoardWindow();
 
+  // Shader Import window (ToolWindow subclass, own thread)
+  std::unique_ptr<ShaderImportWindow> m_shaderImportWindow;
+  void OpenShaderImportWindow();
+  void CloseShaderImportWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 

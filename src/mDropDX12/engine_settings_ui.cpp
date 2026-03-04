@@ -812,6 +812,32 @@ void SettingsWindow::RebuildFonts() {
   ToolWindow::RebuildFonts();
 }
 
+// ─── Tools ListView sort ────────────────────────────────────────────────────
+static int  s_toolSortCol = 0;
+static bool s_toolSortAsc = true;
+
+static int CALLBACK ToolListCompare(LPARAM lp1, LPARAM lp2, LPARAM lpSort)
+{
+  HWND hList = (HWND)lpSort;
+  wchar_t a[128] = {}, b[128] = {};
+  LVITEMW lvi = {};
+  lvi.mask = LVIF_TEXT;
+  lvi.iSubItem = s_toolSortCol;
+  lvi.pszText = a; lvi.cchTextMax = 128;
+  // Find items by lParam
+  LVFINDINFOW fi = {};
+  fi.flags = LVFI_PARAM;
+  fi.lParam = lp1;
+  int i1 = (int)SendMessageW(hList, LVM_FINDITEMW, -1, (LPARAM)&fi);
+  fi.lParam = lp2;
+  int i2 = (int)SendMessageW(hList, LVM_FINDITEMW, -1, (LPARAM)&fi);
+  if (i1 >= 0) { lvi.iItem = i1; SendMessageW(hList, LVM_GETITEMTEXTW, i1, (LPARAM)&lvi); }
+  lvi.pszText = b; lvi.cchTextMax = 128;
+  if (i2 >= 0) { lvi.iItem = i2; SendMessageW(hList, LVM_GETITEMTEXTW, i2, (LPARAM)&lvi); }
+  int cmp = _wcsicmp(a, b);
+  return s_toolSortAsc ? cmp : -cmp;
+}
+
 LRESULT SettingsWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
   // Idle timer timeout spin control
   if (pnm->idFrom == IDC_MW_IDLE_TIMEOUT_SPIN && pnm->code == UDN_DELTAPOS) {
@@ -822,6 +848,36 @@ LRESULT SettingsWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
     m_pEngine->m_nIdleTimeoutMinutes = newVal;
     m_pEngine->SaveIdleTimerSettings();
   }
+
+  // Tools ListView: double-click to open
+  if (pnm->idFrom == IDC_MW_TOOLS_LIST && pnm->code == NM_DBLCLK) {
+    HWND hList = pnm->hwndFrom;
+    int sel = (int)SendMessageW(hList, LVM_GETNEXTITEM, -1, LVNI_SELECTED);
+    if (sel >= 0) {
+      LVITEMW lvi = {};
+      lvi.mask = LVIF_PARAM;
+      lvi.iItem = sel;
+      SendMessageW(hList, LVM_GETITEMW, 0, (LPARAM)&lvi);
+      int hkIdx = (int)lvi.lParam;
+      if (hkIdx >= 0 && hkIdx < NUM_HOTKEYS)
+        m_pEngine->DispatchHotkeyAction(m_pEngine->m_hotkeys[hkIdx].id);
+    }
+    return 0;
+  }
+
+  // Tools ListView: column click to sort
+  if (pnm->idFrom == IDC_MW_TOOLS_LIST && pnm->code == LVN_COLUMNCLICK) {
+    NMLISTVIEW* pnmlv = (NMLISTVIEW*)pnm;
+    if (pnmlv->iSubItem == s_toolSortCol)
+      s_toolSortAsc = !s_toolSortAsc;
+    else {
+      s_toolSortCol = pnmlv->iSubItem;
+      s_toolSortAsc = true;
+    }
+    ListView_SortItems(pnm->hwndFrom, ToolListCompare, (LPARAM)pnm->hwndFrom);
+    return 0;
+  }
+
   return 0;
 }
 
@@ -1061,6 +1117,11 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     if (id == IDC_MW_OPEN_BOARD && code == BN_CLICKED) {
       p->OpenBoardWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_SHIMPORT && code == BN_CLICKED) {
+      p->OpenShaderImportWindow();
       return 0;
     }
 
@@ -2006,7 +2067,7 @@ void SettingsWindow::DoBuildControls() {
   HFONT hFontBold = m_hFontBold;
 
   // Tab control (base handles creation, subclass, dark theme)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"System", L"Files", L"Remote", L"Script", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Tools", L"Visual", L"Colors", L"System", L"Files", L"Remote", L"Script", L"About" };
   RECT rcDisplay = BuildTabControl(IDC_MW_TAB, tabNames, SETTINGS_NUM_PAGES,
                                     0, 0, clientW, clientH);
   int tabTop = rcDisplay.top;
@@ -2123,29 +2184,14 @@ void SettingsWindow::DoBuildControls() {
   // ====== PAGE 0: General ======
   y = tabTop + 10;
 
-  // ── Launcher buttons row (prominent, always visible) ──
-  {
-    int bx = x, bg = 4;
-    int bw1 = MulDiv(130, lineH, 26);
-    int bw2 = MulDiv(95, lineH, 26);
-    int bw3 = MulDiv(80, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"Displays...",  IDC_MW_OPEN_DISPLAYS, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Song Info...", IDC_MW_OPEN_SONGINFO, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Presets...",   IDC_MW_OPEN_PRESETS,  bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Sprites...",  IDC_MW_OPEN_SPRITES,  bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Messages...", IDC_MW_OPEN_MESSAGES, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Board...",     IDC_MW_OPEN_BOARD,    bx, y, bw3, lineH, hFont));
-  }
-  y += lineH + gap + 2;
-
   // Current/Startup Preset + Browse
-  PAGE_CTRL(0, CreateLabel(hw, L"Current Preset:", x, y, lw, lineH, hFont));
-  PAGE_CTRL(0, CreateEdit(hw, m_szCurrentPresetFile, IDC_MW_CURRENT_PRESET, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
-  PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_PRESET, x + rw - 65, y, 65, lineH, hFont));
+  PAGE_CTRL(SP_GENERAL, CreateLabel(hw, L"Current Preset:", x, y, lw, lineH, hFont));
+  PAGE_CTRL(SP_GENERAL, CreateEdit(hw, m_szCurrentPresetFile, IDC_MW_CURRENT_PRESET, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
+  PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_PRESET, x + rw - 65, y, 65, lineH, hFont));
   y += lineH + gap;
 
   // ── Other ──
-  PAGE_CTRL(0, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
+  PAGE_CTRL(SP_GENERAL, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
   {
     HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
       WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
@@ -2157,15 +2203,15 @@ void SettingsWindow::DoBuildControls() {
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Sprites");
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Messages & Sprites");
     SendMessageW(hCombo, CB_SETCURSEL, m_nSpriteMessagesMode, 0);
-    PAGE_CTRL(0, hCombo);
+    PAGE_CTRL(SP_GENERAL, hCombo);
   }
   y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
+  PAGE_CTRL(SP_GENERAL, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
+  PAGE_CTRL(SP_GENERAL, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
+  PAGE_CTRL(SP_GENERAL, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
   {
     int themeLblW = MulDiv(55, lineH, 26);
-    PAGE_CTRL(0, CreateLabel(hw, L"Theme:", x, y, themeLblW, lineH, hFont, false));
+    PAGE_CTRL(SP_GENERAL, CreateLabel(hw, L"Theme:", x, y, themeLblW, lineH, hFont, false));
     HWND hThemeCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
       x + themeLblW + 4, y, rw - themeLblW - 4, 200, hw,
@@ -2175,116 +2221,116 @@ void SettingsWindow::DoBuildControls() {
     SendMessageW(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Light");
     SendMessageW(hThemeCombo, CB_ADDSTRING, 0, (LPARAM)L"Follow System");
     SendMessage(hThemeCombo, CB_SETCURSEL, (WPARAM)m_nThemeMode, 0);
-    PAGE_CTRL(0, hThemeCombo);
+    PAGE_CTRL(SP_GENERAL, hThemeCombo);
   }
   y += lineH + gap + 4;
   {
     int bx = x, bg = 4;
     int bw1 = MulDiv(95, lineH, 26), bw2 = MulDiv(65, lineH, 26), bw3 = MulDiv(80, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, bx, y, bw3, lineH, hFont));
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, bx, y, bw3, lineH, hFont));
   }
   y += lineH + gap;
   {
     int bx = x, bg = 4;
     int bw1 = MulDiv(100, lineH, 26), bw2 = MulDiv(55, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
-    PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
   }
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Opacity:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(1, CreateSlider(hw, IDC_MW_OPACITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(fOpacity * 100), false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Opacity:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateSlider(hw, IDC_MW_OPACITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(fOpacity * 100), false));
   swprintf(buf, 64, L"%d%%", (int)(fOpacity * 100));
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_OPACITY_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(1, hLbl);
+    PAGE_CTRL(SP_VISUAL, hLbl);
   }
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Render Quality:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(1, CreateSlider(hw, IDC_MW_RENDER_QUALITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(m_fRenderQuality * 100), false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Render Quality:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateSlider(hw, IDC_MW_RENDER_QUALITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(m_fRenderQuality * 100), false));
   swprintf(buf, 64, L"%.2f", m_fRenderQuality);
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_QUALITY_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(1, hLbl);
+    PAGE_CTRL(SP_VISUAL, hLbl);
   }
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateCheck(hw, L"Auto Quality", IDC_MW_QUALITY_AUTO, x, y, rw, lineH, hFont, bQualityAuto, false));
+  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Auto Quality", IDC_MW_QUALITY_AUTO, x, y, rw, lineH, hFont, bQualityAuto, false));
   y += lineH + gap + 4;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Time Factor:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Time Factor:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.2f", m_timeFactor);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_TIME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_TIME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Frame Factor:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Frame Factor:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.2f", m_frameFactor);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_FRAME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_FRAME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"FPS Factor:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"FPS Factor:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.2f", m_fpsFactor);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_FPS_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_FPS_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Vis Intensity:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Intensity:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.2f", m_VisIntensity);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_INTENSITY, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_INTENSITY, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Vis Shift:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Shift:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.2f", m_VisShift);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_SHIFT, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_SHIFT, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Vis Version:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Version:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%.0f", m_VisVersion);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, MulDiv(80, lineH, 26), lineH, hFont));
+  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, MulDiv(80, lineH, 26), lineH, hFont));
   y += lineH + gap + 8;
 
   // -- GPU Protection section --
-  PAGE_CTRL(1, CreateLabel(hw, L"GPU Protection", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"GPU Protection", x, y, rw, lineH, hFont, false));
   y += lineH + 2;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Max Instances:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Max Instances:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%d", m_nMaxShapeInstances);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_MAX_INST, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  PAGE_CTRL(1, CreateLabel(hw, L"(0=unlimited)", x + lw + 70, y, 100, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_MAX_INST, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"(0=unlimited)", x + lw + 70, y, 100, lineH, hFont, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateCheck(hw, L"Scale Instances by Resolution", IDC_MW_GPU_SCALE_BY_RES, x, y, rw, lineH, hFont, m_bScaleInstancesByResolution, false));
+  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Scale Instances by Resolution", IDC_MW_GPU_SCALE_BY_RES, x, y, rw, lineH, hFont, m_bScaleInstancesByResolution, false));
   y += lineH + 2;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Scale Base Width:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Scale Base Width:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%d", m_nInstanceScaleBaseWidth);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_SCALE_BASE, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_SCALE_BASE, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateCheck(hw, L"Skip Heavy Presets", IDC_MW_GPU_SKIP_HEAVY, x, y, rw, lineH, hFont, m_bSkipHeavyPresets, false));
+  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Skip Heavy Presets", IDC_MW_GPU_SKIP_HEAVY, x, y, rw, lineH, hFont, m_bSkipHeavyPresets, false));
   y += lineH + 2;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"Heavy Threshold:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Heavy Threshold:", x, y, lw, lineH, hFont, false));
   swprintf(buf, 64, L"%d", m_nHeavyPresetMaxInstances);
-  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
 
-  PAGE_CTRL(1, CreateCheck(hw, L"Enable VSync", IDC_MW_VSYNC_ENABLED, x, y, rw, lineH, hFont, m_bEnableVSync, false));
+  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Enable VSync", IDC_MW_VSYNC_ENABLED, x, y, rw, lineH, hFont, m_bEnableVSync, false));
   y += lineH + gap;
 
-  PAGE_CTRL(1, CreateLabel(hw, L"FPS Cap:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"FPS Cap:", x, y, lw, lineH, hFont, false));
   {
     HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
@@ -2299,72 +2345,72 @@ void SettingsWindow::DoBuildControls() {
       if (fpsValues[i] == m_max_fps_fs) selIdx = i;
     }
     SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
-    PAGE_CTRL(1, hCombo);
+    PAGE_CTRL(SP_VISUAL, hCombo);
   }
   y += lineH + gap + 4;
 
-  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
-  PAGE_CTRL(1, CreateBtn(hw, L"Restart Render", IDC_MW_RESTART_RENDER, x + MulDiv(120, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont));
+  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
+  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Restart Render", IDC_MW_RESTART_RENDER, x + MulDiv(120, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
 
-  PAGE_CTRL(2, CreateLabel(hw, L"Hue:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_HUE, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftHue * 100) + 100, false));
+  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Hue:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_HUE, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftHue * 100) + 100, false));
   swprintf(buf, 64, L"%.2f", m_ColShiftHue);
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_HUE_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(2, hLbl);
+    PAGE_CTRL(SP_COLORS, hLbl);
   }
   y += lineH + gap;
 
-  PAGE_CTRL(2, CreateLabel(hw, L"Saturation:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_SAT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftSaturation * 100) + 100, false));
+  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Saturation:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_SAT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftSaturation * 100) + 100, false));
   swprintf(buf, 64, L"%.2f", m_ColShiftSaturation);
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_SAT_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(2, hLbl);
+    PAGE_CTRL(SP_COLORS, hLbl);
   }
   y += lineH + gap;
 
-  PAGE_CTRL(2, CreateLabel(hw, L"Brightness:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_BRIGHT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftBrightness * 100) + 100, false));
+  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Brightness:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_BRIGHT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftBrightness * 100) + 100, false));
   swprintf(buf, 64, L"%.2f", m_ColShiftBrightness);
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_BRIGHT_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(2, hLbl);
+    PAGE_CTRL(SP_COLORS, hLbl);
   }
   y += lineH + gap;
 
-  PAGE_CTRL(2, CreateLabel(hw, L"Gamma:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_GAMMA, x + lw + 4, y, sliderW, lineH, 0, 80, (int)(m_pState->m_fGammaAdj.eval(-1) * 10), false));
+  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Gamma:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_GAMMA, x + lw + 4, y, sliderW, lineH, 0, 80, (int)(m_pState->m_fGammaAdj.eval(-1) * 10), false));
   swprintf(buf, 64, L"%.1f", m_pState->m_fGammaAdj.eval(-1));
   {
     HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
       x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_GAMMA_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(2, hLbl);
+    PAGE_CTRL(SP_COLORS, hLbl);
   }
   y += lineH + gap + 4;
 
-  PAGE_CTRL(2, CreateCheck(hw, L"Auto Hue", IDC_MW_AUTO_HUE, x, y, rw / 2, lineH, hFont, m_AutoHue, false));
-  PAGE_CTRL(2, CreateLabel(hw, L"Seconds:", x + rw / 2, y, 60, lineH, hFont, false));
+  PAGE_CTRL(SP_COLORS, CreateCheck(hw, L"Auto Hue", IDC_MW_AUTO_HUE, x, y, rw / 2, lineH, hFont, m_AutoHue, false));
+  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Seconds:", x + rw / 2, y, 60, lineH, hFont, false));
   swprintf(buf, 64, L"%.3f", m_AutoHueSeconds);
-  PAGE_CTRL(2, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_COLORS, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
+  PAGE_CTRL(SP_COLORS, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
 
   // ====== PAGE 3: System (created hidden) ======
   y = tabTop + 10;
 
   // Audio Device
-  PAGE_CTRL(3, CreateLabel(hw, L"Audio Device:", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Audio Device:", x, y, rw, lineH, hFont, false));
   y += lineH;
   {
     HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
@@ -2372,7 +2418,7 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, 200, hw, (HMENU)(INT_PTR)IDC_MW_AUDIO_DEVICE, GetModuleHandle(NULL), NULL);
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
     EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
-    PAGE_CTRL(3, hCombo);
+    PAGE_CTRL(SP_SYSTEM, hCombo);
   }
   y += lineH + gap + 8;
 
@@ -2380,15 +2426,15 @@ void SettingsWindow::DoBuildControls() {
   {
     int btnW = MulDiv(100, lineH, 26);
     int midiW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(3, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - midiW - 16, lineH, hFontBold, false));
-    PAGE_CTRL(3, CreateBtn(hw, L"MIDI...", IDC_MW_OPEN_MIDI, x + rw - btnW - midiW - 8, y, midiW, lineH, hFont));
-    PAGE_CTRL(3, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - midiW - 16, lineH, hFontBold, false));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"MIDI...", IDC_MW_OPEN_MIDI, x + rw - btnW - midiW - 8, y, midiW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
   }
   y += lineH + gap + 8;
 
   // Idle Timer (screensaver mode)
-  PAGE_CTRL(3, CreateLabel(hw, L"Idle Timer", x, y, rw / 2 - 4, lineH, hFontBold, false));
-  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_IDLE_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bIdleTimerEnabled));
+  PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Idle Timer", x, y, rw / 2 - 4, lineH, hFontBold, false));
+  PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Enable", IDC_MW_IDLE_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bIdleTimerEnabled));
   y += lineH + gap;
 
   {
@@ -2397,9 +2443,9 @@ void SettingsWindow::DoBuildControls() {
     int comboW = rw - lblW - editW - MulDiv(100, lineH, 26);
 
     // Timeout
-    PAGE_CTRL(3, CreateLabel(hw, L"Timeout:", x, y, lblW, lineH, hFont, false));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Timeout:", x, y, lblW, lineH, hFont, false));
     HWND hEdit = CreateEdit(hw, L"", IDC_MW_IDLE_TIMEOUT, x + lblW, y, editW, lineH, hFont);
-    PAGE_CTRL(3, hEdit);
+    PAGE_CTRL(SP_SYSTEM, hEdit);
     {
       wchar_t buf[16];
       swprintf(buf, 16, L"%d", m_nIdleTimeoutMinutes);
@@ -2412,13 +2458,13 @@ void SettingsWindow::DoBuildControls() {
       SendMessage(hSpin, UDM_SETRANGE32, 1, 60);
       SendMessage(hSpin, UDM_SETPOS32, 0, m_nIdleTimeoutMinutes);
     }
-    PAGE_CTRL(3, hSpin);
+    PAGE_CTRL(SP_SYSTEM, hSpin);
 
-    PAGE_CTRL(3, CreateLabel(hw, L"min", x + lblW + editW + 4, y, MulDiv(30, lineH, 26), lineH, hFont, false));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"min", x + lblW + editW + 4, y, MulDiv(30, lineH, 26), lineH, hFont, false));
 
     // Action combo
     int actionX = x + lblW + editW + MulDiv(40, lineH, 26);
-    PAGE_CTRL(3, CreateLabel(hw, L"Action:", actionX, y, lblW, lineH, hFont, false));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Action:", actionX, y, lblW, lineH, hFont, false));
     HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
       WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
       actionX + lblW, y, comboW, lineH * 6, hw,
@@ -2427,10 +2473,10 @@ void SettingsWindow::DoBuildControls() {
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Fullscreen");
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Stretch/Mirror");
     SendMessageW(hCombo, CB_SETCURSEL, m_nIdleAction, 0);
-    PAGE_CTRL(3, hCombo);
+    PAGE_CTRL(SP_SYSTEM, hCombo);
 
     y += lineH + gap;
-    PAGE_CTRL(3, CreateCheck(hw, L"Auto-restore on input", IDC_MW_IDLE_AUTO_RESTORE,
+    PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Auto-restore on input", IDC_MW_IDLE_AUTO_RESTORE,
       x, y, rw, lineH, hFont, false, m_bIdleAutoRestore));
 
     // Disable idle timer controls if not enabled
@@ -2447,10 +2493,10 @@ void SettingsWindow::DoBuildControls() {
   {
     int titleW = MulDiv(130, lineH, 26);
     int helpW = lineH;  // square button
-    PAGE_CTRL(3, CreateLabel(hw, L"Game Controller", x, y, titleW, lineH, hFontBold, false));
-    PAGE_CTRL(3, CreateBtn(hw, L"\u2753", IDC_MW_CTRL_HELP, x + titleW + 4, y, helpW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Game Controller", x, y, titleW, lineH, hFontBold, false));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"\u2753", IDC_MW_CTRL_HELP, x + titleW + 4, y, helpW, lineH, hFont));
   }
-  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_CTRL_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bControllerEnabled));
+  PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Enable", IDC_MW_CTRL_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bControllerEnabled));
   y += lineH + gap;
 
   {
@@ -2460,20 +2506,20 @@ void SettingsWindow::DoBuildControls() {
     int comboW = rw - lblW - scanW - 8;
 
     // Device combo + Scan button
-    PAGE_CTRL(3, CreateLabel(hw, L"Device:", x, y, lblW, lineH, hFont, false));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Device:", x, y, lblW, lineH, hFont, false));
     HWND hCtrlCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
       WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
       x + lblW, y, comboW, lineH * 8, hw,
       (HMENU)(INT_PTR)IDC_MW_CTRL_DEVICE, GetModuleHandle(NULL), NULL);
     if (hCtrlCombo && hFont) SendMessage(hCtrlCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(3, hCtrlCombo);
+    PAGE_CTRL(SP_SYSTEM, hCtrlCombo);
     EnumerateControllers(hCtrlCombo);
 
-    PAGE_CTRL(3, CreateBtn(hw, L"Scan", IDC_MW_CTRL_SCAN, x + lblW + comboW + 4, y, scanW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Scan", IDC_MW_CTRL_SCAN, x + lblW + comboW + 4, y, scanW, lineH, hFont));
     y += lineH + gap;
 
     // Button Mapping label
-    PAGE_CTRL(3, CreateLabel(hw, L"Button Mapping:", x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Button Mapping:", x, y, rw, lineH, hFont, false));
     y += lineH;
 
     // Multiline JSON edit control
@@ -2483,7 +2529,7 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, editH, hw,
       (HMENU)(INT_PTR)IDC_MW_CTRL_JSON_EDIT, GetModuleHandle(NULL), NULL);
     if (hJsonEdit && hFont) SendMessage(hJsonEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(3, hJsonEdit);
+    PAGE_CTRL(SP_SYSTEM, hJsonEdit);
 
     // Populate with current JSON text
     {
@@ -2497,9 +2543,9 @@ void SettingsWindow::DoBuildControls() {
     // Defaults / Save / Load buttons
     int btnW = MulDiv(70, lineH, 26);
     int btnGap = 6;
-    PAGE_CTRL(3, CreateBtn(hw, L"Defaults", IDC_MW_CTRL_DEFAULTS, x, y, btnW, lineH, hFont));
-    PAGE_CTRL(3, CreateBtn(hw, L"Save", IDC_MW_CTRL_SAVE, x + btnW + btnGap, y, btnW, lineH, hFont));
-    PAGE_CTRL(3, CreateBtn(hw, L"Load", IDC_MW_CTRL_LOAD, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Defaults", IDC_MW_CTRL_DEFAULTS, x, y, btnW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Save", IDC_MW_CTRL_SAVE, x + btnW + btnGap, y, btnW, lineH, hFont));
+    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Load", IDC_MW_CTRL_LOAD, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
 
     // Disable sub-controls if not enabled
     if (!m_bControllerEnabled) {
@@ -2521,7 +2567,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_CONTENT_BASE_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hLbl);
+    PAGE_CTRL(SP_FILES, hLbl);
   }
   y += lineH + 2;
   {
@@ -2530,18 +2576,18 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_CONTENT_BASE_EDIT,
       GetModuleHandle(NULL), NULL);
     if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hEdit);
+    PAGE_CTRL(SP_FILES, hEdit);
   }
   y += lineH + 6;
   {
     int bx = x, bg = 4;
     int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
-    PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_CONTENT_BASE_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_CONTENT_BASE_CLEAR, bx, y, bw2, lineH, hFont));
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Browse...", IDC_MW_CONTENT_BASE_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Clear", IDC_MW_CONTENT_BASE_CLEAR, bx, y, bw2, lineH, hFont));
   }
   y += lineH + gap + 4;
 
-  PAGE_CTRL(4, CreateLabel(hw, L"Fallback Search Paths:", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_FILES, CreateLabel(hw, L"Fallback Search Paths:", x, y, rw, lineH, hFont, false));
   y += lineH + 2;
   {
     HWND hList = CreateWindowExW(0, L"LISTBOX", L"",
@@ -2552,14 +2598,14 @@ void SettingsWindow::DoBuildControls() {
     // Populate from m_fallbackPaths
     for (auto& p : m_fallbackPaths)
       SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.c_str());
-    PAGE_CTRL(4, hList);
+    PAGE_CTRL(SP_FILES, hList);
   }
   y += 84;
   {
     int bx = x, bg = 4;
     int fbw = MulDiv(70, lineH, 26);
-    PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, bx, y, fbw, lineH, hFont)); bx += fbw + bg;
-    PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, bx, y, fbw, lineH, hFont));
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, bx, y, fbw, lineH, hFont)); bx += fbw + bg;
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, bx, y, fbw, lineH, hFont));
   }
   y += lineH + gap;
   {
@@ -2568,7 +2614,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH * 2, hw,
       (HMENU)(INT_PTR)IDC_MW_FILE_DESC, GetModuleHandle(NULL), NULL);
     if (hDesc && hFont) SendMessage(hDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hDesc);
+    PAGE_CTRL(SP_FILES, hDesc);
   }
   y += lineH * 2 + gap;
 
@@ -2578,7 +2624,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_RANDTEX_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hLbl);
+    PAGE_CTRL(SP_FILES, hLbl);
   }
   y += lineH + 2;
   {
@@ -2587,14 +2633,14 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_RANDTEX_EDIT,
       GetModuleHandle(NULL), NULL);
     if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hEdit);
+    PAGE_CTRL(SP_FILES, hEdit);
   }
   y += lineH + 6;
   {
     int bx = x, bg = 4;
     int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
-    PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, bx, y, bw2, lineH, hFont));
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(SP_FILES, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, bx, y, bw2, lineH, hFont));
   }
   y += lineH + gap + 4;
 
@@ -2604,7 +2650,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_FALLBACK_TEX_LABEL, GetModuleHandle(NULL), NULL);
     if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(4, hLbl);
+    PAGE_CTRL(SP_FILES, hLbl);
   }
   y += lineH + 2;
   {
@@ -2621,7 +2667,7 @@ void SettingsWindow::DoBuildControls() {
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Random (Textures Dir)");
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Custom File...");
     SendMessageW(hCombo, CB_SETCURSEL, m_nFallbackTexStyle, 0);
-    PAGE_CTRL(4, hCombo);
+    PAGE_CTRL(SP_FILES, hCombo);
   }
   y += lineH + 6;
   // Custom fallback texture file controls (visible only when style == 5)
@@ -2633,16 +2679,16 @@ void SettingsWindow::DoBuildControls() {
       GetModuleHandle(NULL), NULL);
     if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     if (m_nFallbackTexStyle == 5) ShowWindow(hEdit, SW_SHOW);
-    PAGE_CTRL(4, hEdit);
+    PAGE_CTRL(SP_FILES, hEdit);
   }
   y += lineH + 6;
   {
     int bx = x, bg = 4;
     int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
     HWND hBrowse = CreateBtn(hw, L"Browse...", IDC_MW_FALLBACK_FILE_BROWSE, bx, y, bw1, lineH, hFont);
-    PAGE_CTRL(4, hBrowse); bx += bw1 + bg;
+    PAGE_CTRL(SP_FILES, hBrowse); bx += bw1 + bg;
     HWND hClear = CreateBtn(hw, L"Clear", IDC_MW_FALLBACK_FILE_CLEAR, bx, y, bw2, lineH, hFont);
-    PAGE_CTRL(4, hClear);
+    PAGE_CTRL(SP_FILES, hClear);
     if (m_nFallbackTexStyle != 5) {
       ShowWindow(hBrowse, SW_HIDE);
       ShowWindow(hClear, SW_HIDE);
@@ -2653,25 +2699,25 @@ void SettingsWindow::DoBuildControls() {
   y = tabTop + 10;
 
   // Script file path + Browse
-  PAGE_CTRL(6, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
-  PAGE_CTRL(6, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
+  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
+  PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
   y += lineH + gap;
 
   // Play / Stop / Loop
   {
     int btnW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(6, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
+    PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(SP_SCRIPT, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
     y += lineH + gap;
   }
 
   // BPM + Beats
-  PAGE_CTRL(6, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
-  PAGE_CTRL(6, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
-  PAGE_CTRL(6, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
-  PAGE_CTRL(6, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
+  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
+  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
   y += lineH + gap;
 
   // Line status label (with ID for dynamic updates)
@@ -2680,7 +2726,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_SCRIPT_LINE, GetModuleHandle(NULL), NULL);
     if (hLineLabel && hFont) SendMessage(hLineLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(6, hLineLabel);
+    PAGE_CTRL(SP_SCRIPT, hLineLabel);
   }
   y += lineH + gap;
 
@@ -2691,16 +2737,69 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SCRIPT_LIST, GetModuleHandle(NULL), NULL);
     if (hScriptList && hFont) SendMessage(hScriptList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(6, hScriptList);
+    PAGE_CTRL(SP_SCRIPT, hScriptList);
   }
 
-  // ===== About tab (page 7) =====
+  // ====== PAGE 1: Tools ======
+  y = tabTop + 10;
+  {
+    RECT rc;
+    GetClientRect(hw, &rc);
+    int listH = rc.bottom - y - 16;
+    if (listH < lineH * 5) listH = lineH * 5;
+
+    HWND hList = CreateThemedListView(IDC_MW_TOOLS_LIST, x, y, rw, listH,
+                                       /*visible=*/true, /*sortable=*/true);
+    PAGE_CTRL(SP_TOOLS, hList);
+    if (hList) {
+      int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
+      int colTool = MulDiv(rw, 60, 100);
+      int colKey  = rw - colTool - scrollW;
+
+      LVCOLUMNW col = {};
+      col.mask = LVCF_TEXT | LVCF_WIDTH;
+      col.pszText = (LPWSTR)L"Tool";
+      col.cx = colTool;
+      SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
+      col.pszText = (LPWSTR)L"Hotkey";
+      col.cx = colKey;
+      SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
+
+      // Populate from m_hotkeys[] filtered to HKCAT_TOOLS
+      // lParam = m_hotkeys array index (for dispatch via m_hotkeys[i].id)
+      int row = 0;
+      for (int i = 0; i < NUM_HOTKEYS; i++) {
+        if (_e->m_hotkeys[i].category != HKCAT_TOOLS) continue;
+
+        LVITEMW lvi = {};
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.iItem = row;
+        lvi.iSubItem = 0;
+        lvi.pszText = (LPWSTR)_e->m_hotkeys[i].szAction;
+        lvi.lParam = (LPARAM)i;  // m_hotkeys array index
+        int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+        std::wstring hkStr = _e->FormatHotkeyDisplay(_e->m_hotkeys[i].modifiers, _e->m_hotkeys[i].vk);
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = idx;
+        lvi.iSubItem = 1;
+        lvi.pszText = (LPWSTR)hkStr.c_str();
+        SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+        row++;
+      }
+
+
+      ListView_SetItemState(hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    }
+  }
+
+  // ===== About tab (page 8) =====
   y = tabTop + 10;
 
-  PAGE_CTRL(7, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
-  PAGE_CTRL(7, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
 
   {
@@ -2709,98 +2808,98 @@ void SettingsWindow::DoBuildControls() {
     MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
     MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
     swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
-    PAGE_CTRL(7, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
-  PAGE_CTRL(7, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
-  PAGE_CTRL(7, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
   // Paths section
-  PAGE_CTRL(7, CreateLabel(hw, L"Paths:", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Paths:", x, y, rw, lineH, hFontBold, false));
   y += lineH + 2;
   {
     wchar_t buf[MAX_PATH + 64];
     swprintf(buf, MAX_PATH + 64, L"Base Dir:  %s", m_szBaseDir);
-    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
     swprintf(buf, MAX_PATH + 64, L"Settings:  %s", GetConfigIniFile());
-    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
     swprintf(buf, MAX_PATH + 64, L"Presets:   %s", m_szPresetDir);
-    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
   }
   y += 8;
 
   // Debug Log Level radio buttons
-  PAGE_CTRL(7, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
     int rx = x + lw + 4;
     int rbw = 80;
-    PAGE_CTRL(7, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
     rx += rbw;
-    PAGE_CTRL(7, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
     rx += rbw;
-    PAGE_CTRL(7, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
     rx += rbw;
-    PAGE_CTRL(7, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
     rx += rbw;
-    PAGE_CTRL(7, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
   y += lineH + 8;
 
   // File Association button
-  PAGE_CTRL(7, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
   {
     int btnW = MulDiv(200, lineH, 26);
-    PAGE_CTRL(7, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
   }
   y += lineH + 2;
-  PAGE_CTRL(7, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
   // ===== Remote tab (page 5) =====
   y = tabTop + 10;
 
   // Section header
-  PAGE_CTRL(5, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
   // Info line
-  PAGE_CTRL(5, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
   y += lineH * 2 + gap;
 
   // Window Title
-  PAGE_CTRL(5, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(5, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_REMOTE, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
   y += lineH + 2;
 
   // Hint
-  PAGE_CTRL(5, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
   // Remote Window Title
-  PAGE_CTRL(5, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(5, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(SP_REMOTE, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
   y += lineH + 2;
 
   // Hint
-  PAGE_CTRL(5, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
   // Apply button + Capture Screenshot button
   {
     int applyW = MulDiv(150, lineH, 26);
-    PAGE_CTRL(5, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
+    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
     int captureW = MulDiv(130, lineH, 26);
-    PAGE_CTRL(5, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
+    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
     y += lineH + gap + 8;
   }
 
   // Active IPC Windows section
-  PAGE_CTRL(5, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
   // IPC list box
@@ -2810,7 +2909,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
     if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(5, hIPCList);
+    PAGE_CTRL(SP_REMOTE, hIPCList);
     y += listH + gap;
   }
 
@@ -2822,7 +2921,7 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
       GetModuleHandle(NULL), NULL);
     if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(5, hGroup);
+    PAGE_CTRL(SP_REMOTE, hGroup);
 
     int pad = 8;
     HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
@@ -2831,7 +2930,7 @@ void SettingsWindow::DoBuildControls() {
       hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
       GetModuleHandle(NULL), NULL);
     if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(5, hMsgText);
+    PAGE_CTRL(SP_REMOTE, hMsgText);
   }
 
   // Populate IPC list with current state

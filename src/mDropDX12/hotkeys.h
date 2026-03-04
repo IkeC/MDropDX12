@@ -128,6 +128,7 @@ enum HotkeyAction : int {
     HK_OPEN_PRESETS,             // (unbound) — open Presets window
     HK_OPEN_SPRITES,             // (unbound) — open Sprites window
     HK_OPEN_MESSAGES,            // (unbound) — open Messages window
+    HK_OPEN_SHADER_IMPORT,       // (unbound) — open Shader Import window
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };
