@@ -682,6 +682,8 @@ void CState::Default(DWORD ApplyFlags) {
   if (ApplyFlags & STATE_COMP) {
     m_szCompShadersText[0] = 0;
     m_nCompPSVersion = 0;
+    m_szBufferAShadersText[0] = 0;
+    m_nBufferAPSVersion = 0;
   }
 
   RandomizePresetVars();
@@ -965,6 +967,8 @@ bool CState::Export(const wchar_t* szIniFile) {
     WriteCode(fOut, i, m_szWarpShadersText, "warp_", true);
   if (m_nCompPSVersion >= MD2_PS_2_0)
     WriteCode(fOut, i, m_szCompShadersText, "comp_", true);
+  if (m_nBufferAPSVersion >= MD2_PS_2_0)
+    WriteCode(fOut, i, m_szBufferAShadersText, "bufA_", true);
 
   fclose(fOut);
 
@@ -1439,6 +1443,14 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     m_nCompPSVersion = nCompPSVersionInFile;
   }
 
+  // Buffer A shader (Shadertoy two-pass)
+  if (ApplyFlags & STATE_COMP) {
+    ReadCode(f, m_szBufferAShadersText, "bufA_");
+    if (m_szBufferAShadersText[0])
+      m_nBufferAPSVersion = nCompPSVersionInFile;  // use same PS version as comp
+    else
+      m_nBufferAPSVersion = 0;
+  }
 
   // U + 2191
   boolean autoUpdate = false;

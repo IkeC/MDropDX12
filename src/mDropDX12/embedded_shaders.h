@@ -213,6 +213,11 @@ float4 texsize_noise_hq;
 float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
+// feedback buffer for Shadertoy temporal reprojection (comp shader reads own previous output):
+// Explicit register required — without it, the compiler merges sampler_feedback with sampler_main
+// (same sampler state) and the SRV never appears in reflection, so CacheParams can't detect it.
+sampler2D sampler_feedback : register(s14);
+
 // procedural blur textures:
 sampler2D sampler_blur1 : register(s11);
 sampler2D sampler_blur2 : register(s12);

@@ -24,6 +24,56 @@ namespace mdrop {
 extern Engine g_engine;
 extern float timetick;
 
+void Engine::CopyBackbufferToFeedback()
+{
+  // Single-pass feedback: comp now renders directly to FLOAT16 feedback buffer
+  // and blits to the backbuffer, so no copy is needed.
+  // Two-pass (Buffer A + Image): Buffer A writes directly to feedback.
+  // This function is kept as a stub; the old backbuffer→feedback copy was removed
+  // because the backbuffer is UNORM (clamps negatives) while feedback is FLOAT16.
+  return;
+
+  int writeIdx = 1 - m_nFeedbackIdx;
+  DX12Texture& fbWrite = m_dx12Feedback[writeIdx];
+  if (!fbWrite.IsValid()) return;
+  if (!m_lpDX || !m_lpDX->m_ready) return;
+
+  // Size guard: feedback texture must match backbuffer for CopyResource
+  if (fbWrite.width  != (UINT)m_lpDX->m_backbuffer_width ||
+      fbWrite.height != (UINT)m_lpDX->m_backbuffer_height)
+    return;
+
+  auto* cl = m_lpDX->m_commandList.Get();
+  ID3D12Resource* pBackBuf = m_lpDX->m_renderTargets[m_lpDX->m_frameIndex].Get();
+
+  // 1. Transition backbuffer RENDER_TARGET → COPY_SOURCE
+  D3D12_RESOURCE_BARRIER toSrc = {};
+  toSrc.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toSrc.Transition.pResource        = pBackBuf;
+  toSrc.Transition.StateBefore      = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toSrc.Transition.StateAfter       = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toSrc.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toSrc);
+
+  // 2. Transition feedback write buffer → COPY_DEST
+  m_lpDX->TransitionResource(fbWrite, D3D12_RESOURCE_STATE_COPY_DEST);
+
+  // 3. Copy backbuffer → feedback write buffer
+  cl->CopyResource(fbWrite.resource.Get(), pBackBuf);
+
+  // 4. Transition feedback COPY_DEST → PIXEL_SHADER_RESOURCE
+  m_lpDX->TransitionResource(fbWrite, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  // 5. Transition backbuffer COPY_SOURCE → RENDER_TARGET
+  D3D12_RESOURCE_BARRIER toRT = {};
+  toRT.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toRT.Transition.pResource        = pBackBuf;
+  toRT.Transition.StateBefore      = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toRT.Transition.StateAfter       = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toRT.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toRT);
+}
+
 void Engine::RenderInjectEffect()
 {
   // Post-process pass: applies the F11 inject effect and (for non-shader presets)

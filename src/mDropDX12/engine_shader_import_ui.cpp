@@ -6,6 +6,7 @@
 #include "tool_window.h"
 #include "engine.h"
 #include "state.h"
+#include "json_utils.h"
 #include "utility.h"
 #include "md_defines.h"
 #include <CommCtrl.h>
@@ -83,9 +84,23 @@ void ShaderImportWindow::DoBuildControls() {
         x, y, rw, glslH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_GLSL_EDIT, NULL, NULL));
     y += glslH + gap;
 
-    // Convert button
+    // Convert button + pass selector
     TrackControl(CreateBtn(hw, L"Convert >>", IDC_MW_SHIMPORT_CONVERT,
         x, y, btnW + 20, btnH, hFont));
+    {
+        int comboW = MulDiv(120, lineH, 26);
+        TrackControl(CreateWindowExW(0, L"STATIC", L"Target:", WS_CHILD | WS_VISIBLE,
+            x + btnW + 30, y + 2, MulDiv(50, lineH, 26), lineH, hw, NULL, NULL, NULL));
+        HWND hCombo = CreateWindowExW(0, L"COMBOBOX", L"",
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+            x + btnW + 30 + MulDiv(52, lineH, 26), y, comboW, lineH * 4,
+            hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_PASS_COMBO, NULL, NULL);
+        SendMessageW(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Image (comp)");
+        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Buffer A");
+        SendMessageW(hCombo, CB_SETCURSEL, 0, 0);
+        TrackControl(hCombo);
+    }
     y += btnH + gap;
 
     // "HLSL Output:" label + Copy button
@@ -208,30 +223,45 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
 
 LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_TIMER && wParam == 1) {
-        // Check compilation result after Apply
-        KillTimer(hWnd, 1);
+        // Poll compilation result — render thread signals via m_nRecompileResult
         Engine* p = m_pEngine;
+        int result = p->m_nRecompileResult.load();
+        if (result < 2) {
+            // Still compiling — keep polling (timer re-fires every 200ms)
+            return 0;
+        }
+        KillTimer(hWnd, 1);
+        p->m_nRecompileResult.store(0);  // reset to idle
 
         std::wstring errText;
-        if (p->m_shaders.comp.ptr != NULL) {
+        bool compOK = (p->m_shaders.comp.bytecodeBlob != NULL);
+        bool bufAOK = !m_bufferAHlsl.empty() ? (p->m_shaders.bufferA.bytecodeBlob != NULL) : true;
+
+        if (compOK && bufAOK) {
             errText = L"Shader compiled successfully.";
+            if (p->m_bHasBufferA)
+                errText += L" (Buffer A + Image)";
         } else {
             errText = L"Compilation failed.\r\n";
-            // Try to read diagnostic file
-            wchar_t diagPath[MAX_PATH];
-            swprintf(diagPath, MAX_PATH, L"%lsdiag_comp_shader.txt", p->m_szBaseDir);
-            FILE* f = _wfopen(diagPath, L"r");
+            if (!compOK) errText += L"[Image/comp] ";
+            if (!bufAOK) errText += L"[Buffer A] ";
+            errText += L"\r\n";
+            // Read error file (last compilation's errors)
+            wchar_t errPath[MAX_PATH];
+            swprintf(errPath, MAX_PATH, L"%lsdiag_comp_shader_error.txt", p->m_szBaseDir);
+            FILE* f = _wfopen(errPath, L"r");
             if (f) {
-                char buf[4096] = {};
+                char buf[8192] = {};
                 size_t n = fread(buf, 1, sizeof(buf) - 1, f);
                 fclose(f);
                 buf[n] = '\0';
-                // Convert to wide string
-                int wlen = MultiByteToWideChar(CP_ACP, 0, buf, -1, NULL, 0);
-                if (wlen > 0) {
-                    std::wstring wbuf(wlen, L'\0');
-                    MultiByteToWideChar(CP_ACP, 0, buf, -1, wbuf.data(), wlen);
-                    errText += wbuf;
+                if (n > 0) {
+                    int wlen = MultiByteToWideChar(CP_ACP, 0, buf, -1, NULL, 0);
+                    if (wlen > 0) {
+                        std::wstring wbuf(wlen, L'\0');
+                        MultiByteToWideChar(CP_ACP, 0, buf, -1, wbuf.data(), wlen);
+                        errText += wbuf;
+                    }
                 }
             }
         }
@@ -239,6 +269,33 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
         return 0;
     }
     return -1;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+int ShaderImportWindow::GetSelectedPass() {
+    HWND hCombo = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_PASS_COMBO);
+    return hCombo ? (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0) : 0;
+}
+
+// Convert wide HLSL text to narrow with LINEFEED_CONTROL_CHAR line endings
+static std::string WideHlslToNarrow(const std::wstring& hlslW, int len) {
+    std::string hlsl;
+    hlsl.reserve(len);
+    for (int i = 0; i < len; i++) {
+        wchar_t ch = hlslW[i];
+        if (ch == L'\r') {
+            if (i + 1 < len && hlslW[i + 1] == L'\n') i++;
+            hlsl += (char)LINEFEED_CONTROL_CHAR;
+        } else if (ch == L'\n') {
+            hlsl += (char)LINEFEED_CONTROL_CHAR;
+        } else if (ch < 128) {
+            hlsl += (char)ch;
+        } else {
+            hlsl += '?';
+        }
+    }
+    return hlsl;
 }
 
 // ─── Apply (live preview) ───────────────────────────────────────────────
@@ -255,38 +312,43 @@ void ShaderImportWindow::ApplyShader() {
     }
     std::wstring hlslW(len + 1, L'\0');
     GetDlgItemTextW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, hlslW.data(), len + 1);
+    std::string hlsl = WideHlslToNarrow(hlslW, len);
 
-    // Convert wide → narrow, replacing \r\n with LINEFEED_CONTROL_CHAR
-    std::string hlsl;
-    hlsl.reserve(len);
-    for (int i = 0; i < len; i++) {
-        wchar_t ch = hlslW[i];
-        if (ch == L'\r') {
-            if (i + 1 < len && hlslW[i + 1] == L'\n') i++; // skip \n after \r
-            hlsl += (char)LINEFEED_CONTROL_CHAR;
-        } else if (ch == L'\n') {
-            hlsl += (char)LINEFEED_CONTROL_CHAR;
-        } else if (ch < 128) {
-            hlsl += (char)ch;
-        } else {
-            hlsl += '?';
-        }
+    int pass = GetSelectedPass();
+    if (pass == 1) {
+        // Buffer A — store locally and write into state
+        m_bufferAHlsl = hlsl;
+        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT,
+            L"Buffer A stored. Switch to Image, convert & apply to see the full effect.");
+        return;
     }
 
-    // Write into state
+    // Image (comp) — also inject stored Buffer A if present
     strncpy_s(p->m_pState->m_szCompShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
-    p->m_pState->m_nCompPSVersion = 3; // ps_3_0
-    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, 3);
+    p->m_pState->m_nCompPSVersion = MD2_PS_3_0;
+    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_3_0);
 
-    // Enqueue recompile
+    if (!m_bufferAHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+    }
+
+    // Activate Shadertoy pipeline (skip warp/blur/shapes)
+    p->m_bShadertoyMode = true;
+    p->m_nShadertoyStartFrame = p->GetFrame();
+
+    // Signal pending and enqueue recompile
+    p->m_nRecompileResult.store(1);  // 1=pending
     p->EnqueueRenderCmd(RenderCmd::RecompileCompShader);
 
-    // Check result after a short delay
+    // Poll for result every 200ms (render thread signals completion)
     SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Compiling...");
-    SetTimer(hw, 1, 500, NULL);
+    SetTimer(hw, 1, 200, NULL);
 }
 
-// ─── Save as .milk ──────────────────────────────────────────────────────
+// ─── Save as .milk3 (JSON Shadertoy format) ─────────────────────────────
 
 void ShaderImportWindow::SaveAsPreset() {
     HWND hw = m_hWnd;
@@ -301,56 +363,141 @@ void ShaderImportWindow::SaveAsPreset() {
     std::wstring hlslW(len + 1, L'\0');
     GetDlgItemTextW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, hlslW.data(), len + 1);
 
-    // File save dialog
+    // File save dialog — default to .milk3 for Shadertoy imports
     wchar_t filePath[MAX_PATH] = {};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hw;
-    ofn.lpstrFilter = L"MilkDrop Preset (*.milk)\0*.milk\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Shadertoy Preset (*.milk3)\0*.milk3\0MilkDrop Preset (*.milk)\0*.milk\0All Files\0*.*\0";
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrInitialDir = p->GetPresetDir();
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-    ofn.lpstrDefExt = L"milk";
+    ofn.lpstrDefExt = L"milk3";
 
     if (!GetSaveFileNameW(&ofn))
         return;
 
-    // Convert wide → narrow with LINEFEED_CONTROL_CHAR
-    std::string hlsl;
-    hlsl.reserve(len);
-    for (int i = 0; i < len; i++) {
-        wchar_t ch = hlslW[i];
-        if (ch == L'\r') {
-            if (i + 1 < len && hlslW[i + 1] == L'\n') i++;
-            hlsl += (char)LINEFEED_CONTROL_CHAR;
-        } else if (ch == L'\n') {
-            hlsl += (char)LINEFEED_CONTROL_CHAR;
-        } else if (ch < 128) {
-            hlsl += (char)ch;
+    // Convert HLSL text to narrow
+    std::string hlsl = WideHlslToNarrow(hlslW, len);
+
+    // If currently on Buffer A, store it first before saving
+    int pass = GetSelectedPass();
+    if (pass == 1)
+        m_bufferAHlsl = hlsl;
+
+    // Determine which extension the user chose
+    std::wstring ext = filePath;
+    bool isMilk3 = (ext.size() >= 6 && _wcsicmp(ext.c_str() + ext.size() - 6, L".milk3") == 0);
+
+    if (isMilk3) {
+        // Save as .milk3 JSON
+        std::string imageHlsl, bufferAHlsl;
+        if (pass == 0) {
+            imageHlsl = hlsl;
         } else {
-            hlsl += '?';
+            // Buffer A pass — use current state's comp text for Image
+            if (p->m_pState->m_nCompPSVersion > 0)
+                imageHlsl = p->m_pState->m_szCompShadersText;
         }
-    }
+        if (!m_bufferAHlsl.empty())
+            bufferAHlsl = m_bufferAHlsl;
 
-    // Heap-allocate CState (too large for stack — ~200KB+ of char arrays)
-    auto tempState = std::make_unique<CState>();
-    tempState->Default(0xFFFFFFFF);
-    tempState->m_nCompPSVersion = 3;
-    tempState->m_nWarpPSVersion = 0;
-    tempState->m_nMaxPSVersion = 3;
-    tempState->m_nMinPSVersion = 0;
-    strncpy_s(tempState->m_szCompShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
+        // Build JSON
+        JsonWriter w;
+        w.BeginObject();
+        w.Int(L"version", 1);
 
-    if (tempState->Export(filePath)) {
-        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Preset saved successfully.");
+        // Extract a name from the filename
+        std::wstring fname = std::filesystem::path(filePath).stem().wstring();
+        w.String(L"name", fname.c_str());
+
+        // Write shader text as wide strings (JsonWriter handles escaping)
+        if (!bufferAHlsl.empty()) {
+            std::wstring wBufA(bufferAHlsl.begin(), bufferAHlsl.end());
+            w.String(L"bufferA", wBufA.c_str());
+        }
+        {
+            std::wstring wImage(imageHlsl.begin(), imageHlsl.end());
+            w.String(L"image", wImage.c_str());
+        }
+
+        // Channel mappings
+        w.BeginObject(L"channels");
+        if (!bufferAHlsl.empty()) {
+            w.BeginObject(L"bufferA");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        w.BeginObject(L"image");
+        w.String(L"iChannel0", bufferAHlsl.empty() ? L"self" : L"bufferA");
+        w.EndObject();
+        w.EndObject(); // channels
+        w.EndObject(); // root
+
+        if (w.SaveToFile(filePath)) {
+            SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Preset saved as .milk3 successfully.");
+        } else {
+            SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Failed to save .milk3 preset.");
+        }
     } else {
-        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Failed to save preset.");
+        // Legacy .milk save path
+        auto tempState = std::make_unique<CState>();
+        tempState->Default(0xFFFFFFFF);
+        tempState->m_nCompPSVersion = MD2_PS_3_0;
+        tempState->m_nWarpPSVersion = 0;
+        tempState->m_nMaxPSVersion = MD2_PS_3_0;
+        tempState->m_nMinPSVersion = 0;
+
+        if (pass == 0) {
+            strncpy_s(tempState->m_szCompShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
+        } else {
+            if (p->m_pState->m_nCompPSVersion > 0)
+                strncpy_s(tempState->m_szCompShadersText, MAX_BIGSTRING_LEN, p->m_pState->m_szCompShadersText, _TRUNCATE);
+        }
+
+        if (!m_bufferAHlsl.empty()) {
+            strncpy_s(tempState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
+            tempState->m_nBufferAPSVersion = MD2_PS_3_0;
+        }
+
+        if (tempState->Export(filePath)) {
+            SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Preset saved successfully.");
+        } else {
+            SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Failed to save preset.");
+        }
     }
 }
 
 // ─── GLSL→HLSL Conversion ──────────────────────────────────────────────
 // Ported from Milkwave Remote ShaderHelper.cs
+
+// Helper: whole-word replacement (identifier-boundary-aware)
+static std::string WholeWordReplace(const std::string& input, const std::string& oldWord, const std::string& newWord) {
+    std::string result;
+    result.reserve(input.size() + 256);
+    size_t pos = 0;
+    size_t oldLen = oldWord.size();
+    auto isIdent = [](char c) -> bool {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    };
+    while (pos < input.size()) {
+        size_t found = input.find(oldWord, pos);
+        if (found == std::string::npos) {
+            result += input.substr(pos);
+            break;
+        }
+        bool leftOk = (found == 0 || !isIdent(input[found - 1]));
+        bool rightOk = (found + oldLen >= input.size() || !isIdent(input[found + oldLen]));
+        result += input.substr(pos, found - pos);
+        if (leftOk && rightOk)
+            result += newWord;
+        else
+            result += oldWord;
+        pos = found + oldLen;
+    }
+    return result;
+}
 
 // Helper: replace variable name patterns in various contexts
 std::string ShaderImportWindow::ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& inp) {
@@ -412,6 +559,12 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
         replaceAll(result, "* mat", "*mat");
         replaceAll(result, " *mat", "*mat");
 
+        // GLSL mat3(a,b,c) stores a,b,c as COLUMNS; HLSL float3x3(a,b,c) stores as ROWS.
+        // Instead of transposing constructors, we swap mul() argument order:
+        //   GLSL "v *= matN(...)" = "v = v * M" → HLSL "v = mul(floatNxN(...), v)"
+        //   GLSL "x * matN(...)" = "x * M"     → HLSL "mul(floatNxN(...), x)"
+        // Phase 1b handles named matrix variables with the same swap.
+
         std::string token = "*=mat";
         size_t index = result.find(token);
         if (index != std::string::npos) {
@@ -432,9 +585,10 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
                 int closingIdx = FindClosingBracket(rest, '(', ')', 1);
                 if (closingIdx > 0) {
                     std::string args = rest.substr(0, closingIdx);
-                    result = indent_str + fac1 + " = mul(" + fac1 + ", transpose(float"
+                    // v *= matN(args) → v = mul(floatNxN(args), v)  [swapped for column-major]
+                    result = indent_str + fac1 + " = mul(float"
                            + std::to_string(matSize) + "x" + std::to_string(matSize)
-                           + "(" + args + ")));";
+                           + "(" + args + "), " + fac1 + ");";
                 }
             }
         } else {
@@ -455,15 +609,16 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
                     int closingIdx = FindClosingBracket(rest, '(', ')', 1);
                     if (closingIdx > 0) {
                         std::string args = rest.substr(0, closingIdx);
-                        result = left + "mul(" + fac1 + ", transpose(float"
+                        // x * matN(args) → mul(floatNxN(args), x)  [swapped for column-major]
+                        result = left + "mul(float"
                                + std::to_string(matSize) + "x" + std::to_string(matSize)
-                               + "(" + args + ")));";
+                               + "(" + args + "), " + fac1 + ");";
                     }
                 }
             }
         }
 
-        // Replace remaining mat types
+        // Simple type replacement for constructors and declarations
         replaceAll(result, "mat2(", "float2x2(");
         replaceAll(result, "mat3(", "float3x3(");
         replaceAll(result, "mat4(", "float4x4(");
@@ -477,43 +632,55 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
 }
 
 // Fix float2/3/4 single-argument expansion: float3(1) → float3(1,1,1)
+// Processes ALL occurrences per line, not just the first.
 std::string ShaderImportWindow::FixFloatNumberOfArguments(const std::string& inputLine, const std::string& fullContext) {
     std::string result = inputLine;
     for (int numArgs = 2; numArgs <= 4; numArgs++) {
         std::string prefix = "float" + std::to_string(numArgs) + "(";
-        size_t index = result.find(prefix);
-        if (index != std::string::npos) {
+        size_t searchFrom = 0;
+        while (searchFrom < result.size()) {
+            size_t index = result.find(prefix, searchFrom);
+            if (index == std::string::npos) break;
+
             std::string rest = result.substr(index + prefix.size());
             int closingIdx = FindClosingBracket(rest, '(', ')', 1);
-            if (closingIdx > 0) {
-                std::string argsLine = rest.substr(0, closingIdx);
-                // Check if only one argument (no commas at top level)
-                if (argsLine.find(',') == std::string::npos) {
-                    // Check if it's a number, function call, or known float variable
-                    bool shouldExpand = false;
-                    // Is it a numeric literal?
-                    try {
-                        size_t pos;
-                        (void)std::stof(argsLine, &pos);
-                        if (pos == argsLine.size()) shouldExpand = true;
-                    } catch (...) {}
-                    // Is it a function call (contains parens)?
-                    if (!shouldExpand && argsLine.find('(') != std::string::npos && argsLine.find(')') != std::string::npos)
-                        shouldExpand = true;
-                    // Is it a known float variable in context?
-                    if (!shouldExpand && (fullContext.find("float " + argsLine + ",") != std::string::npos ||
-                                          fullContext.find("float " + argsLine + ";") != std::string::npos))
-                        shouldExpand = true;
+            if (closingIdx <= 0) { searchFrom = index + prefix.size(); continue; }
 
-                    if (shouldExpand) {
-                        std::string expanded = argsLine;
-                        for (int i = 1; i < numArgs; i++)
-                            expanded += ", " + argsLine;
-                        result = result.substr(0, index + prefix.size())
-                               + expanded
-                               + result.substr(index + prefix.size() + closingIdx);
-                    }
-                }
+            std::string argsLine = rest.substr(0, closingIdx);
+            // Check if only one argument (no commas at top level)
+            int topCommas = 0;
+            { int depth = 0;
+              for (char c : argsLine) {
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                else if (c == ',' && depth == 0) topCommas++;
+              }
+            }
+            if (topCommas > 0) { searchFrom = index + prefix.size() + closingIdx; continue; }
+
+            // Check if it's a number, function call, or known float variable
+            bool shouldExpand = false;
+            try {
+                size_t pos;
+                (void)std::stof(argsLine, &pos);
+                if (pos == argsLine.size()) shouldExpand = true;
+            } catch (...) {}
+            if (!shouldExpand && argsLine.find('(') != std::string::npos && argsLine.find(')') != std::string::npos)
+                shouldExpand = true;
+            if (!shouldExpand && (fullContext.find("float " + argsLine + ",") != std::string::npos ||
+                                  fullContext.find("float " + argsLine + ";") != std::string::npos))
+                shouldExpand = true;
+
+            if (shouldExpand) {
+                std::string expanded = argsLine;
+                for (int i = 1; i < numArgs; i++)
+                    expanded += ", " + argsLine;
+                result = result.substr(0, index + prefix.size())
+                       + expanded
+                       + result.substr(index + prefix.size() + closingIdx);
+                searchFrom = index + prefix.size() + expanded.size();
+            } else {
+                searchFrom = index + prefix.size() + closingIdx;
             }
         }
     }
@@ -654,6 +821,24 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         else inp += '?';
     }
 
+    // Strip // comment lines (browser copy-paste can line-wrap comments,
+    // splitting words across lines and creating invalid identifiers like 'his' from 'this')
+    {
+        std::string cleaned;
+        cleaned.reserve(inp.size());
+        size_t i = 0;
+        while (i < inp.size()) {
+            if (i + 1 < inp.size() && inp[i] == '/' && inp[i + 1] == '/') {
+                // Skip to end of line
+                while (i < inp.size() && inp[i] != '\n') i++;
+            } else {
+                cleaned += inp[i];
+                i++;
+            }
+        }
+        inp = std::move(cleaned);
+    }
+
     std::string errors;
     std::string result;
 
@@ -667,9 +852,68 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
 
     try {
         // Phase 1: Global replacements
+
+        // Integer/boolean vector types (must come BEFORE vec→float to avoid ivec2→ifloat2)
+        replaceAll(inp, "ivec2", "int2");
+        replaceAll(inp, "ivec3", "int3");
+        replaceAll(inp, "ivec4", "int4");
+        replaceAll(inp, "bvec2", "bool2");
+        replaceAll(inp, "bvec3", "bool3");
+        replaceAll(inp, "bvec4", "bool4");
+
         replaceAll(inp, "vec2", "float2");
         replaceAll(inp, "vec3", "float3");
         replaceAll(inp, "vec4", "float4");
+
+        // Square matrix type aliases (matNxN → floatNxN, simple replacement)
+        replaceAll(inp, "mat2x2", "float2x2");
+        replaceAll(inp, "mat3x3", "float3x3");
+        replaceAll(inp, "mat4x4", "float4x4");
+
+        // Non-square matrix types: constructor vs declaration need different handling.
+        // GLSL matAxB(args) fills COLUMNS (A cols × B rows); HLSL floatAxB(args) fills ROWS.
+        // Constructor fix: matAxB(args) → transpose(floatAxB(args))
+        //   floatAxB stores args as rows; transpose flips rows→columns, matching GLSL.
+        // Declaration fix: matAxB varName → floatBxA varName (dimensions swapped)
+        {
+            auto isIdentNS = [](char c) -> bool {
+                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       (c >= '0' && c <= '9') || c == '_';
+            };
+            struct NonSqMat { const char* pat; const char* dims; const char* decl; };
+            NonSqMat nsTypes[] = {
+                {"mat2x3(", "2x3", "float3x2"},
+                {"mat2x4(", "2x4", "float4x2"},
+                {"mat3x2(", "3x2", "float2x3"},
+                {"mat3x4(", "3x4", "float4x3"},
+                {"mat4x2(", "4x2", "float2x4"},
+                {"mat4x3(", "4x3", "float3x4"},
+            };
+            for (auto& ns : nsTypes) {
+                std::string pat(ns.pat);
+                // Wrap constructors: matAxB(args) → transpose(floatAxB(args))
+                size_t pos = 0;
+                while ((pos = inp.find(pat, pos)) != std::string::npos) {
+                    if (pos > 0 && isIdentNS(inp[pos - 1])) { pos++; continue; }
+                    size_t argsStart = pos + pat.size();
+                    std::string rest = inp.substr(argsStart);
+                    int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                    if (closingIdx >= 0) {
+                        size_t closePos = argsStart + closingIdx;
+                        std::string args = inp.substr(argsStart, closingIdx);
+                        std::string repl = "transpose(float" + std::string(ns.dims) + "(" + args + "))";
+                        inp = inp.substr(0, pos) + repl + inp.substr(closePos + 1);
+                        pos += repl.size();
+                    } else {
+                        pos += pat.size();
+                    }
+                }
+                // Replace remaining type declarations: matAxB → floatBxA (dims swapped)
+                std::string typeName = pat.substr(0, pat.size() - 1);
+                replaceAll(inp, typeName, ns.decl);
+            }
+        }
+
         replaceAll(inp, "fract (", "fract(");
         replaceAll(inp, "mod (", "mod(");
         replaceAll(inp, "mix (", "mix(");
@@ -678,15 +922,143 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         replaceAll(inp, "mix(", "lerp(");
         inp = ReplaceVarName("time", "time_conv", inp);
         replaceAll(inp, "refrac(", "refract("); // undo damage to refract
+
+        // Rename variables that collide with MilkDrop audio macros (#define mid _c3.y etc.)
+        // These are common GLSL variable names (e.g. "mid" = midpoint) that the preprocessor
+        // would otherwise expand into constant buffer swizzles, breaking declarations/calls.
+        inp = WholeWordReplace(inp, "mid", "_st_mid");
+        inp = WholeWordReplace(inp, "bass", "_st_bass");
+        inp = WholeWordReplace(inp, "treb", "_st_treb");
+        inp = WholeWordReplace(inp, "vol", "_st_vol");
         replaceAll(inp, "iTimeDelta", "xTimeDelta"); // protect from iTime replace
         replaceAll(inp, "iTime", "time");
-        replaceAll(inp, "iResolution", "uv");
+        // iResolution: Shadertoy vec3(width, height, pixelAspect=1.0)
+        // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
+        // Inline-expand so iResolution.z → float3(...).z → 1.0
+        replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
         replaceAll(inp, "iFrame", "frame");
         replaceAll(inp, "iMouse", "mouse");
+        // iChannel samplers — inline replacement (not #define) to avoid preprocessor issues
+        replaceAll(inp, "iChannel0", "sampler_feedback");
+        replaceAll(inp, "iChannel1", "sampler_noise_lq");
+        replaceAll(inp, "iChannel2", "sampler_noise_mq");
+        replaceAll(inp, "iChannel3", "sampler_noise_hq");
         replaceAll(inp, "texture(", "tex2D(");
+        replaceAll(inp, "textureLod(", "tex2Dlod_conv(");
+        replaceAll(inp, "texelFetch(", "texelFetch_conv(");
         replaceAll(inp, "highp ", "");
+        replaceAll(inp, "lowp ", "");
+        replaceAll(inp, "mediump ", "");
         replaceAll(inp, "void mainImage(", "mainImage(");
         replaceAll(inp, "atan (", "atan(");
+
+        // Phase 1b: Collect matrix variable names and fix matrix*vector multiplication
+        // HLSL requires mul() for matrix-vector multiply; the * operator causes X3020 type mismatch.
+        // Square matrices use mul-swap (no transpose on constructor, rows≡GLSL columns, M[i] works).
+        // Non-square matrices use standard mul (constructor wrapped with transpose() in Phase 1).
+        {
+            auto isIdent = [](char c) -> bool {
+                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       (c >= '0' && c <= '9') || c == '_';
+            };
+            struct MatVar { std::string name; bool isSquare; };
+            std::vector<MatVar> matVars;
+            struct MatTypeInfo { const char* type; bool isSquare; };
+            MatTypeInfo matTypes[] = {
+                {"float2x2", true}, {"float3x3", true}, {"float4x4", true},
+                {"float2x3", false}, {"float3x2", false}, {"float2x4", false},
+                {"float4x2", false}, {"float3x4", false}, {"float4x3", false},
+            };
+            for (auto& mt : matTypes) {
+                int mtLen = (int)strlen(mt.type);
+                size_t pos = 0;
+                while ((pos = inp.find(mt.type, pos)) != std::string::npos) {
+                    if (pos > 0 && isIdent(inp[pos - 1])) { pos += mtLen; continue; }
+                    size_t after = pos + mtLen;
+                    if (after < inp.size() && isIdent(inp[after])) { pos += mtLen; continue; }
+                    while (after < inp.size() && (inp[after] == ' ' || inp[after] == '\t')) after++;
+                    size_t nameStart = after;
+                    while (after < inp.size() && isIdent(inp[after])) after++;
+                    if (after > nameStart) {
+                        std::string name = inp.substr(nameStart, after - nameStart);
+                        size_t check = after;
+                        while (check < inp.size() && (inp[check] == ' ' || inp[check] == '\t')) check++;
+                        if (check >= inp.size() || inp[check] != '(')
+                            matVars.push_back({name, mt.isSquare});
+                    }
+                    pos = after;
+                }
+            }
+            // Convert matVar*expr and expr*matVar to mul() calls.
+            // Square (mul-swap): matVar*expr → mul(expr, matVar), expr*matVar → mul(matVar, expr)
+            //   Because float3x3(a,b,c) stores a,b,c as ROWS but GLSL treats them as COLUMNS.
+            //   Swapping mul() args compensates. Also preserves M[i] indexing (row i = GLSL col i).
+            // Non-square (standard): matVar*expr → mul(matVar, expr), expr*matVar → mul(expr, matVar)
+            //   Because constructor was wrapped with transpose(), matrix is correct. Standard order.
+            for (const auto& mv : matVars) {
+                int mvLen = (int)mv.name.size();
+                size_t pos = 0;
+                while ((pos = inp.find(mv.name, pos)) != std::string::npos) {
+                    if (pos > 0 && isIdent(inp[pos - 1])) { pos++; continue; }
+                    size_t afterMv = pos + mvLen;
+                    if (afterMv < inp.size() && isIdent(inp[afterMv])) { pos++; continue; }
+                    size_t s = afterMv;
+                    while (s < inp.size() && inp[s] == ' ') s++;
+                    if (s < inp.size() && inp[s] == '*' && (s + 1 >= inp.size() || inp[s + 1] != '=')) {
+                        size_t afterStar = s + 1;
+                        while (afterStar < inp.size() && inp[afterStar] == ' ') afterStar++;
+                        size_t opStart = afterStar;
+                        while (afterStar < inp.size() && isIdent(inp[afterStar])) afterStar++;
+                        if (afterStar > opStart) {
+                            if (afterStar < inp.size() && inp[afterStar] == '(') {
+                                int depth = 1;
+                                size_t fp = afterStar + 1;
+                                while (fp < inp.size() && depth > 0) {
+                                    if (inp[fp] == '(') depth++;
+                                    else if (inp[fp] == ')') depth--;
+                                    fp++;
+                                }
+                                afterStar = fp;
+                            }
+                            std::string operand = inp.substr(opStart, afterStar - opStart);
+                            std::string repl;
+                            if (mv.isSquare)
+                                repl = "mul(" + operand + ", " + mv.name + ")";  // SWAPPED
+                            else
+                                repl = "mul(" + mv.name + ", " + operand + ")";  // STANDARD
+                            inp = inp.substr(0, pos) + repl + inp.substr(afterStar);
+                            pos += repl.size();
+                            continue;
+                        }
+                    }
+                    if (pos > 0) {
+                        size_t bk = pos;
+                        while (bk > 0 && inp[bk - 1] == ' ') bk--;
+                        if (bk > 0 && inp[bk - 1] == '*') {
+                            size_t starIdx = bk - 1;
+                            if (starIdx == 0 || inp[starIdx - 1] != '=') {
+                                size_t opEnd = starIdx;
+                                while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
+                                size_t opStart = opEnd;
+                                while (opStart > 0 && isIdent(inp[opStart - 1])) opStart--;
+                                if (opEnd > opStart) {
+                                    std::string operand = inp.substr(opStart, opEnd - opStart);
+                                    std::string repl;
+                                    if (mv.isSquare)
+                                        repl = "mul(" + mv.name + ", " + operand + ")";  // SWAPPED
+                                    else
+                                        repl = "mul(" + operand + ", " + mv.name + ")";  // STANDARD
+                                    inp = inp.substr(0, opStart) + repl + inp.substr(afterMv);
+                                    pos = opStart + repl.size();
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    pos++;
+                }
+            }
+        }
 
         // Phase 2: Extract mainImage
         size_t indexMainImage = inp.find("mainImage(");
@@ -765,6 +1137,26 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
             inpHeader = modHelpers + inpHeader;
         }
 
+        // Add texelFetch helper if needed (GLSL integer-coordinate texture fetch)
+        if (inp.find("texelFetch_conv(") != std::string::npos) {
+            std::string helper =
+                "// CONV: texelFetch → tex2Dlod with integer-to-UV coordinate conversion\n"
+                "float4 texelFetch_conv(sampler2D s, int2 c, int l) {\n"
+                "  return tex2Dlod(s, float4((float2(c) + 0.5) * texsize.zw, 0, l));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
+
+        // Add textureLod helper if needed (GLSL explicit-LOD texture fetch)
+        if (inp.find("tex2Dlod_conv(") != std::string::npos) {
+            std::string helper =
+                "// CONV: textureLod → tex2Dlod wrapper\n"
+                "float4 tex2Dlod_conv(sampler2D s, float2 uv_tl, float l) {\n"
+                "  return tex2Dlod(s, float4(uv_tl, 0, l));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
+
         // Add lessThan helper if needed
         if (inp.find("lessThan") != std::string::npos || inp.find("lessthan") != std::string::npos) {
             std::string ltHelper =
@@ -772,19 +1164,14 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
             inpHeader = ltHelper + inpHeader;
         }
 
-        // Add #defines for iChannel samplers
+        // Add remaining #defines (uniforms/channels already replaced inline above)
         {
             std::string defines;
-            bool hasChannel = false;
-            if (inp.find("iChannel0") != std::string::npos) { defines += "#define iChannel0 sampler_noise_lq\n"; hasChannel = true; }
-            if (inp.find("iChannel1") != std::string::npos) { defines += "#define iChannel1 sampler_noise_lq\n"; hasChannel = true; }
-            if (inp.find("iChannel2") != std::string::npos) { defines += "#define iChannel2 sampler_noise_lq\n"; hasChannel = true; }
-            if (inp.find("iChannel3") != std::string::npos) { defines += "#define iChannel3 sampler_noise_lq\n"; hasChannel = true; }
-            if (hasChannel) defines = "// CONV: setting iChannel samplers to default noise texture\n" + defines + "\n";
             if (inp.find(" tx") == std::string::npos) {
-                defines = "#define tx (sin(time)*0.5+1)\n\n" + defines;
+                defines = "#define tx (sin(time)*0.5+1)\n\n";
             }
-            inpHeader = defines + inpHeader;
+            if (!defines.empty())
+                inpHeader = defines + inpHeader;
         }
 
         // Build shader_body wrapper
@@ -821,22 +1208,22 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                             replaceAll(arg, "out ", "");
                             sbHeader << arg << " = 0;\n";
                         } else {
+                            // Input parameter (typically fragCoord) — use pixel coordinates
+                            // Use DX convention (y=0 at top) so that fragCoord ∝ texture v.
+                            // This keeps the feedback loop self-consistent: what's written at
+                            // texture v=F/H is read back at uv=F/H. The Image pass flips the
+                            // quad UVs to display right-side-up (see RenderFrameShadertoy).
                             replaceAll(arg, "in ", "");
-                            sbHeader << arg << " = uv;\n";
+                            sbHeader << arg << " = uv * texsize.xy;\n";
                         }
                     }
                 }
             }
         }
 
-        sbHeader << "// CONV: Center on screen, then try some aspect correction\n";
-        sbHeader << "uv = (uv*2) - 1;\n";
-        sbHeader << "uv *= aspect.xy;\n";
-        sbHeader << "// CONV: Adjust this to flip the output (+-uv.x, +-uv.y)\n";
-        sbHeader << "uv = float2(uv.x, -uv.y);\n";
-        sbHeader << "// CONV: Adjust viewpoint (x,y individually or both)\n";
-        sbHeader << "uv += float2(0,0) + 0;\n";
-        sbHeader << "uv *= float2(1,1) * 1;\n";
+        // No UV manipulation — Shadertoy shaders compute their own UVs
+        // from fragCoord / iResolution. The MilkDrop 'uv' parameter is only
+        // used to initialize fragCoord above.
 
         // Find the opening brace of mainImage body and replace everything before it
         size_t braceIdx = inpMain.find('{');

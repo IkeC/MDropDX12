@@ -295,6 +295,14 @@ void JsonWriter::BeginObject() {
     m_stack.push_back(false);
 }
 
+void JsonWriter::BeginObject(const wchar_t* key) {
+    WriteKey(key);
+    m_ss << L"{";
+    m_indent++;
+    m_needComma = false;
+    m_stack.push_back(false);
+}
+
 void JsonWriter::EndObject() {
     m_indent--;
     Newline();

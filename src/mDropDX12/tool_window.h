@@ -498,10 +498,12 @@ protected:
 
 private:
   int m_nTopY = 0;
+  std::string m_bufferAHlsl;   // Stored Buffer A HLSL (narrow, with LINEFEED_CONTROL_CHAR)
   void LayoutControls();
   void ConvertGLSLtoHLSL();
   void ApplyShader();
   void SaveAsPreset();
+  int  GetSelectedPass();      // 0=Image, 1=Buffer A
 
   // Conversion helpers (ported from Milkwave Remote ShaderHelper.cs)
   static std::string ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& input);

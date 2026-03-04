@@ -604,6 +604,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SHIMPORT_CLEAR        9109  // Button: Clear all
 #define IDC_MW_SHIMPORT_PASTE        9110  // Button: Paste from clipboard
 #define IDC_MW_SHIMPORT_COPY         9111  // Button: Copy HLSL
+#define IDC_MW_SHIMPORT_PASS_COMBO   9112  // Combo: target pass (Image / Buffer A)
 
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080

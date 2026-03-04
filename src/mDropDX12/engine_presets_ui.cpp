@@ -126,7 +126,7 @@ void PresetsWindow::DoBuildControls() {
         m_hBtnUp = CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont);
         m_hBtnInto = CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont);
         // Filter button (right-aligned)
-        const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
+        const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2", L".milk3" };
         int filterW = MulDiv(50, lineH, 26);
         m_hBtnFilter = CreateBtn(hw, filterLabels[p->m_nPresetFilter], IDC_MW_PRESET_FILTER, x + rw - filterW, y, filterW, lineH + 4, hFont);
     }
@@ -360,8 +360,8 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // ── Preset Filter ──
     if (id == IDC_MW_PRESET_FILTER && code == BN_CLICKED) {
-        p->m_nPresetFilter = (p->m_nPresetFilter + 1) % 3;
-        const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
+        p->m_nPresetFilter = (p->m_nPresetFilter + 1) % 4;
+        const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2", L".milk3" };
         SetWindowTextW((HWND)lParam, filterLabels[p->m_nPresetFilter]);
         p->UpdatePresetList(false, true);
         RefreshPresetList();

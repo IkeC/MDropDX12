@@ -80,6 +80,7 @@ bool      JsonSaveFile(const wchar_t* path, const std::wstring& jsonText);
 class JsonWriter {
 public:
     void BeginObject();
+    void BeginObject(const wchar_t* key);  // named nested object
     void EndObject();
     void BeginArray(const wchar_t* key);
     void BeginArrayAnon();   // inside another array

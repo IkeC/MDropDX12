@@ -6,6 +6,7 @@
 
 #include "engine.h"
 #include "engine_helpers.h"
+#include "json_utils.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -1541,6 +1542,102 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   DeleteFileW(temp2);
 }
 
+// Loads a .milk3 Shadertoy preset from JSON: { bufferA: "hlsl...", image: "hlsl..." }
+void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) {
+  JsonValue root = JsonLoadFile(szPresetFilename);
+  if (!root.isObject()) {
+    wchar_t buf[MAX_PATH + 64];
+    swprintf_s(buf, L"LoadMilk3Preset: failed to parse %s", szPresetFilename);
+    DebugLogW(buf, LOG_VERBOSE);
+    return;
+  }
+
+  int version = root[L"version"].asInt(0);
+  if (version < 1) {
+    DebugLogA("LoadMilk3Preset: unsupported version", LOG_WARN);
+    return;
+  }
+
+  // Update current preset path
+  lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
+
+  // Log which preset is now actively rendering
+  {
+    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+    name = name ? name + 1 : m_szCurrentPresetFile;
+    char dbg[512];
+    sprintf(dbg, "Render: Active preset (milk3): %ls", name);
+    DebugLogA(dbg);
+  }
+
+  // Reset state to defaults
+  m_pState->Default(0xFFFFFFFF);
+
+  // Set preset description from filename
+  {
+    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
+    if (!p) p = szPresetFilename; else p++;
+    wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
+    wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
+    if (dot) *dot = L'\0';
+  }
+
+  // Extract shader text from JSON
+  std::wstring bufferAW = root[L"bufferA"].asString(L"");
+  std::wstring imageW   = root[L"image"].asString(L"");
+
+  // Convert wide strings to narrow for shader text storage
+  auto wideToNarrow = [](const std::wstring& ws) -> std::string {
+    std::string s;
+    s.reserve(ws.size());
+    for (wchar_t ch : ws) {
+      if (ch == L'\n')
+        s += (char)LINEFEED_CONTROL_CHAR;
+      else if (ch < 128)
+        s += (char)ch;
+      else
+        s += '?';
+    }
+    return s;
+  };
+
+  // Store Image/comp shader
+  if (!imageW.empty()) {
+    std::string imageA = wideToNarrow(imageW);
+    strncpy_s(m_pState->m_szCompShadersText, MAX_BIGSTRING_LEN, imageA.c_str(), _TRUNCATE);
+    m_pState->m_nCompPSVersion = MD2_PS_3_0;
+  }
+
+  // Store Buffer A shader
+  if (!bufferAW.empty()) {
+    std::string bufferAA = wideToNarrow(bufferAW);
+    strncpy_s(m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, bufferAA.c_str(), _TRUNCATE);
+    m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+  }
+
+  // No warp shader in Shadertoy mode
+  m_pState->m_nWarpPSVersion = 0;
+  m_pState->m_nMaxPSVersion = MD2_PS_3_0;
+
+  // Activate Shadertoy pipeline
+  m_bShadertoyMode = true;
+  m_nShadertoyStartFrame = GetFrame();
+
+  // Compile shaders
+  m_shaders.warp.Clear();
+  m_shaders.comp.Clear();
+  m_shaders.bufferA.Clear();
+  LoadShaders(&m_shaders, m_pState, false, false);
+  CreateDX12PresetPSOs();
+
+  m_fPresetStartTime = GetTime();
+  m_bPresetDiagLogged = false;
+  m_fNextPresetTime = -1.0f;
+  NumTotalPresetsLoaded++;
+  OnFinishedLoadingPreset();
+}
+
 // ---------------------------------------------------------------------------
 
 void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
@@ -1580,6 +1677,15 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     }
   }
 
+  // .milk3 Shadertoy preset: route to dedicated loader
+  {
+    int fnLen = lstrlenW(szPresetFilename);
+    if (fnLen >= 6 && _wcsicmp(szPresetFilename + fnLen - 6, L".milk3") == 0) {
+      LoadMilk3Preset(szPresetFilename, fBlendTime);
+      return;
+    }
+  }
+
   // .milk2 double-preset: route to dedicated loader
   {
     int fnLen = lstrlenW(szPresetFilename);
@@ -1588,6 +1694,9 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       return;
     }
   }
+
+  // Loading a non-.milk3 preset: disable Shadertoy mode
+  m_bShadertoyMode = false;
 
   // if no preset was valid before, make sure there is no blend, because there is nothing valid to blend from.
   if (!wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC))
@@ -2099,22 +2208,29 @@ retry:
         swprintf(szFilename, L"*%s", fd.cFileName);
     }
     else {
-      // skip normal files not ending in ".milk" or ".milk2"
+      // skip normal files not ending in ".milk", ".milk2", or ".milk3"
       int len = lstrlenW(fd.cFileName);
       bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
       bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
-      if (!bIsMilk && !bIsMilk2)
+      bool bIsMilk3 = (len >= 6 && _wcsicmp(fd.cFileName + len - 6, L".milk3") == 0);
+      if (!bIsMilk && !bIsMilk2 && !bIsMilk3)
         bSkip = true;
 
-      // Apply preset filter: 0=all, 1=.milk only, 2=.milk2 only
+      // Apply preset filter: 0=all, 1=.milk only, 2=.milk2 only, 3=.milk3 only
       if (!bSkip && g_engine.m_nPresetFilter == 1 && !bIsMilk)
         bSkip = true;
       if (!bSkip && g_engine.m_nPresetFilter == 2 && !bIsMilk2)
         bSkip = true;
+      if (!bSkip && g_engine.m_nPresetFilter == 3 && !bIsMilk3)
+        bSkip = true;
 
+      // .milk3 files are always runnable (JSON + HLSL, no PS version check needed)
+      if (!bSkip && bIsMilk3) {
+        // no further filtering needed for .milk3
+      }
       // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
       // otherwise we don't want to show it in the preset list!
-      if (!bSkip) {
+      else if (!bSkip) {
         // If the first line of the file is not "MILKDROP_PRESET_VERSION XXX",
         //   then it's a MilkDrop 1 era preset, so it is definitely runnable. (no shaders)
         // Otherwise, check for the value "PSVERSION".  It will be 0, 2, or 3.
@@ -2612,6 +2728,9 @@ bool DirHasMilkFilesHelper(const wchar_t* szDir) {
   HANDLE h = FindFirstFileW(szMask, &fd);
   if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
   swprintf(szMask, L"%s*.milk2", szDir);
+  h = FindFirstFileW(szMask, &fd);
+  if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
+  swprintf(szMask, L"%s*.milk3", szDir);
   h = FindFirstFileW(szMask, &fd);
   if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
   return false;

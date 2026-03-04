@@ -88,7 +88,7 @@ struct WindowTitleProfile {
     int nPollIntervalSec = 2;          // Poll interval in seconds (1-10)
 };
 
-typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
+typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
 typedef struct { float rad; float ang; float a; float c; } td_vertinfo; // blending: mix = max(0,min(1,a*t + c));
 typedef char* CHARPTR;
@@ -320,6 +320,7 @@ typedef struct {
 typedef struct {
   PShaderInfo warp;
   PShaderInfo comp;
+  PShaderInfo bufferA;  // Shadertoy Buffer A (pre-comp pass)
 } PShaderSet;
 
 typedef struct {
@@ -673,7 +674,7 @@ public:
 
   int			m_nPresets;			// the # of entries in the file listing.  Includes directories and then files, sorted alphabetically.
   int			m_nDirs;			// the # of presets that are actually directories.  Always between 0 and m_nPresets.
-  int			m_nPresetFilter = 0;	// 0=all (.milk+.milk2), 1=.milk only, 2=.milk2 only
+  int			m_nPresetFilter = 0;	// 0=all, 1=.milk only, 2=.milk2 only, 3=.milk3 only
   int			m_nPresetListCurPos;// Index of the currently-HIGHLIGHTED preset (the user must press Enter on it to select it).
   int			m_nCurrentPreset;	// Index of the currently-RUNNING preset.
   //   Note that this is NOT the same as the currently-highlighted preset! (that's m_nPresetListCurPos)
@@ -827,6 +828,16 @@ public:
   DX12Texture m_injectEffectTex;                     // back-buffer-sized copy for F11 inject post-process
   ComPtr<ID3D12PipelineState> m_pInjectEffectPSO;    // inject effect pixel shader PSO
   void RenderInjectEffect();                         // F11 inject effect post-process pass
+  DX12Texture m_dx12Feedback[2];                      // ping-pong feedback buffers for temporal reprojection
+  int m_nFeedbackIdx = 0;                            // read index (write = 1 - read)
+  bool m_bCompUsesFeedback = false;                  // true when comp shader uses sampler_feedback
+  bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
+  bool m_bShadertoyMode = false;                     // true when a .milk3 Shadertoy preset is active
+  int  m_nShadertoyStartFrame = 0;                   // frame at which Shadertoy mode was activated (for iFrame=0)
+  ComPtr<ID3D12PipelineState> m_dx12BufferAPSO;      // Buffer A pixel shader PSO
+  std::atomic<int> m_nRecompileResult{0};            // 0=idle, 1=pending, 2=done-ok, 3=done-fail
+  void CopyBackbufferToFeedback();                   // capture comp output for next frame's feedback (single-pass)
+  void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag
@@ -997,6 +1008,7 @@ public:
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
   bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
   void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
+  void        LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
   bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick
   void        FindValidPresetDir();
@@ -1235,7 +1247,7 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
-  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]);
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
 

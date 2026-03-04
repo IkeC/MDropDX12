@@ -2499,6 +2499,23 @@ int Engine::AllocateMyDX9Stuff() {
       DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED");
     }
 
+    // Feedback buffers for Shadertoy temporal reprojection (ping-pong pair, VS-resolution)
+    // Must match m_nTexSizeX/Y because comp shader's texsize constant = VS size,
+    // and Shadertoy shaders compute fragCoord / texelFetch using texsize.
+    {
+      UINT fbW = (UINT)max(1, m_nTexSizeX);
+      UINT fbH = (UINT)max(1, m_nTexSizeY);
+      m_dx12Feedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12Feedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      // Binding blocks needed for the blit pass (feedback → backbuffer for display)
+      if (m_dx12Feedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[0]);
+      if (m_dx12Feedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[1]);
+      m_nFeedbackIdx = 0;
+      DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
+                ? "DX12: Feedback buffers: created (ping-pong pair)"
+                : "DX12: Feedback buffers: FAILED");
+    }
+
     // Inject effect pixel shader PSO
     // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
     // mode.y = per-preset effect bitmask (bit0=brighten, bit1=darken, bit2=solarize, bit3=invert)
@@ -3163,6 +3180,9 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_dx12VS[0].Reset();
     m_dx12VS[1].Reset();
     m_injectEffectTex.Reset();
+    m_dx12Feedback[0].Reset();
+    m_dx12Feedback[1].Reset();
+    m_dx12BufferAPSO.Reset();
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
     DestroySpoutInput();
@@ -3575,6 +3595,12 @@ void Engine::MyRenderFn(int redraw) {
     DoCustomSoundAnalysis();    // emulates old pre-vms milkdrop sound analysis
 
   RenderFrame(redraw);  // see milkdropfs.cpp
+
+  CopyBackbufferToFeedback();  // capture comp output for Shadertoy temporal feedback (no-op when unused)
+
+  // Swap feedback ping-pong: current write becomes next frame's read
+  if (m_bCompUsesFeedback || m_bHasBufferA)
+    m_nFeedbackIdx = 1 - m_nFeedbackIdx;
 
   RenderInjectEffect();  // F11 inject effect post-process pass (no-op when mode==0)
 

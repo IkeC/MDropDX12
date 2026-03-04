@@ -163,6 +163,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
         m_texture_bindings[cd.RegisterIndex].texptr = NULL;
         m_texcode[cd.RegisterIndex] = TEX_VS;
       }
+      else if (!wcscmp(L"feedback", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_FEEDBACK;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP for feedback
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
         m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[1];
@@ -703,6 +711,44 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       if (m_fallbackShaders_ps.comp.bytecodeBlob) m_fallbackShaders_ps.comp.bytecodeBlob->AddRef();
       memcpy(&sh->comp, &m_fallbackShaders_ps.comp, sizeof(PShaderInfo));
     }
+
+    // Check if comp shader uses sampler_feedback (Shadertoy temporal reprojection)
+    m_bCompUsesFeedback = false;
+    for (int i = 0; i < 16; i++) {
+      if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK) {
+        m_bCompUsesFeedback = true;
+        DebugLogA("DX12: Comp shader uses sampler_feedback (temporal feedback enabled)");
+        break;
+      }
+    }
+  }
+
+  // Buffer A shader (Shadertoy two-pass)
+  m_bHasBufferA = false;
+  if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly);
+    DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+    // Save Buffer A error/shader to separate diag files before comp overwrites them
+    {
+      char srcPath[MAX_PATH], dstPath[MAX_PATH];
+      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferA_shader_error.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
+      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferA_shader.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
+    }
+    if (bOK) {
+      m_bHasBufferA = true;
+      m_bCompUsesFeedback = true;  // Buffer A always implies feedback
+      // Check if Buffer A uses sampler_feedback (for self-referencing)
+      for (int i = 0; i < 16; i++) {
+        if (sh->bufferA.params.m_texcode[i] == TEX_FEEDBACK) {
+          DebugLogA("DX12: Buffer A shader uses sampler_feedback (self-referencing)");
+          break;
+        }
+      }
+    }
   }
 
   return true;
@@ -731,11 +777,20 @@ void Engine::CreateDX12PresetPSOs() {
   }
 
   // Create comp PSO from current shader bytecode
+  // In Shadertoy mode (.milk3): comp/Image always writes to UNORM backbuffer.
+  // In MilkDrop mode with single-pass feedback: comp writes to FLOAT32 feedback buffer.
+  DXGI_FORMAT compRtvFormat;
+  if (m_bShadertoyMode)
+    compRtvFormat = rtvFormat;  // backbuffer UNORM
+  else if (m_bCompUsesFeedback && !m_bHasBufferA)
+    compRtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  else
+    compRtvFormat = rtvFormat;
   m_dx12CompPSO.Reset();
   m_compMainTexSlot = 0;
   if (m_shaders.comp.bytecodeBlob && g_pCompVSBlob) {
     m_dx12CompPSO = DX12CreatePresetPSO(
-      device, rootSig, rtvFormat,
+      device, rootSig, compRtvFormat,
       g_pCompVSBlob,
       m_shaders.comp.bytecodeBlob->GetBufferPointer(),
       (UINT)m_shaders.comp.bytecodeBlob->GetBufferSize(),
@@ -744,13 +799,174 @@ void Engine::CreateDX12PresetPSOs() {
     if (m_compMainTexSlot == UINT_MAX) m_compMainTexSlot = 0;
   }
 
+  // Create Buffer A PSO — always renders to FLOAT32 feedback buffer (Shadertoy uses float32)
+  DXGI_FORMAT feedbackRtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  m_dx12BufferAPSO.Reset();
+  if (m_shaders.bufferA.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferAPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferA.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferA.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
   {
     char dbg[256];
     sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
     DebugLogA(dbg, LOG_VERBOSE);
     sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
     DebugLogA(dbg, LOG_VERBOSE);
+    if (m_dx12BufferAPSO)
+      DebugLogA("DX12: Preset bufferA PSO: OK");
   }
+}
+
+// Preprocessor: fix matrix * vector multiplication.
+// HLSL requires mul() for matrix-vector multiply; the * operator causes X3020 type mismatch.
+// Finds variables declared as float2x2/float3x3/float4x4 and wraps their * operations.
+static void FixMatrixVarMultiply(char* szShaderText) {
+  auto isIdent = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  // Phase 1: collect matrix variable names
+  static const char* matTypes[] = {
+    "float2x2", "float2x3", "float2x4",
+    "float3x2", "float3x3", "float3x4",
+    "float4x2", "float4x3", "float4x4"
+  };
+  char matVars[64][64];  // up to 64 matrix variables
+  int matVarLens[64];
+  int nMatVars = 0;
+
+  for (auto& mt : matTypes) {
+    int mtLen = (int)strlen(mt);
+    const char* s = szShaderText;
+    while ((s = strstr(s, mt)) != NULL) {
+      if (s > szShaderText && isIdent(s[-1])) { s += mtLen; continue; }
+      if (isIdent(s[mtLen])) { s += mtLen; continue; }
+      const char* p = s + mtLen;
+      while (*p == ' ' || *p == '\t') p++;
+      const char* nameStart = p;
+      while (isIdent(*p)) p++;
+      int nameLen = (int)(p - nameStart);
+      if (nameLen > 0 && nameLen < 63) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '(') {  // not a function declaration
+          memcpy(matVars[nMatVars], nameStart, nameLen);
+          matVars[nMatVars][nameLen] = '\0';
+          matVarLens[nMatVars] = nameLen;
+          nMatVars++;
+          if (nMatVars >= 64) break;
+        }
+      }
+      s = p;
+    }
+    if (nMatVars >= 64) break;
+  }
+
+  if (nMatVars == 0) return;
+
+  // Phase 2: replace matVar*ident → mul(matVar, ident) and ident*matVar → mul(ident, matVar)
+  int srcLen = (int)strlen(szShaderText);
+  char* tmp = (char*)malloc(srcLen + 32768);
+  if (!tmp) return;
+
+  for (int mi = 0; mi < nMatVars; mi++) {
+    const char* mv = matVars[mi];
+    int mvLen = matVarLens[mi];
+    int wi = 0;
+
+    for (int i = 0; i < srcLen; ) {
+      // Check for word-boundary match of matrix variable name
+      if (strncmp(&szShaderText[i], mv, mvLen) == 0 &&
+          (i == 0 || !isIdent(szShaderText[i - 1])) &&
+          !isIdent(szShaderText[i + mvLen])) {
+        // Forward: matVar * ident
+        int afterMv = i + mvLen;
+        int s = afterMv;
+        while (szShaderText[s] == ' ') s++;
+        if (szShaderText[s] == '*' && szShaderText[s + 1] != '=') {
+          int afterStar = s + 1;
+          while (szShaderText[afterStar] == ' ') afterStar++;
+          int opStart = afterStar;
+          while (isIdent(szShaderText[afterStar])) afterStar++;
+          if (afterStar > opStart) {
+            // If the identifier is followed by '(' it's a function call — include the args
+            if (szShaderText[afterStar] == '(') {
+              int depth = 1;
+              afterStar++; // skip opening '('
+              while (szShaderText[afterStar] && depth > 0) {
+                if (szShaderText[afterStar] == '(') depth++;
+                else if (szShaderText[afterStar] == ')') depth--;
+                afterStar++;
+              }
+            }
+            // Include trailing .swizzle (e.g., n.yzw, func().xyz)
+            if (szShaderText[afterStar] == '.') {
+              afterStar++; // skip '.'
+              while (isIdent(szShaderText[afterStar])) afterStar++;
+            }
+            // Write: mul(matVar, operand)
+            memcpy(&tmp[wi], "mul(", 4); wi += 4;
+            memcpy(&tmp[wi], mv, mvLen); wi += mvLen;
+            memcpy(&tmp[wi], ", ", 2); wi += 2;
+            memcpy(&tmp[wi], &szShaderText[opStart], afterStar - opStart);
+            wi += afterStar - opStart;
+            tmp[wi++] = ')';
+            i = afterStar;
+            continue;
+          }
+        }
+        // Reverse: check if preceded by ident * matVar
+        if (i > 0) {
+          int bk = i;
+          while (bk > 0 && szShaderText[bk - 1] == ' ') bk--;
+          if (bk > 0 && szShaderText[bk - 1] == '*' && (bk < 2 || szShaderText[bk - 2] != '=')) {
+            int starIdx = bk - 1;
+            int opEnd = starIdx;
+            while (opEnd > 0 && szShaderText[opEnd - 1] == ' ') opEnd--;
+            int opStart = opEnd;
+            while (opStart > 0 && isIdent(szShaderText[opStart - 1])) opStart--;
+            // Include preceding ident.swizzle pattern (e.g., n.yzw → capture full "n.yzw")
+            if (opStart > 1 && szShaderText[opStart - 1] == '.') {
+              int dotPos = opStart - 1;
+              int identStart = dotPos;
+              while (identStart > 0 && isIdent(szShaderText[identStart - 1])) identStart--;
+              if (identStart < dotPos)
+                opStart = identStart;  // include "n." prefix
+            }
+            if (opEnd > opStart) {
+              // Rewind output to before operand * matVar
+              wi -= (i - opStart);  // remove already-written "operand * " from tmp
+              memcpy(&tmp[wi], "mul(", 4); wi += 4;
+              memcpy(&tmp[wi], &szShaderText[opStart], opEnd - opStart);
+              wi += opEnd - opStart;
+              memcpy(&tmp[wi], ", ", 2); wi += 2;
+              memcpy(&tmp[wi], mv, mvLen); wi += mvLen;
+              tmp[wi++] = ')';
+              i += mvLen;
+              continue;
+            }
+          }
+        }
+        // No match — copy as-is
+        memcpy(&tmp[wi], mv, mvLen);
+        wi += mvLen;
+        i += mvLen;
+      } else {
+        tmp[wi++] = szShaderText[i++];
+      }
+    }
+    tmp[wi] = 0;
+    memcpy(szShaderText, tmp, wi + 1);
+    srcLen = wi;
+  }
+
+  free(tmp);
 }
 
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
@@ -1016,21 +1232,33 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       if (p) {
         // skip over it
         p++;
-        // then insert "float3 ret = 0;"
+        // then insert first line(s)
         lstrcpy(temp, p);
-        sprintf(p, "%s\n", szFirstLine);
+        if (m_bShadertoyMode) {
+          // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
+          sprintf(p, "    float4 ret = 0;\n");
+        } else {
+          sprintf(p, "%s\n", szFirstLine);
+        }
         p += lstrlen(p);
         lstrcpy(p, temp);
 
         // find the ending curly brace
         p = strrchr(p, '}');
-        // add the last line - "    _return_value = float4(ret.xyz, _vDiffuse.w);"
         if (p) {
-          // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
-          // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
-          // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
-          char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-          sprintf(p, " %s\n}\n", szLastLine);
+          if (m_bShadertoyMode) {
+            // Shadertoy: output all 4 channels directly (no shiftHSV, no alpha override)
+            // Both Buffer A and Image passes output ret unchanged.
+            // Buffer A writes to FLOAT32 feedback; Image writes to UNORM backbuffer.
+            char szLastLine[] = "    _return_value = ret;";
+            sprintf(p, " %s\n}\n", szLastLine);
+          } else {
+            // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
+            // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
+            // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
+            char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
+            sprintf(p, " %s\n}\n", szLastLine);
+          }
         }
       }
     }
@@ -1047,6 +1275,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
 
+  // Fix matrix * vector multiplication (HLSL requires mul())
+  FixMatrixVarMultiply(szShaderText);
+
   // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
   if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
     char dumpPath[MAX_PATH];
@@ -1054,6 +1285,15 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
             shaderType == SHADER_COMP ? "comp" : "warp");
     FILE* f = fopen(dumpPath, "w");
     if (f) { fputs(szShaderText, f); fclose(f); }
+  }
+  // Also dump a numbered variant for multi-pass diagnostics (bufferA=0, comp=1, etc.)
+  {
+    static int s_dumpIdx = 0;
+    char dumpPath[MAX_PATH];
+    sprintf(dumpPath, "%lsdiag_comp_shader_%d.txt", m_szBaseDir, s_dumpIdx++);
+    FILE* f = fopen(dumpPath, "w");
+    if (f) { fputs(szShaderText, f); fclose(f); }
+    if (s_dumpIdx > 5) s_dumpIdx = 0;
   }
 
   // now really try to compile it.
@@ -1160,6 +1400,15 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         MultiByteToWideChar(CP_ACP, 0, errorMsg, -1, wideErrorMsg, _countof(wideErrorMsg));
         dumpmsg(wideErrorMsg, LOG_WARN);
 
+        // Write D3DCompile error to diagnostic file for Shader Import window
+        if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+          char errPath[MAX_PATH];
+          sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir,
+                  shaderType == SHADER_COMP ? "comp" : "warp");
+          FILE* ef = fopen(errPath, "w");
+          if (ef) { fputs(errorMsg, ef); fclose(ef); }
+        }
+
         SafeRelease(m_pShaderCompileErrors);
         AddNotification(wideErrorMsg);
       }
@@ -1170,6 +1419,15 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         }
       }
       return false;
+    }
+
+    // Clear stale error file on successful compilation
+    if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+      char errPath[MAX_PATH];
+      sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir,
+              shaderType == SHADER_COMP ? "comp" : "warp");
+      FILE* ef = fopen(errPath, "w");
+      if (ef) fclose(ef);
     }
 
     if (m_ShaderCaching) {

@@ -372,6 +372,8 @@ public:
   char			m_szPerPixelExpr[MAX_BIGSTRING_LEN];
   char            m_szWarpShadersText[MAX_BIGSTRING_LEN]; // pixel shader code
   char            m_szCompShadersText[MAX_BIGSTRING_LEN]; // pixel shader code
+  char            m_szBufferAShadersText[MAX_BIGSTRING_LEN]; // Shadertoy Buffer A shader code
+  int             m_nBufferAPSVersion = 0;             // 0 = no Buffer A shader
   void			FreeVarsAndCode(bool bFree = true);
   void			RegisterBuiltInVariables(int flags);
   void			StripLinefeedCharsAndComments(char* src, char* dest);

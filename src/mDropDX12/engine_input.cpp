@@ -2192,14 +2192,29 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
     case RenderCmd::RecompileCompShader:
     {
       ClearErrors(ERR_PRESET);
+      bool allOK = true;
       if (m_nMaxPSVersion > 0) {
         m_shaders.comp.Clear();
         if (!RecompilePShader(m_pState->m_szCompShadersText, &m_shaders.comp,
                               SHADER_COMP, false, m_pState->m_nCompPSVersion, false)) {
           m_shaders.comp = m_fallbackShaders_ps.comp;
+          allOK = false;
+        }
+        // Recompile Buffer A if present
+        m_bHasBufferA = false;
+        m_shaders.bufferA.Clear();
+        if (m_pState->m_nBufferAPSVersion > 0 && m_pState->m_szBufferAShadersText[0]) {
+          if (RecompilePShader(m_pState->m_szBufferAShadersText, &m_shaders.bufferA,
+                               SHADER_COMP, false, m_pState->m_nBufferAPSVersion, false)) {
+            m_bHasBufferA = true;
+            m_bCompUsesFeedback = true;
+          } else {
+            allOK = false;
+          }
         }
         CreateDX12PresetPSOs();
       }
+      m_nRecompileResult.store(allOK ? 2 : 3);  // 2=ok, 3=fail
       break;
     }
     case RenderCmd::DisableAllOutputs:

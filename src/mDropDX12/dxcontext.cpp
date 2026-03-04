@@ -825,8 +825,8 @@ bool DXContext::CreateRootSignature()
         staticSamplers[i].ShaderRegister   = i;
         staticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur)
-    for (int i : {1, 2, 11, 12, 13}) {
+    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur), s14 (feedback)
+    for (int i : {1, 2, 11, 12, 13, 14}) {
         staticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -1670,22 +1670,22 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBindingBlockGpuHandleByIndex(UINT bloc
 
 bool DXContext::AllocatePerFrameBindings()
 {
-    // Reserve 64 contiguous SRV slots: 2 frames × 2 passes × 16 descriptors
+    // Reserve 96 contiguous SRV slots: 2 frames × 3 passes (warp+bufferA+comp) × 16 descriptors
     m_perFrameBindingBase = m_nextFreeSrvSlot;
-    m_nextFreeSrvSlot += DXC_FRAME_COUNT * 2 * BINDING_BLOCK_SIZE;
+    m_nextFreeSrvSlot += DXC_FRAME_COUNT * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
     char buf[128];
     sprintf(buf, "DX12: AllocatePerFrameBindings: base=%u (reserved %u slots)",
-            m_perFrameBindingBase, DXC_FRAME_COUNT * 2 * BINDING_BLOCK_SIZE);
+            m_perFrameBindingBase, DXC_FRAME_COUNT * PASSES_PER_FRAME * BINDING_BLOCK_SIZE);
     DebugLogA(buf);
     return true;
 }
 
-void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT compSrvSlots[16])
+void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16], const UINT compSrvSlots[16])
 {
     if (m_perFrameBindingBase == UINT_MAX) return;
 
-    // Each frame gets 32 slots: [0..15] = warp, [16..31] = comp
-    UINT frameBase = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE;
+    // Each frame gets 48 slots: [0..15] = warp, [16..31] = bufferA, [32..47] = comp
+    UINT frameBase = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
     nullSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
@@ -1693,41 +1693,37 @@ void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT c
 
     D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    // Warp binding block
-    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
-        D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = heapStart.ptr + (SIZE_T)(frameBase + i) * m_srvDescriptorSize;
-
-        D3D12_CPU_DESCRIPTOR_HANDLE src;
-        if (warpSrvSlots[i] != UINT_MAX) {
-            src.ptr = heapStart.ptr + (SIZE_T)warpSrvSlots[i] * m_srvDescriptorSize;
-        } else {
-            src = nullSrc;
+    // Helper to fill a 16-slot binding block
+    auto fillBlock = [&](UINT base, const UINT slots[16]) {
+        for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
+            D3D12_CPU_DESCRIPTOR_HANDLE dst;
+            dst.ptr = heapStart.ptr + (SIZE_T)(base + i) * m_srvDescriptorSize;
+            D3D12_CPU_DESCRIPTOR_HANDLE src;
+            if (slots[i] != UINT_MAX)
+                src.ptr = heapStart.ptr + (SIZE_T)slots[i] * m_srvDescriptorSize;
+            else
+                src = nullSrc;
+            m_device->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         }
-        m_device->CopyDescriptorsSimple(1, dst, src,
-                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
+    };
 
-    // Comp binding block
-    UINT compBase = frameBase + BINDING_BLOCK_SIZE;
-    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
-        D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = heapStart.ptr + (SIZE_T)(compBase + i) * m_srvDescriptorSize;
-
-        D3D12_CPU_DESCRIPTOR_HANDLE src;
-        if (compSrvSlots[i] != UINT_MAX) {
-            src.ptr = heapStart.ptr + (SIZE_T)compSrvSlots[i] * m_srvDescriptorSize;
-        } else {
-            src = nullSrc;
-        }
-        m_device->CopyDescriptorsSimple(1, dst, src,
-                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
+    fillBlock(frameBase, warpSrvSlots);                              // pass 0: warp
+    fillBlock(frameBase + BINDING_BLOCK_SIZE, bufferASrvSlots);      // pass 1: bufferA
+    fillBlock(frameBase + 2 * BINDING_BLOCK_SIZE, compSrvSlots);     // pass 2: comp
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
 {
-    UINT slot = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE;
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferABindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;
@@ -1736,7 +1732,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
 {
-    UINT slot = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE + BINDING_BLOCK_SIZE;
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 2 * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;
