@@ -9,10 +9,13 @@
 
 #include <Windows.h>
 #include <vector>
+#include <string>
 #include <thread>
 #include <atomic>
 #include "engine_helpers.h"
 #include "midi_input.h"
+#include "button_panel.h"   // ButtonAction
+#include "hotkeys.h"        // HotkeyScope
 
 namespace mdrop {
 
@@ -63,6 +66,12 @@ protected:
 
   // Whether window accepts drag-and-drop files (DragAcceptFiles)
   virtual bool AcceptsDragDrop() const { return false; }
+
+  // Whether the message pump forwards ALL keyboard input to the render window
+  // (not just F-keys and Ctrl/Alt combos).  Override to true for windows with
+  // no text edits (e.g. Button Board) so the VJ can use hotkeys while the
+  // window has focus.  Escape and Ctrl+Shift+F2 are always kept local.
+  virtual bool ForwardAllKeys() const { return false; }
 
   // Called when Open() finds window already visible. Default: SetForegroundWindow.
   // Settings overrides to move off fullscreen monitor.
@@ -424,8 +433,6 @@ private:
 
 // ── Concrete subclass: Button Board window ──
 
-class ButtonPanel; // forward (defined in button_panel.h)
-
 class ButtonBoardWindow : public ToolWindow {
 public:
   ButtonBoardWindow(Engine* pEngine);
@@ -439,10 +446,13 @@ protected:
   int GetFontMinusControlID() const override { return IDC_MW_BOARD_FONT_MINUS; }
   int GetMinWidth() const override  { return 300; }
   int GetMinHeight() const override { return 250; }
+  bool ForwardAllKeys() const override { return true; }
+  bool AcceptsDragDrop() const override { return true; }
 
   void    OnResize() override;
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   void    DoDestroy() override;
 
 private:
@@ -460,6 +470,8 @@ private:
   void ShowConfigMenu();
   void ShowSlotEditDialog(int globalIndex);
   void SaveBoard();
+  void LoadSlotImages();
+  void SetSlotImage(int globalIndex, const std::wstring& path);
 };
 
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.
@@ -467,5 +479,34 @@ private:
 LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,
                                 COLORREF colBg, COLORREF colBorder, COLORREF colText,
                                 bool* pHandled);
+
+// ── Shared Action Edit Dialog ────────────────────────────────────────────
+// Used by both ButtonBoardWindow and HotkeysWindow for editing actions.
+// Supports: action type dropdown, label, payload/command, file browse,
+// optional hotkey binding (key + scope).
+
+struct ActionEditData {
+    // Action configuration
+    ButtonAction actionType = ButtonAction::None;
+    std::wstring label;
+    std::wstring payload;       // command string, file path, etc.
+
+    // Key binding (shown when showKeyBinding == true)
+    bool showKeyBinding = true;
+    UINT modifiers = 0;         // MOD_ALT, MOD_CONTROL, MOD_SHIFT
+    UINT vk = 0;                // virtual key code (0 = unbound)
+    HotkeyScope scope = ::HKSCOPE_LOCAL;
+
+    // Built-in hotkey mode: action type is read-only, only key + scope editable
+    bool isBuiltInHotkey = false;
+    std::wstring actionName;    // display name for built-in (read-only)
+
+    // Context
+    Engine* pEngine = nullptr;
+    bool accepted = false;
+};
+
+// Show the shared action edit dialog.  Returns true if user pressed OK.
+bool ShowActionEditDialog(HWND hParent, ActionEditData& data);
 
 } // namespace mdrop

@@ -3,12 +3,13 @@
 // Standalone window hosting a configurable grid of buttons that trigger
 // presets, sprites, script commands, or messages.
 
+#include "tool_window.h"
 #include "engine.h"
 #include "button_panel.h"
 #include "utility.h"
 #include <CommCtrl.h>
-#include <dwmapi.h>
-#pragma comment(lib, "dwmapi.lib")
+#include <commdlg.h>
+#include <shellapi.h>
 
 namespace mdrop {
 
@@ -75,6 +76,9 @@ void ButtonBoardWindow::DoBuildControls() {
     // Set callbacks
     m_pPanel->OnLeftClick = [this](int gi) { ExecuteSlot(gi); };
     m_pPanel->OnRightClick = [this](int gi, POINT pt) { ShowSlotContextMenu(gi, pt); };
+
+    // Load thumbnail images from saved paths
+    LoadSlotImages();
 
     UpdateBankLabel();
 }
@@ -157,6 +161,17 @@ void ButtonBoardWindow::UpdateBankLabel() {
 
 // ─── Execute Slot Action ────────────────────────────────────────────────
 
+// Helper: post a wide string to the render window via WM_MW_IPC_MESSAGE.
+// Allocates with malloc() to match the free() in the message handler.
+static void PostIPCMessage(HWND hRender, const std::wstring& msg) {
+    size_t cb = (msg.size() + 1) * sizeof(wchar_t);
+    wchar_t* copy = (wchar_t*)malloc(cb);
+    if (!copy) return;
+    memcpy(copy, msg.c_str(), cb);
+    if (!PostMessage(hRender, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy))
+        free(copy);
+}
+
 void ButtonBoardWindow::ExecuteSlot(int globalIndex) {
     if (!m_pPanel || globalIndex < 0 || globalIndex >= m_pPanel->GetTotalSlots())
         return;
@@ -170,33 +185,30 @@ void ButtonBoardWindow::ExecuteSlot(int globalIndex) {
     if (!hRender) return;
 
     switch (slot.action) {
-    case ButtonAction::LoadPreset: {
-        // Send preset path via IPC message: "PRESET=<path>"
-        std::wstring cmd = L"PRESET=" + slot.payload;
-        wchar_t* copy = new wchar_t[cmd.size() + 1];
-        wcscpy(copy, cmd.c_str());
-        PostMessage(hRender, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+    case ButtonAction::LoadPreset:
+        PostIPCMessage(hRender, L"PRESET=" + slot.payload);
         break;
-    }
     case ButtonAction::PushSprite: {
         int sprNum = _wtoi(slot.payload.c_str());
         PostMessage(hRender, WM_MW_PUSH_SPRITE, sprNum, -1);
         break;
     }
-    case ButtonAction::ScriptCommand: {
-        // Send pipe-chained commands via IPC
-        wchar_t* copy = new wchar_t[slot.payload.size() + 1];
-        wcscpy(copy, slot.payload.c_str());
-        PostMessage(hRender, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+    case ButtonAction::ScriptCommand:
+        // Pipe-chained script commands (NEXT, PREV, LOCK, SEND=0x.., etc.)
+        // Routed via IPC → LaunchMessage → ExecuteScriptLine fallback
+        PostIPCMessage(hRender, slot.payload);
         break;
-    }
-    case ButtonAction::LaunchMessage: {
-        // Full MSG|text=...|font=... string via IPC
-        wchar_t* copy = new wchar_t[slot.payload.size() + 1];
-        wcscpy(copy, slot.payload.c_str());
-        PostMessage(hRender, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+    case ButtonAction::LaunchMessage:
+        PostIPCMessage(hRender, slot.payload);
         break;
-    }
+    case ButtonAction::RunScript:
+        // Load and execute a script file (same as FILE= in script system)
+        PostIPCMessage(hRender, L"FILE=" + slot.payload);
+        break;
+    case ButtonAction::LaunchApp:
+        // Launch or focus an application (same as hotkey Launch type)
+        PostIPCMessage(hRender, L"LAUNCH=" + slot.payload);
+        break;
     default:
         break;
     }
@@ -215,6 +227,10 @@ void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
     AppendMenuW(hMenu, MF_STRING, 2, L"Set Script Command...");
     AppendMenuW(hMenu, MF_STRING, 3, L"Set Sprite...");
     AppendMenuW(hMenu, MF_STRING, 4, L"Set Message...");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, 7, L"Set Image...");
+    bool hasImage = !slot.imagePath.empty();
+    AppendMenuW(hMenu, MF_STRING | (hasImage ? 0 : MF_GRAYED), 8, L"Clear Image");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hMenu, MF_STRING | (hasAction ? 0 : MF_GRAYED), 5, L"Edit...");
     AppendMenuW(hMenu, MF_STRING | (hasAction ? 0 : MF_GRAYED), 6, L"Clear Slot");
@@ -286,8 +302,30 @@ void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
         s.action = ButtonAction::None;
         s.payload.clear();
         s.label.clear();
+        s.imagePath.clear();
         m_pPanel->ClearSlotThumbnail(globalIndex);
         m_pPanel->Invalidate();
+        SaveBoard();
+        break;
+
+    case 7: { // Set Image
+        wchar_t szFile[MAX_PATH] = {};
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = m_hWnd;
+        ofn.lpstrFilter = L"Images\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.ico\0All Files\0*.*\0";
+        ofn.lpstrFile = szFile;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&ofn)) {
+            SetSlotImage(globalIndex, szFile);
+            SaveBoard();
+        }
+        break;
+    }
+
+    case 8: // Clear Image
+        SetSlotImage(globalIndex, L"");
         SaveBoard();
         break;
     }
@@ -314,6 +352,12 @@ void ButtonBoardWindow::ShowConfigMenu() {
     AppendMenuW(hBanks, MF_STRING | (cfg.nBanks==5 ? MF_CHECKED : 0), 23, L"5 Banks");
     AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hBanks, L"Banks");
 
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, 30, L"Save Layout...");
+    AppendMenuW(hMenu, MF_STRING, 31, L"Load Layout...");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, 40, L"Reset to Defaults");
+
     RECT rc;
     GetWindowRect(m_hConfigBtn, &rc);
     int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY,
@@ -330,6 +374,53 @@ void ButtonBoardWindow::ShowConfigMenu() {
     case 21: cfg.nBanks = 2; changed = true; break;
     case 22: cfg.nBanks = 3; changed = true; break;
     case 23: cfg.nBanks = 5; changed = true; break;
+    case 30: // Save Layout
+    {
+        wchar_t szFile[MAX_PATH] = L"board_layout.json";
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = m_hWnd;
+        ofn.lpstrFilter = L"JSON Files (*.json)\0*.json\0All Files\0*.*\0";
+        ofn.lpstrFile   = szFile;
+        ofn.nMaxFile    = MAX_PATH;
+        ofn.lpstrDefExt = L"json";
+        ofn.Flags       = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        // Start in base dir
+        std::wstring initDir(m_pEngine->m_szBaseDir);
+        ofn.lpstrInitialDir = initDir.c_str();
+        if (GetSaveFileNameW(&ofn)) {
+            if (m_pPanel->SaveLayoutJSON(szFile))
+                m_pEngine->AddNotification(L"Board layout saved");
+        }
+        break;
+    }
+    case 31: // Load Layout
+    {
+        wchar_t szFile[MAX_PATH] = L"";
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = m_hWnd;
+        ofn.lpstrFilter = L"JSON Files (*.json)\0*.json\0All Files\0*.*\0";
+        ofn.lpstrFile   = szFile;
+        ofn.nMaxFile    = MAX_PATH;
+        ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        std::wstring initDir(m_pEngine->m_szBaseDir);
+        ofn.lpstrInitialDir = initDir.c_str();
+        if (GetOpenFileNameW(&ofn)) {
+            if (m_pPanel->LoadLayoutJSON(szFile)) {
+                UpdateBankLabel();
+                SaveBoard();
+                m_pEngine->AddNotification(L"Board layout loaded");
+            }
+        }
+        break;
+    }
+    case 40: // Reset to Defaults
+        m_pPanel->ResetToDefaults();
+        UpdateBankLabel();
+        SaveBoard();
+        m_pEngine->AddNotification(L"Board reset to defaults");
+        break;
     }
 
     if (changed) {
@@ -341,192 +432,112 @@ void ButtonBoardWindow::ShowConfigMenu() {
     }
 }
 
-// ─── Slot Edit Dialog ───────────────────────────────────────────────────
+// ─── Slot Edit Dialog (uses shared ActionEditDialog) ────────────────────
 
 void ButtonBoardWindow::ShowSlotEditDialog(int globalIndex) {
     if (!m_pPanel || globalIndex < 0) return;
 
     ButtonSlot& slot = m_pPanel->Slot(globalIndex);
 
-    // Build in-memory dialog template
-    struct DlgData {
-        ButtonSlot* pSlot;
-        Engine* pEngine;
-        bool accepted;
-    } data = { &slot, m_pEngine, false };
+    // Populate shared dialog data from the button slot
+    ActionEditData data;
+    data.actionType     = slot.action;
+    data.label          = slot.label;
+    data.payload        = slot.payload;
+    data.showKeyBinding = true;
+    data.modifiers      = slot.modifiers;
+    data.vk             = slot.vk;
+    data.scope          = (HotkeyScope)slot.scope;
+    data.isBuiltInHotkey = false;
+    data.pEngine        = m_pEngine;
 
-    // Simple in-memory DLGTEMPLATE
-    __declspec(align(4)) BYTE buf[1024] = {};
-    DLGTEMPLATE* pDlg = (DLGTEMPLATE*)buf;
-    pDlg->style = DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER;
-    pDlg->cx = 220;
-    pDlg->cy = 130;
-    // Title embedded after DLGTEMPLATE (menu=0, class=0, title)
-    WORD* pw = (WORD*)(pDlg + 1);
-    *pw++ = 0; // menu
-    *pw++ = 0; // class
-    const wchar_t* title = L"Edit Button Slot";
-    while (*title) *pw++ = *title++;
-    *pw++ = 0;
-
-    INT_PTR result = DialogBoxIndirectParamW(
-        NULL, pDlg, m_hWnd,
-        [](HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR {
-            DlgData* d = (DlgData*)GetWindowLongPtrW(hDlg, GWLP_USERDATA);
-
-            switch (msg) {
-            case WM_INITDIALOG: {
-                d = (DlgData*)lParam;
-                SetWindowLongPtrW(hDlg, GWLP_USERDATA, (LONG_PTR)d);
-
-                // Apply dark theme
-                Engine* p = d->pEngine;
-                if (p->IsDarkTheme()) {
-                    BOOL useDark = TRUE;
-                    DwmSetWindowAttribute(hDlg, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &useDark, sizeof(useDark));
-                }
-
-                HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-                int y = 10, x = 10, w = 300, lineH = 22;
-
-                // Action type combo
-                CreateWindowExW(0, L"STATIC", L"Action Type:", WS_CHILD | WS_VISIBLE,
-                    x, y, 80, lineH, hDlg, NULL, NULL, NULL);
-                HWND hType = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-                    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                    x + 85, y, 200, 200, hDlg, (HMENU)100, NULL, NULL);
-                SendMessageW(hType, WM_SETFONT, (WPARAM)hFont, TRUE);
-                SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"None");
-                SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Load Preset");
-                SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Push Sprite");
-                SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Script Command");
-                SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Launch Message");
-                SendMessageW(hType, CB_SETCURSEL, (int)d->pSlot->action, 0);
-                y += lineH + 6;
-
-                // Label
-                CreateWindowExW(0, L"STATIC", L"Label:", WS_CHILD | WS_VISIBLE,
-                    x, y, 80, lineH, hDlg, NULL, NULL, NULL);
-                HWND hLabel = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", d->pSlot->label.c_str(),
-                    WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-                    x + 85, y, 200, lineH, hDlg, (HMENU)101, NULL, NULL);
-                SendMessageW(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-                y += lineH + 6;
-
-                // Payload (multiline for script commands)
-                CreateWindowExW(0, L"STATIC", L"Payload:", WS_CHILD | WS_VISIBLE,
-                    x, y, 80, lineH, hDlg, NULL, NULL, NULL);
-
-                // Convert pipes to newlines for display
-                std::wstring displayPayload = d->pSlot->payload;
-                for (size_t pos = 0; (pos = displayPayload.find(L'|', pos)) != std::wstring::npos; pos += 2)
-                    displayPayload.replace(pos, 1, L"\r\n");
-
-                HWND hPayload = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", displayPayload.c_str(),
-                    WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL,
-                    x + 85, y, 200, lineH * 3, hDlg, (HMENU)102, NULL, NULL);
-                SendMessageW(hPayload, WM_SETFONT, (WPARAM)hFont, TRUE);
-                y += lineH * 3 + 10;
-
-                // OK / Cancel
-                HWND hOK = CreateWindowExW(0, L"BUTTON", L"OK",
-                    WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                    x + 85, y, 75, 26, hDlg, (HMENU)IDOK, NULL, NULL);
-                HWND hCancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                    x + 170, y, 75, 26, hDlg, (HMENU)IDCANCEL, NULL, NULL);
-                SendMessageW(hOK, WM_SETFONT, (WPARAM)hFont, TRUE);
-                SendMessageW(hCancel, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-                // Size the dialog to fit
-                RECT rcDlg = { 0, 0, x + 295, y + 36 };
-                AdjustWindowRectEx(&rcDlg, (DWORD)GetWindowLongPtrW(hDlg, GWL_STYLE), FALSE,
-                                   (DWORD)GetWindowLongPtrW(hDlg, GWL_EXSTYLE));
-                SetWindowPos(hDlg, NULL, 0, 0,
-                    rcDlg.right - rcDlg.left, rcDlg.bottom - rcDlg.top,
-                    SWP_NOMOVE | SWP_NOZORDER);
-
-                // Dark theme for child controls
-                if (p->IsDarkTheme()) {
-                    auto setDark = [&](HWND h) {
-                        SendMessageW(h, WM_SETFONT, (WPARAM)hFont, TRUE);
-                    };
-                    setDark(hType);
-                    setDark(hLabel);
-                    setDark(hPayload);
-                }
-
-                return TRUE;
-            }
-
-            case WM_COMMAND:
-                if (LOWORD(wParam) == IDOK) {
-                    // Read back values
-                    HWND hType = GetDlgItem(hDlg, 100);
-                    HWND hLabel = GetDlgItem(hDlg, 101);
-                    HWND hPayload = GetDlgItem(hDlg, 102);
-
-                    int sel = (int)SendMessageW(hType, CB_GETCURSEL, 0, 0);
-                    d->pSlot->action = (ButtonAction)sel;
-
-                    // Read label
-                    int labelLen = GetWindowTextLengthW(hLabel);
-                    std::vector<wchar_t> labelBuf(labelLen + 1);
-                    GetWindowTextW(hLabel, labelBuf.data(), labelLen + 1);
-                    d->pSlot->label = labelBuf.data();
-
-                    // Read payload (multiline → convert newlines to pipes)
-                    int payLen = GetWindowTextLengthW(hPayload);
-                    std::vector<wchar_t> payBuf(payLen + 1);
-                    GetWindowTextW(hPayload, payBuf.data(), payLen + 1);
-                    std::wstring payload(payBuf.data());
-                    // Replace \r\n with |
-                    size_t pos = 0;
-                    while ((pos = payload.find(L"\r\n", pos)) != std::wstring::npos)
-                        payload.replace(pos, 2, L"|");
-                    // Also replace bare \n
-                    pos = 0;
-                    while ((pos = payload.find(L'\n', pos)) != std::wstring::npos)
-                        payload.replace(pos, 1, L"|");
-                    d->pSlot->payload = payload;
-
-                    d->accepted = true;
-                    EndDialog(hDlg, IDOK);
-                    return TRUE;
-                }
-                if (LOWORD(wParam) == IDCANCEL) {
-                    EndDialog(hDlg, IDCANCEL);
-                    return TRUE;
-                }
-                break;
-
-            case WM_CTLCOLOREDIT:
-            case WM_CTLCOLORLISTBOX:
-            case WM_CTLCOLORSTATIC:
-            case WM_CTLCOLORDLG:
-                if (d && d->pEngine && d->pEngine->IsDarkTheme()) {
-                    HDC hdc = (HDC)wParam;
-                    SetTextColor(hdc, d->pEngine->m_colSettingsText);
-                    SetBkColor(hdc, d->pEngine->m_colSettingsCtrlBg);
-                    static HBRUSH hBrDark = NULL;
-                    if (!hBrDark) hBrDark = CreateSolidBrush(d->pEngine->m_colSettingsCtrlBg);
-                    if (msg == WM_CTLCOLORDLG) {
-                        static HBRUSH hBrBg = NULL;
-                        if (!hBrBg) hBrBg = CreateSolidBrush(d->pEngine->m_colSettingsBg);
-                        return (INT_PTR)hBrBg;
-                    }
-                    return (INT_PTR)hBrDark;
-                }
-                break;
-            }
-            return FALSE;
-        },
-        (LPARAM)&data);
-
-    if (data.accepted) {
+    if (ShowActionEditDialog(m_hWnd, data)) {
+        slot.action    = data.actionType;
+        slot.label     = data.label;
+        slot.payload   = data.payload;
+        slot.modifiers = data.modifiers;
+        slot.vk        = data.vk;
+        slot.scope     = (int)data.scope;
         m_pPanel->Invalidate();
         SaveBoard();
     }
+}
+
+// ─── Image Support ──────────────────────────────────────────────────────
+
+static bool IsImageFile(const wchar_t* path) {
+    const wchar_t* ext = wcsrchr(path, L'.');
+    if (!ext) return false;
+    return (_wcsicmp(ext, L".png") == 0  || _wcsicmp(ext, L".jpg") == 0 ||
+            _wcsicmp(ext, L".jpeg") == 0 || _wcsicmp(ext, L".bmp") == 0 ||
+            _wcsicmp(ext, L".gif") == 0  || _wcsicmp(ext, L".tif") == 0 ||
+            _wcsicmp(ext, L".tiff") == 0 || _wcsicmp(ext, L".ico") == 0);
+}
+
+void ButtonBoardWindow::SetSlotImage(int globalIndex, const std::wstring& path) {
+    if (!m_pPanel || globalIndex < 0 || globalIndex >= m_pPanel->SlotCount()) return;
+    ButtonSlot& s = m_pPanel->Slot(globalIndex);
+
+    // Clear old thumbnail
+    m_pPanel->ClearSlotThumbnail(globalIndex);
+
+    if (path.empty()) {
+        s.imagePath.clear();
+    } else {
+        s.imagePath = path;
+        // Load via WIC (reuse engine's thumbnail loader, 128x128 max for button icons)
+        HBITMAP hBmp = m_pEngine->LoadThumbnailWIC(path.c_str(), 128, 128);
+        if (hBmp) {
+            BITMAP bm = {};
+            GetObject(hBmp, sizeof(bm), &bm);
+            m_pPanel->SetSlotThumbnail(globalIndex, hBmp, bm.bmWidth, bm.bmHeight);
+        }
+    }
+    m_pPanel->Invalidate();
+}
+
+void ButtonBoardWindow::LoadSlotImages() {
+    if (!m_pPanel) return;
+    for (int i = 0; i < m_pPanel->SlotCount(); i++) {
+        const ButtonSlot& s = m_pPanel->Slot(i);
+        if (!s.imagePath.empty())
+            SetSlotImage(i, s.imagePath);
+    }
+}
+
+// ─── Drag-and-Drop ──────────────────────────────────────────────────────
+
+LRESULT ButtonBoardWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_DROPFILES && m_pPanel) {
+        HDROP hDrop = (HDROP)wParam;
+        UINT nFiles = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+
+        // Get drop point and convert to panel client coords
+        POINT pt;
+        DragQueryPoint(hDrop, &pt);
+        // pt is in client coords of the window that received WM_DROPFILES
+        // Convert to panel client coords
+        POINT panelPt = pt;
+        MapWindowPoints(m_hWnd, m_pPanel->GetHWND(), &panelPt, 1);
+        int hitSlot = m_pPanel->HitTest(panelPt);
+
+        if (hitSlot >= 0) {
+            int gi = m_pPanel->LocalToGlobal(hitSlot);
+            // Process first image file found
+            for (UINT i = 0; i < nFiles; i++) {
+                wchar_t szFile[MAX_PATH];
+                DragQueryFileW(hDrop, i, szFile, MAX_PATH);
+                if (IsImageFile(szFile)) {
+                    SetSlotImage(gi, szFile);
+                    SaveBoard();
+                    break;
+                }
+            }
+        }
+        DragFinish(hDrop);
+        return 0;
+    }
+    return -1; // not handled
 }
 
 // ─── Save ───────────────────────────────────────────────────────────────

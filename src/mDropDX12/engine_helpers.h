@@ -385,6 +385,16 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_HK_EDIT_PATH          8007  // Edit: app path (Launch)
 #define IDC_HK_EDIT_BROWSE        8008  // Button: browse for exe (Launch)
 
+// Shared action edit dialog (8010-8019)
+#define IDC_AE_ACTION_TYPE    8010  // Combobox: action type dropdown
+#define IDC_AE_LABEL          8011  // Edit: label text
+#define IDC_AE_PAYLOAD        8012  // Edit: payload/command (multiline)
+#define IDC_AE_BROWSE         8013  // Button: browse for file
+#define IDC_AE_HOTKEY         8014  // HOTKEY_CLASS: key capture
+#define IDC_AE_CLEAR_KEY      8015  // Button: clear key binding
+#define IDC_AE_SCOPE          8016  // Checkbox: global scope
+#define IDC_AE_ACTION_LABEL   8017  // Edit (read-only): built-in action name
+
 // MIDI window controls (7090-7109)
 #define IDC_MW_MIDI_PIN         7090
 #define IDC_MW_MIDI_FONT_PLUS   7091

@@ -10,17 +10,22 @@
 #include <string>
 #include <functional>
 
+// Forward — defined in hotkeys.h (must be at global scope, not inside namespace mdrop)
+enum HotkeyScope : int;
+
 namespace mdrop {
 
 class Engine; // forward
 
-// Action types for button panel slots
+// Action types for button/hotkey slots (shared by button panel and hotkey system)
 enum class ButtonAction : int {
     None = 0,
     LoadPreset    = 1, // payload = preset file path
     PushSprite    = 2, // payload = sprite index (as string)
     ScriptCommand = 3, // payload = pipe-chained IPC commands
     LaunchMessage = 4, // payload = MSG|text=...|font=... string
+    RunScript     = 5, // payload = script file path (uses FILE= command)
+    LaunchApp     = 6, // payload = application path (launch or focus)
 };
 
 // Data for a single button slot
@@ -28,9 +33,15 @@ struct ButtonSlot {
     ButtonAction action  = ButtonAction::None;
     std::wstring payload;    // action-specific data
     std::wstring label;      // display name
-    HBITMAP      hThumbnail = NULL; // owned 32bpp DIBSection, or NULL
+    std::wstring imagePath;          // image file path (persisted, loaded on startup)
+    HBITMAP      hThumbnail = NULL;  // owned 32bpp DIBSection, or NULL
     int          thumbW = 0;
     int          thumbH = 0;
+
+    // Optional hotkey binding (makes this button also act as a hotkey)
+    UINT         modifiers = 0;    // MOD_ALT, MOD_CONTROL, MOD_SHIFT
+    UINT         vk = 0;           // virtual key code (0 = unbound)
+    int          scope = 0;        // 0 = local, 1 = global (HotkeyScope)
 };
 
 // Grid configuration
@@ -89,6 +100,16 @@ public:
     void SaveToINI(const wchar_t* iniPath, const wchar_t* section) const;
     void LoadFromINI(const wchar_t* iniPath, const wchar_t* section);
 
+    // JSON layout export/import -------------------------------------------
+    bool SaveLayoutJSON(const wchar_t* filePath) const;
+    bool LoadLayoutJSON(const wchar_t* filePath);
+    void ResetToDefaults();
+
+    // Hit-testing (for drag-drop, etc.) ------------------------------------
+    int  HitTest(POINT clientPt) const;
+    int  LocalToGlobal(int localIndex) const;
+    int  SlotCount() const { return (int)m_slots.size(); }
+
     // Callbacks (set by the owning window) ---------------------------------
     std::function<void(int globalIndex)>                 OnLeftClick;
     std::function<void(int globalIndex, POINT screenPt)> OnRightClick;
@@ -117,10 +138,9 @@ private:
 
     // Geometry
     RECT GetButtonRect(int localIndex) const;
-    int  HitTest(POINT clientPt) const;
-    int  LocalToGlobal(int localIndex) const;
 
     void EnsureSlotCount();
+    void PopulateDefaults(); // fill bank 0 with Milkwave Remote layout
 
     // Window class
     static bool s_bClassRegistered;

@@ -421,6 +421,7 @@ public:
   void UnregisterGlobalHotkeys(HWND hwnd);
   bool DispatchHotkeyAction(int actionId);
   bool LookupLocalHotkey(UINT vk, UINT modifiers);
+  bool DispatchHotkeyByTag(const std::wstring& tag);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
 
   // Dynamic F1 help text (generated from binding table)
@@ -739,6 +740,7 @@ public:
   void StartScript();
   void StopScript();
   void ExecuteScriptLine(int lineIndex);
+  void ExecuteScriptLine(const wchar_t* text); // pipe-split + execute
   void ExecuteScriptCommand(const std::wstring& cmd);
   void SyncScriptUI();
 

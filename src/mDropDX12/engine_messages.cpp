@@ -2238,6 +2238,11 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     CaptureScreenshot();
     DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
   }
+  else {
+    // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
+    // SEND=0x.., etc.)  This unifies IPC and button board dispatch.
+    ExecuteScriptLine(sMessage);
+  }
 }
 
 void Engine::SendPresetChangedInfoToMDropDX12Remote() {

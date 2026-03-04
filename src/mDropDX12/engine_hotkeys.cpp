@@ -1008,6 +1008,15 @@ bool Engine::LookupLocalHotkey(UINT vk, UINT modifiers)
     return false;
 }
 
+bool Engine::DispatchHotkeyByTag(const std::wstring& tag)
+{
+    for (int i = 0; i < NUM_HOTKEYS; i++) {
+        if (_wcsicmp(m_hotkeys[i].szIniKey, tag.c_str()) == 0)
+            return DispatchHotkeyAction(m_hotkeys[i].id);
+    }
+    return false;
+}
+
 void Engine::LoadIdleTimerSettings()
 {
     wchar_t* pIni = GetConfigIniFile();

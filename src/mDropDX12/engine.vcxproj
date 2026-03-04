@@ -360,6 +360,7 @@
     <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="engine_hotkeys.cpp" />
     <ClCompile Include="engine_hotkeys_ui.cpp" />
+    <ClCompile Include="json_utils.cpp" />
     <ClCompile Include="button_panel.cpp" />
     <ClCompile Include="engine_board_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
@@ -444,6 +445,7 @@
     <ClInclude Include="mdropdx12.h" />
     <ClInclude Include="display_output.h" />
     <ClInclude Include="hotkeys.h" />
+    <ClInclude Include="json_utils.h" />
     <ClInclude Include="button_panel.h" />
     <ClInclude Include="midi_input.h" />
     <ClInclude Include="engine.h" />

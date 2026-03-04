@@ -129,6 +129,20 @@ void Engine::ExecuteScriptLine(int lineIndex) {
   }
 }
 
+void Engine::ExecuteScriptLine(const wchar_t* text) {
+  if (!text || !*text) return;
+  std::wstringstream ss(text);
+  std::wstring token;
+  while (std::getline(ss, token, L'|')) {
+    size_t start = token.find_first_not_of(L" \t");
+    size_t end   = token.find_last_not_of(L" \t");
+    if (start == std::wstring::npos) continue;
+    token = token.substr(start, end - start + 1);
+    if (!token.empty())
+      ExecuteScriptCommand(token);
+  }
+}
+
 void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
   // --- Sequencing ---
   if (cmd == L"NEXT") {
@@ -306,6 +320,14 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
   else if (cmd == L"MEDIA_STOP") {
     keybd_event(VK_MEDIA_STOP, 0, 0, 0);
     keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
+  }
+  // --- Trigger hotkey action by tag name (e.g. ACTION=OpenSongInfo) ---
+  else if (_wcsnicmp(cmd.c_str(), L"ACTION=", 7) == 0) {
+    DispatchHotkeyByTag(cmd.substr(7));
+  }
+  // --- Launch application ---
+  else if (_wcsnicmp(cmd.c_str(), L"LAUNCH=", 7) == 0) {
+    LaunchOrFocusApp(cmd.substr(7));
   }
   // --- Milkwave-specific (ignore gracefully) ---
   else if (_wcsnicmp(cmd.c_str(), L"STYLE=", 6) == 0 ||
