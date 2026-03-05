@@ -991,7 +991,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         replaceAll(inp, "fract(", "frac(");
         replaceAll(inp, "mod(", "mod_conv(");
         replaceAll(inp, "mix(", "lerp(");
-        inp = ReplaceVarName("time", "time_conv", inp);
+        inp = WholeWordReplace(inp, "time", "time_conv");
         replaceAll(inp, "refrac(", "refract("); // undo damage to refract
 
         // Rename variables that collide with MilkDrop macros.
