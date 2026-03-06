@@ -871,6 +871,17 @@ void ShaderImportWindow::ApplyShader() {
         p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
     }
 
+    // Update preset description to reflect import project (for diag files and logging)
+    if (!m_lastProjectPath.empty()) {
+        std::wstring desc = m_lastProjectPath;
+        size_t sl = desc.rfind(L'\\');
+        if (sl == std::wstring::npos) sl = desc.rfind(L'/');
+        if (sl != std::wstring::npos) desc = desc.substr(sl + 1);
+        size_t dot = desc.rfind(L'.');
+        if (dot != std::wstring::npos) desc = desc.substr(0, dot);
+        wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+    }
+
     // Activate Shadertoy pipeline
     p->m_bShadertoyMode = true;
     p->m_bLoadingShadertoyMode = true;  // Must be set BEFORE recompile for correct shader wrapper
@@ -1316,6 +1327,22 @@ void ShaderImportWindow::SaveAsPreset() {
 
     // File save dialog — default to .milk3 for Shadertoy imports
     wchar_t filePath[MAX_PATH] = {};
+
+    // Pre-populate with project name (.json → .milk3) if available
+    if (!m_lastProjectPath.empty()) {
+        std::wstring suggested = m_lastProjectPath;
+        size_t dotPos = suggested.rfind(L'.');
+        if (dotPos != std::wstring::npos)
+            suggested = suggested.substr(0, dotPos);
+        suggested += L".milk3";
+        // Extract just the filename (no directory — lpstrInitialDir handles that)
+        size_t slashPos = suggested.rfind(L'\\');
+        if (slashPos == std::wstring::npos) slashPos = suggested.rfind(L'/');
+        if (slashPos != std::wstring::npos)
+            suggested = suggested.substr(slashPos + 1);
+        wcsncpy_s(filePath, suggested.c_str(), _TRUNCATE);
+    }
+
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hw;
@@ -3413,10 +3440,21 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         swprintf(diagPath, MAX_PATH, L"%lsdiag_converter_%ls.txt", m_pEngine->m_szBaseDir, passTag);
         FILE* f = _wfopen(diagPath, L"w");
         if (f) {
-            fprintf(f, "// CONV OUTPUT [%s]: %d chars, %d lines\n",
+            // Include project name so diag files aren't confused with regular presets
+            std::string projName;
+            if (!m_lastProjectPath.empty()) {
+                size_t sl = m_lastProjectPath.rfind(L'\\');
+                if (sl == std::wstring::npos) sl = m_lastProjectPath.rfind(L'/');
+                std::wstring wn = (sl != std::wstring::npos) ? m_lastProjectPath.substr(sl + 1) : m_lastProjectPath;
+                projName.reserve(wn.size());
+                for (wchar_t ch : wn) projName += (ch < 128) ? (char)ch : '?';
+            }
+            fprintf(f, "// CONV OUTPUT [%s]: %d chars, %d lines%s%s\n",
                     (passIdx == 0) ? "Image" : "Buffer A",
                     (int)result.size(),
-                    (int)std::count(result.begin(), result.end(), '\n'));
+                    (int)std::count(result.begin(), result.end(), '\n'),
+                    projName.empty() ? "" : " project=",
+                    projName.empty() ? "" : projName.c_str());
             fwrite(result.c_str(), 1, result.size(), f);
             fclose(f);
         }
@@ -3458,6 +3496,16 @@ void ShaderImportWindow::SaveImportProject() {
     }
 
     wchar_t filePath[MAX_PATH] = {};
+
+    // Pre-populate with last project path if available
+    if (!m_lastProjectPath.empty()) {
+        size_t slashPos = m_lastProjectPath.rfind(L'\\');
+        if (slashPos == std::wstring::npos) slashPos = m_lastProjectPath.rfind(L'/');
+        std::wstring filename = (slashPos != std::wstring::npos)
+            ? m_lastProjectPath.substr(slashPos + 1) : m_lastProjectPath;
+        wcsncpy_s(filePath, filename.c_str(), _TRUNCATE);
+    }
+
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hw;
@@ -3469,6 +3517,9 @@ void ShaderImportWindow::SaveImportProject() {
 
     if (!GetSaveFileNameW(&ofn))
         return;
+
+    // Remember the path for future saves
+    m_lastProjectPath = filePath;
 
     JsonWriter w;
     w.BeginObject();
@@ -3537,6 +3588,9 @@ void ShaderImportWindow::LoadImportProject() {
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Unsupported import project version.");
         return;
     }
+
+    // Remember the project path for suggested save names
+    m_lastProjectPath = filePath;
 
     // Rebuild passes from JSON
     m_passes.clear();

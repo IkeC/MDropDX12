@@ -577,6 +577,7 @@ private:
   int m_nTopY = 0;
   std::vector<ShaderPass> m_passes;
   int m_nSelectedPass = 0;
+  std::wstring m_lastProjectPath;  // Last loaded/saved .json project path
   std::unique_ptr<ShaderEditorWindow> m_editorWindow;
 
   void LayoutControls();
