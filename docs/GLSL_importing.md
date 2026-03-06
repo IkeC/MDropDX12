@@ -30,6 +30,33 @@ Not every Shadertoy shader will import cleanly. Here's what to look for:
 - Keyboard input (`iChannelN` as keyboard) — not supported
 - Video/webcam inputs as iChannel sources — not connected to Shadertoy pipeline
 
+### Channel Auto-Detection
+
+MDropDX12 automatically detects the correct iChannel mappings when you import shaders:
+
+**When you add passes ([+] button):**
+
+- Buffer A gets self-feedback on ch0
+- Buffer B gets self-feedback on ch0
+- Image gets Buffer A on ch0, Buffer B on ch1
+- Buffer passes get cross-references set up automatically
+
+**When you paste GLSL:**
+
+- If the pasted code has no `mainImage` function, it's auto-detected as Common code and a Common pass is created
+- Channel types are inferred from the GLSL source:
+  - `texelFetch(iChannelN, ivec2(...))` patterns → Audio input
+  - 3D texture coordinates (`vec3` inside `texture()` calls) → Volume noise texture
+  - Buffer passes → self-feedback on ch0
+- Only default channels are overwritten — if you manually set a channel, auto-detection won't change it
+
+**When you click Convert:**
+
+- All passes are re-analyzed for channel patterns before conversion
+- Channel combos update automatically
+
+For most Shadertoy shaders, you can just paste the GLSL for each tab and the channels will be configured correctly. If the auto-detection gets it wrong, you can always override by selecting a different channel in the combo box.
+
 ### Tested Shaders
 
 These are confirmed working and make good test cases:

@@ -554,6 +554,7 @@ public:
   void OnEditorClosing(const std::string& glsl, const std::string& hlsl, const std::string& notes);  // Called by editor before destroy
   void ConvertGLSLtoHLSL(int passOverride = -1);  // Convert pass GLSL→HLSL
   void ConvertAndApply();           // Convert all passes, then apply
+  void OnPasteGLSL(const std::string& glsl);  // Paste intelligence: detect pass type + channels
 
 protected:
   const wchar_t* GetWindowTitle() const override { return L"Shader Import"; }
@@ -587,6 +588,8 @@ private:
   void SaveImportProject();
   void LoadImportProject();
   int  GetSelectedPass();     // 0=Image, 1=Buffer A
+
+  void AnalyzeChannels(ShaderPass& pass);  // Infer channel types from GLSL source
 
   // Conversion helpers (ported from Milkwave Remote ShaderHelper.cs)
   static std::string ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& input);
