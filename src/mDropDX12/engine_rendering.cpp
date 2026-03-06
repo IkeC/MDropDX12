@@ -93,10 +93,10 @@ void Engine::RenderInjectEffect()
     if (m_pState->var_pf_invert   && *m_pState->var_pf_invert   > 0.5) presetFxMask |= 8u;
   }
 
-  // Shadertoy sRGB gamma: Shadertoy.com renders to sRGB framebuffer (automatic
-  // linear→sRGB). MDropDX12 uses R8G8B8A8_UNORM (no conversion), so apply gamma
-  // correction as a post-process to match Shadertoy's brightness.
-  UINT srgbGamma = m_bShadertoyMode ? 1u : 0u;
+  // Shadertoy sRGB gamma: disabled. Shadertoy.com actually uses RGBA8 (NOT sRGB).
+  // Shaders that need gamma encode it manually (e.g. pow(col, 0.45)).
+  // Applying sRGB here would double-gamma those shaders.
+  UINT srgbGamma = 0u;
 
   // Skip if nothing to do
   if (m_nInjectEffectMode == 0 && presetFxMask == 0 && srgbGamma == 0) return;

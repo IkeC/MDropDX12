@@ -852,6 +852,10 @@ public:
   Microsoft::WRL::ComPtr<ID3D12Resource> m_audioUploadBuffer;
   void CreateAudioTexture();
   void UpdateAudioTexture();   // per-frame: upload latest FFT/waveform to GPU
+
+  // Custom channel textures from Shader Import (user-selected texture files)
+  DX12Texture m_dx12ChannelTex[4];           // loaded textures for sampler_chtex0..3
+  std::wstring m_szChannelTexPath[4];        // file paths (set by Import UI)
   bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
   bool m_bHasBufferB = false;                        // true when preset has a Buffer B shader
   bool m_bShadertoyMode = false;                     // true when a .milk3 Shadertoy preset is active

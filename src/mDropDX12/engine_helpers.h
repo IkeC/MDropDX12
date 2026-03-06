@@ -607,6 +607,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SHIMPORT_SAVE_IMPORT  9116  // Button: Save Import...
 #define IDC_MW_SHIMPORT_LOAD_IMPORT  9117  // Button: Load Import...
 #define IDC_MW_SHIMPORT_NEW          9118  // Button: New
+#define IDC_MW_SHIMPORT_COPY_STATUS  9119  // Button: Copy (errors/status to clipboard)
 // Shader Editor window (9120-9129)
 #define IDC_MW_SHEDITOR_PIN          9120
 #define IDC_MW_SHEDITOR_FONT_PLUS    9121

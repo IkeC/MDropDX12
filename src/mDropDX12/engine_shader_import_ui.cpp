@@ -35,6 +35,7 @@ static const char* kChannelSamplers[] = {
     "sampler_audio",       // CHAN_AUDIO
     "sampler_rand00",      // CHAN_RANDOM_TEX
     "sampler_bufferB",     // CHAN_BUFFER_B
+    "",                    // CHAN_TEXTURE_FILE (handled specially per-channel)
 };
 // Shadertoy-compatible noise (uniform white noise, no interpolation, fixed seed)
 static const char* kChannelSamplers_ST[] = {
@@ -48,6 +49,7 @@ static const char* kChannelSamplers_ST[] = {
     "sampler_audio",          // CHAN_AUDIO (unchanged)
     "sampler_rand00",         // CHAN_RANDOM_TEX (unchanged)
     "sampler_bufferB",        // CHAN_BUFFER_B (unchanged)
+    "",                       // CHAN_TEXTURE_FILE (handled specially per-channel)
 };
 static const wchar_t* kChannelNames[] = {
     L"Noise LQ",      L"Noise MQ",       L"Noise HQ",
@@ -55,8 +57,9 @@ static const wchar_t* kChannelNames[] = {
     L"Image (prev frame)", L"Audio (FFT + Wave)",
     L"Random Texture",
     L"Buffer B",
+    L"Texture File...",
 };
-static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0 }; // 0 = use texsize
+static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0, 0 }; // 0 = use texsize
 
 // ─── Open / Close (Engine methods) ──────────────────────────────────────
 
@@ -594,9 +597,14 @@ void ShaderImportWindow::DoBuildControls() {
         x + rw - saveW, y, saveW, btnH, hFont));
     y += btnH + gap;
 
-    // "Errors / Status:" label
+    // "Errors / Status:" label + Copy button
     TrackControl(CreateWindowExW(0, L"STATIC", L"Errors / Status:", WS_CHILD | WS_VISIBLE,
         x, y, 150, lineH, hw, NULL, NULL, NULL));
+    {
+        int copyW = MulDiv(50, lineH, 26);
+        TrackControl(CreateBtn(hw, L"\u2702 Copy", IDC_MW_SHIMPORT_COPY_STATUS,
+            x + 150 + 4, y, copyW, lineH, hFont));
+    }
     y += lineH + gap;
 
     // Error multiline edit (read-only)
@@ -735,8 +743,38 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
         HWND hCombo = GetDlgItem(hWnd, id);
         int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
         if (sel >= 0 && sel < CHAN_COUNT &&
-            m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size())
-            m_passes[m_nSelectedPass].channels[ch] = sel;
+            m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size()) {
+            if (sel == CHAN_TEXTURE_FILE) {
+                // Open file dialog for texture selection
+                wchar_t path[MAX_PATH] = {};
+                OPENFILENAMEW ofn = {};
+                ofn.lStructSize = sizeof(ofn);
+                ofn.hwndOwner = hWnd;
+                ofn.lpstrFilter = L"Image Files\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.gif\0All Files\0*.*\0";
+                ofn.lpstrFile = path;
+                ofn.nMaxFile = MAX_PATH;
+                ofn.lpstrTitle = L"Select Channel Texture";
+                ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+                if (GetOpenFileNameW(&ofn)) {
+                    m_passes[m_nSelectedPass].channels[ch] = CHAN_TEXTURE_FILE;
+                    m_passes[m_nSelectedPass].channelTexPaths[ch] = path;
+                    // Show filename in status
+                    std::wstring fn = path;
+                    size_t sl = fn.rfind(L'\\');
+                    if (sl != std::wstring::npos) fn = fn.substr(sl + 1);
+                    wchar_t msg[256];
+                    swprintf(msg, 256, L"ch%d: Texture \u2192 %s", ch, fn.c_str());
+                    SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, msg);
+                } else {
+                    // User cancelled — revert to previous selection
+                    int prev = m_passes[m_nSelectedPass].channels[ch];
+                    SendMessage(hCombo, CB_SETCURSEL, prev, 0);
+                }
+            } else {
+                m_passes[m_nSelectedPass].channels[ch] = sel;
+                m_passes[m_nSelectedPass].channelTexPaths[ch].clear();
+            }
+        }
         return 0;
     }
 
@@ -831,6 +869,31 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
             SyncChannelCombos();
             SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, L"");
             return 0;
+
+        case IDC_MW_SHIMPORT_COPY_STATUS: {
+            // Copy error/status text to clipboard
+            HWND hEdit = GetDlgItem(hWnd, IDC_MW_SHIMPORT_ERROR_EDIT);
+            if (hEdit) {
+                int len = GetWindowTextLengthW(hEdit);
+                if (len > 0) {
+                    std::wstring txt(len + 1, L'\0');
+                    GetWindowTextW(hEdit, &txt[0], len + 1);
+                    txt.resize(len);
+                    if (OpenClipboard(hWnd)) {
+                        EmptyClipboard();
+                        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (txt.size() + 1) * sizeof(wchar_t));
+                        if (hMem) {
+                            wchar_t* p = (wchar_t*)GlobalLock(hMem);
+                            wcscpy_s(p, txt.size() + 1, txt.c_str());
+                            GlobalUnlock(hMem);
+                            SetClipboardData(CF_UNICODETEXT, hMem);
+                        }
+                        CloseClipboard();
+                    }
+                }
+            }
+            return 0;
+        }
         }
     }
     return -1;
@@ -968,6 +1031,18 @@ void ShaderImportWindow::ApplyShader() {
         size_t dot = desc.rfind(L'.');
         if (dot != std::wstring::npos) desc = desc.substr(0, dot);
         wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+    }
+
+    // Propagate custom channel texture paths from all passes to Engine
+    // CacheParams will load these when it discovers sampler_chtex0..3
+    for (int i = 0; i < 4; i++)
+        p->m_szChannelTexPath[i].clear();
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Common") continue;
+        for (int i = 0; i < 4; i++) {
+            if (pass.channels[i] == CHAN_TEXTURE_FILE && !pass.channelTexPaths[i].empty())
+                p->m_szChannelTexPath[i] = pass.channelTexPaths[i];
+        }
     }
 
     // Activate Shadertoy pipeline
@@ -2217,8 +2292,12 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             for (int i = 0; i < 4; i++) {
                 char from[16], to[32];
                 sprintf_s(from, "iChannel%d", i);
-                int src = (ch[i] >= 0 && ch[i] < CHAN_COUNT) ? ch[i] : 0;
-                strcpy_s(to, kChannelSamplers_ST[src]);
+                if (ch[i] == CHAN_TEXTURE_FILE) {
+                    sprintf_s(to, "sampler_chtex%d", i);
+                } else {
+                    int src = (ch[i] >= 0 && ch[i] < CHAN_COUNT) ? ch[i] : 0;
+                    strcpy_s(to, kChannelSamplers_ST[src]);
+                }
                 replaceAll(inp, from, to);
             }
         }
@@ -2289,7 +2368,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             const char* extSamplers[] = {
                 "sampler_noise_lq", "sampler_noise_mq", "sampler_noise_hq",
                 "sampler_noise_lq_st", "sampler_noise_mq_st", "sampler_noise_hq_st",
-                "sampler_image", "sampler_audio", "sampler_rand00"
+                "sampler_image", "sampler_audio", "sampler_rand00",
+                "sampler_chtex0", "sampler_chtex1", "sampler_chtex2", "sampler_chtex3"
             };
             for (auto* s : extSamplers) {
                 char from[64], to[64];
@@ -2732,6 +2812,22 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // Add gl_FragCoord global if needed (GLSL built-in used in Common helpers)
         if (inp.find("_gl_FragCoord") != std::string::npos) {
             inpHeader = "static float4 _gl_FragCoord;\n" + inpHeader;
+        }
+
+        // Declare custom channel texture samplers if used
+        {
+            std::string chtexDecls;
+            for (int i = 0; i < 4; i++) {
+                char sampName[32];
+                sprintf_s(sampName, "sampler_chtex%d", i);
+                if (inp.find(sampName) != std::string::npos) {
+                    char decl[64];
+                    sprintf_s(decl, "sampler2D %s;\n", sampName);
+                    chtexDecls += decl;
+                }
+            }
+            if (!chtexDecls.empty())
+                inpHeader = chtexDecls + inpHeader;
         }
 
         // Add remaining #defines (uniforms/channels already replaced inline above)
@@ -3632,6 +3728,14 @@ void ShaderImportWindow::SaveImportProject() {
         w.Int(L"ch1", pass.channels[1]);
         w.Int(L"ch2", pass.channels[2]);
         w.Int(L"ch3", pass.channels[3]);
+        // Store texture file paths for CHAN_TEXTURE_FILE channels
+        for (int ci = 0; ci < 4; ci++) {
+            if (pass.channels[ci] == CHAN_TEXTURE_FILE && !pass.channelTexPaths[ci].empty()) {
+                wchar_t key[16];
+                swprintf(key, 16, L"ch%d_path", ci);
+                w.String(key, pass.channelTexPaths[ci].c_str());
+            }
+        }
         w.EndObject();
         w.EndObject();
     }
@@ -3721,6 +3825,7 @@ void ShaderImportWindow::LoadImportProject() {
                     if (s == L"image") return CHAN_IMAGE_PREV;
                     if (s == L"audio") return CHAN_AUDIO;
                     if (s == L"random") return CHAN_RANDOM_TEX;
+                    if (s == L"texture") return CHAN_TEXTURE_FILE;
                 }
                 return v.asInt(def);
             };
@@ -3728,6 +3833,17 @@ void ShaderImportWindow::LoadImportProject() {
             sp.channels[1] = parseChan(ch[L"ch1"], CHAN_NOISE_LQ);
             sp.channels[2] = parseChan(ch[L"ch2"], CHAN_NOISE_MQ);
             sp.channels[3] = parseChan(ch[L"ch3"], CHAN_NOISE_HQ);
+            // Load texture file paths for CHAN_TEXTURE_FILE channels
+            for (int ci = 0; ci < 4; ci++) {
+                wchar_t key[16];
+                swprintf(key, 16, L"ch%d_path", ci);
+                std::wstring texPath = ch[key].asString(L"");
+                if (!texPath.empty()) {
+                    sp.channelTexPaths[ci] = texPath;
+                    if (sp.channels[ci] != CHAN_TEXTURE_FILE)
+                        sp.channels[ci] = CHAN_TEXTURE_FILE;
+                }
+            }
             sp.channelsFromJSON = true;
         }
         m_passes.push_back(std::move(sp));

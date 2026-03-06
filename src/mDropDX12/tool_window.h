@@ -488,6 +488,7 @@ enum ChannelSource {
   CHAN_AUDIO,            // sampler_audio (512x2 audio FFT + waveform)
   CHAN_RANDOM_TEX,       // sampler_rand00 (random texture from disk)
   CHAN_BUFFER_B,         // sampler_bufferB (Buffer B output)
+  CHAN_TEXTURE_FILE,     // sampler_chtex0..3 (user-selected texture file)
   CHAN_COUNT
 };
 
@@ -499,7 +500,8 @@ struct ShaderPass {
   std::string  hlslOutput; // Converted HLSL (narrow, with LINEFEED_CONTROL_CHAR)
   std::string  notes;      // User comments/notes (narrow)
   int channels[4] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
-  bool channelsFromJSON = false;  // true = channels loaded from .milk3 JSON, skip auto-detect
+  std::wstring channelTexPaths[4]; // File paths for CHAN_TEXTURE_FILE channels
+  bool channelsFromJSON = false;   // true = channels loaded from .milk3 JSON, skip auto-detect
 };
 
 // ── Concrete subclass: Shader Editor window (GLSL + HLSL code editor) ──

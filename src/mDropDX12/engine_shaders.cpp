@@ -257,6 +257,33 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
         }
       }
 #endif
+      else if (!wcsncmp(L"chtex", szRootName, 5) &&
+               szRootName[5] >= L'0' && szRootName[5] <= L'3' && szRootName[6] == 0) {
+        // Custom channel texture from Shader Import UI (sampler_chtex0..3)
+        int chIdx = szRootName[5] - L'0';
+        m_texcode[cd.RegisterIndex] = TEX_DISK;
+        if (g_engine.m_dx12ChannelTex[chIdx].IsValid()) {
+          m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = g_engine.m_dx12ChannelTex[chIdx].srvIndex;
+          m_texture_bindings[cd.RegisterIndex].bWrap = true;
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+          DLOG_INFO("CacheParams: sampler_chtex%d → loaded texture (srv=%u)",
+            chIdx, g_engine.m_dx12ChannelTex[chIdx].srvIndex);
+        } else if (!g_engine.m_szChannelTexPath[chIdx].empty()) {
+          // Load the texture file now
+          DX12Texture tex = g_engine.m_lpDX->LoadTextureFromFile(g_engine.m_szChannelTexPath[chIdx].c_str());
+          if (tex.IsValid()) {
+            g_engine.m_dx12ChannelTex[chIdx] = tex;
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = tex.srvIndex;
+            m_texture_bindings[cd.RegisterIndex].bWrap = true;
+            m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+            DLOG_INFO("CacheParams: sampler_chtex%d → loaded '%ls' (srv=%u)",
+              chIdx, g_engine.m_szChannelTexPath[chIdx].c_str(), tex.srvIndex);
+          } else {
+            DLOG_WARN("CacheParams: sampler_chtex%d → FAILED to load '%ls'",
+              chIdx, g_engine.m_szChannelTexPath[chIdx].c_str());
+          }
+        }
+      }
       else {
         m_texcode[cd.RegisterIndex] = TEX_DISK;
 
