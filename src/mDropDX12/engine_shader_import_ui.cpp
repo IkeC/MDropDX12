@@ -11,6 +11,7 @@
 #include "md_defines.h"
 #include <CommCtrl.h>
 #include <commdlg.h>
+#include <shobjidl.h>
 #include <sstream>
 #include <algorithm>
 #include <set>
@@ -83,7 +84,7 @@ void Engine::CloseWelcomeWindow() {
         m_welcomeWindow->Close();
 }
 
-WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 340, 260) {
+WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 420, 420) {
 }
 
 void WelcomeWindow::DoBuildControls() {
@@ -101,46 +102,133 @@ void WelcomeWindow::DoBuildControls() {
     int gap = 8;
     int y = L.y + gap;
 
-    // Message label
+    // Welcome message
     HWND hLabel = CreateWindowExW(0, L"STATIC",
-        L"No presets found in the current directory.\r\n\r\n"
-        L"Choose an option below to get started:",
+        L"Welcome to MDropDX12!\r\n\r\n"
+        L"No presets were found. Choose a resources folder\r\n"
+        L"or get started with one of the options below:",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
-        x, y, w, lineH * 3, hw, NULL, NULL, NULL);
+        x, y, w, lineH * 4, hw, NULL, NULL, NULL);
     TrackControl(hLabel);
     SendMessage(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    y += lineH * 3 + gap;
+    y += lineH * 4 + gap;
 
-    // Open Settings button
-    TrackControl(CreateBtn(hw, L"Open Settings...",
-        IDC_MW_WELCOME_SETTINGS, x, y, w, btnH, hFont));
-    y += btnH + gap;
+    // Current path display
+    wchar_t pathLabel[MAX_PATH + 32];
+    swprintf(pathLabel, MAX_PATH + 32, L"Base: %ls", m_pEngine->m_szBaseDir);
+    HWND hPath = CreateWindowExW(0, L"STATIC", pathLabel,
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_PATHELLIPSIS,
+        x, y, w, lineH, hw, (HMENU)(INT_PTR)IDC_MW_WELCOME_PATH, NULL, NULL);
+    TrackControl(hPath);
+    SendMessage(hPath, WM_SETFONT, (WPARAM)hFont, TRUE);
+    y += lineH + gap;
+
+    // Browse for Resources button
+    TrackControl(CreateBtn(hw, L"Browse for Resources Folder...",
+        IDC_MW_WELCOME_BROWSE, x, y, w, btnH, hFont));
+    y += btnH + gap + 4;
+
+    // Separator
+    HWND hSep = CreateWindowExW(0, L"STATIC", NULL,
+        WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+        x, y, w, 2, hw, NULL, NULL, NULL);
+    TrackControl(hSep);
+    y += 2 + gap;
 
     // Open Shader Import button
     TrackControl(CreateBtn(hw, L"Open Shader Import...",
         IDC_MW_WELCOME_SHADER_IMPORT, x, y, w, btnH, hFont));
     y += btnH + gap;
 
-    // Open Preset Browser button
-    TrackControl(CreateBtn(hw, L"Open Preset Browser...",
-        IDC_MW_WELCOME_PRESETS, x, y, w, btnH, hFont));
+    // Open Settings button
+    TrackControl(CreateBtn(hw, L"Open Settings...",
+        IDC_MW_WELCOME_SETTINGS, x, y, w, btnH, hFont));
+}
+
+// Helper: browse for a folder using IFileDialog (Vista+)
+static bool BrowseForFolder(HWND hwndOwner, const wchar_t* title, wchar_t* outPath, int maxPath) {
+    IFileDialog* pfd = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+    if (FAILED(hr)) return false;
+
+    DWORD opts;
+    pfd->GetOptions(&opts);
+    pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    if (title) pfd->SetTitle(title);
+
+    hr = pfd->Show(hwndOwner);
+    if (FAILED(hr)) { pfd->Release(); return false; }
+
+    IShellItem* psi = nullptr;
+    hr = pfd->GetResult(&psi);
+    if (FAILED(hr)) { pfd->Release(); return false; }
+
+    PWSTR pszPath = nullptr;
+    hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+    psi->Release();
+    pfd->Release();
+    if (FAILED(hr) || !pszPath) return false;
+
+    wcsncpy_s(outPath, maxPath, pszPath, _TRUNCATE);
+    CoTaskMemFree(pszPath);
+    return true;
 }
 
 LRESULT WelcomeWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     if (code != BN_CLICKED) return 0;
     Engine* p = m_pEngine;
     switch (id) {
+    case IDC_MW_WELCOME_BROWSE:
+    {
+        wchar_t folder[MAX_PATH] = {};
+        if (BrowseForFolder(m_hWnd, L"Select folder containing presets and textures", folder, MAX_PATH)) {
+            // Ensure trailing backslash
+            size_t len = wcslen(folder);
+            if (len > 0 && folder[len - 1] != L'\\') {
+                wcscat_s(folder, L"\\");
+            }
+
+            // Check if this folder has a presets/ subdir or contains .milk files directly
+            wchar_t presetDir[MAX_PATH];
+            swprintf(presetDir, MAX_PATH, L"%lspresets\\", folder);
+            bool hasPresetSubdir = (GetFileAttributesW(presetDir) != INVALID_FILE_ATTRIBUTES);
+
+            // Update preset directory
+            if (hasPresetSubdir)
+                wcscpy_s(p->m_szPresetDir, presetDir);
+            else
+                wcscpy_s(p->m_szPresetDir, folder);
+
+            // Save to INI so it persists
+            WritePrivateProfileStringW(L"Settings", L"szPresetDir", p->m_szPresetDir, p->GetConfigIniFile());
+
+            // Rescan presets
+            p->UpdatePresetList(false, true);
+
+            // Update path label
+            wchar_t pathLabel[MAX_PATH + 32];
+            swprintf(pathLabel, MAX_PATH + 32, L"Base: %ls", folder);
+            SetDlgItemTextW(m_hWnd, IDC_MW_WELCOME_PATH, pathLabel);
+
+            // If presets were found, close and load one
+            if (p->m_nPresets > 0) {
+                p->LoadRandomPreset(0.0f);
+                PostMessage(m_hWnd, WM_CLOSE, 0, 0);
+            }
+        }
+        return 0;
+    }
     case IDC_MW_WELCOME_SETTINGS:
         p->OpenSettingsWindow();
-        Close();
+        PostMessage(m_hWnd, WM_CLOSE, 0, 0);
         return 0;
     case IDC_MW_WELCOME_SHADER_IMPORT:
         p->OpenShaderImportWindow();
-        Close();
+        PostMessage(m_hWnd, WM_CLOSE, 0, 0);
         return 0;
     case IDC_MW_WELCOME_PRESETS:
         p->OpenPresetsWindow();
-        Close();
+        PostMessage(m_hWnd, WM_CLOSE, 0, 0);
         return 0;
     }
     return 0;

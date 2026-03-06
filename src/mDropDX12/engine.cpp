@@ -3366,13 +3366,13 @@ void Engine::MyRenderFn(int redraw) {
       AddError(L"Preset directory not found. Press F8 to open Settings.", 8.0f, ERR_MISC, true);
     }
 
-    // Self-bootstrap: open settings to About tab, notify user about verbose logging
-    if (m_bSelfBootstrapped && m_UI_mode == UI_REGULAR) {
-      m_bSelfBootstrapped = false; // only once
-      // Set ActiveTab to About (page 10) so settings opens there
-      WritePrivateProfileStringW(L"Settings", L"ActiveTab", L"10", GetConfigIniFile());
-      OpenSettingsWindow();
-      AddError(L"First run: debug logging set to max (verbose). Add presets to resources\\presets\\.", 10.0f, ERR_MISC, true);
+    // First run or self-bootstrap: show Welcome window to let user choose resources folder
+    // Force UI_REGULAR first — LoadRandomPreset may have set UI_LOAD when preset dir is empty
+    if (m_bSelfBootstrapped || m_bFirstRun) {
+      m_bSelfBootstrapped = false;
+      m_bFirstRun = false; // only once per session
+      m_UI_mode = UI_REGULAR;
+      OpenWelcomeWindow();
     }
 
     float dt = GetTime() - m_prev_time;

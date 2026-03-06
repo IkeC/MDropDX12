@@ -1,10 +1,27 @@
 # MDropDX12 Development Guide
 
-How to set up a development environment on a fresh Windows machine, clone the source, and build MDropDX12.
+How to set up a development environment on a fresh Windows machine (or Windows Sandbox), clone the source, and build MDropDX12.
 
 ## Prerequisites
 
-Install the following tools. All can be installed via `winget` from a PowerShell terminal, or downloaded manually.
+Install the following tools via `winget` from a PowerShell terminal. On **Windows Sandbox** or fresh installs where `winget` is not available, install it first:
+
+```powershell
+# Install winget (App Installer) if not present
+Add-AppxPackage -RegisterByFamilyName Microsoft.DesktopAppInstaller_8wekyb3d8bbwe
+```
+
+If that doesn't work (e.g. on older Sandbox images), download the latest `.msixbundle` from [github.com/microsoft/winget-cli/releases](https://github.com/microsoft/winget-cli/releases/latest) and install it manually:
+
+```powershell
+# Download and install winget + dependencies
+$ProgressPreference = 'SilentlyContinue'
+Invoke-WebRequest -Uri https://aka.ms/getwinget -OutFile winget.msixbundle
+Add-AppxPackage -Path winget.msixbundle
+Remove-Item winget.msixbundle
+```
+
+After installing, close and reopen your PowerShell terminal so `winget` is on your PATH.
 
 ### 1. Git for Windows
 
@@ -54,15 +71,20 @@ cd MDropDX12
 
 ## First-Time Setup
 
-Run the developer setup script to populate the `Release/` folder with default configuration files and resources. This folder is used as the working directory for Debug builds.
+No manual setup commands are needed. The application self-bootstraps on first run:
 
-```powershell
-Release\Developer-Setup.cmd
-```
+1. **Build** the project (see below)
+2. **Run** the exe — it detects the empty environment and creates `resources/presets/`, `resources/textures/`, etc.
+3. A **Welcome window** appears with:
+   - **Browse for Resources Folder...** — point it at an existing folder containing presets (`.milk` files) and textures
+   - **Open Shader Import...** — import Shadertoy shaders directly
+   - **Open Settings...** — configure paths, audio, display options
 
-This copies `config/*.ini`, `config/script-default.txt`, and the `resources/` directory into `Release/`.
+The `settings.ini` file is created automatically with defaults when the app first writes settings. No template INI files need to be copied.
 
-The Spout2 SDK (the only external dependency) is automatically fetched by the build script on the first build -- no manual setup needed.
+> **Legacy**: A `Developer-Setup.cmd` script exists in `Release/` for backward compatibility. It copies `config/*.ini` and `resources/` into the working directory, but this is no longer required.
+
+The Spout2 SDK (the only external dependency) is automatically fetched by the build script on the first build — no manual setup needed.
 
 ## Building
 
@@ -184,6 +206,59 @@ The project targets Windows SDK `10.0.26100.0`. If you have a different SDK vers
 
 ### Build succeeds but exe won't start
 
-- Make sure you ran `Developer-Setup.cmd` (Debug builds need `Release/` populated)
-- The exe embeds all required shaders — no external `resources/data/` directory is needed
-- Check `Release/debug.log` for error details
+- The exe self-bootstraps — it creates required directories on first run
+- All shaders are embedded in the exe — no external `resources/data/` directory is needed
+- For Debug builds, the working directory is `Release/` (set in `.vscode/launch.json`)
+- Check `debug.log` in the working directory for error details
+
+## Debug Logging
+
+MDropDX12 has a leveled logging system controlled via `settings.ini`:
+
+| INI Key     | Values | Default | Description                                    |
+| ----------- | ------ | ------- | ---------------------------------------------- |
+| `LogLevel`  | 0–4    | 3       | 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose     |
+| `LogOutput` | 1–3    | 3       | 1=File only, 2=OutputDebugString only, 3=Both  |
+
+These can also be changed at runtime via **Settings → About** tab (log level radio buttons and output checkboxes).
+
+Log output goes to `debug.log` in the base directory (rotated to `debug.prev.log` on startup).
+
+### Level-gated macros
+
+Code uses `DLOG_ERROR`, `DLOG_WARN`, `DLOG_INFO`, `DLOG_VERBOSE` macros (defined in `utility.h`) which skip all formatting work when the current log level would suppress the message. Prefer these over raw `DebugLogA`/`DebugLogAFmt` calls.
+
+```cpp
+DLOG_VERBOSE("DX12: PSO created for %s, slots=%d", name, count);
+```
+
+### Diagnostic files (Verbose only)
+
+When `LogLevel=4` (Verbose), diagnostic dump files are written to the base directory:
+
+| File | Contents |
+| ---- | -------- |
+| `diag_comp_shader.txt` | Assembled comp/Image shader HLSL sent to compiler |
+| `diag_warp_shader.txt` | Assembled warp shader HLSL sent to compiler |
+| `diag_converter_image.txt` | GLSL→HLSL converter output for Image pass |
+| `diag_converter_bufferA.txt` | GLSL→HLSL converter output for Buffer A pass |
+| `diag_cacheparams.txt` | Shader constant/sampler binding diagnostics |
+| `diag_bindings.txt` | Resource binding slot assignments |
+
+Error files (`diag_*_shader_error.txt`) are always written on compile failure regardless of log level — these are needed by the Import UI error display.
+
+When debugging Shadertoy imports, the project name from the loaded `.json` file is included in diagnostic headers (`project=filename.json`) and the preset description (`m_szDesc`) is updated to match, so diag files clearly indicate which import is being debugged rather than showing the last regular preset name.
+
+## Shadertoy Import Workflow
+
+The Shader Import window (opened from Settings) converts Shadertoy GLSL to HLSL for live preview:
+
+1. **Load Import** — loads a `.json` project file containing GLSL source for each pass
+2. **Convert** — runs the GLSL→HLSL converter pipeline
+3. **Apply** — compiles HLSL and activates the Shadertoy render path
+4. **Save** — exports as `.milk3` (Shadertoy preset) or `.milk` (legacy)
+5. **Save Import** — saves the project back to `.json` for later editing
+
+Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` preset format stores converted HLSL and is what the visualizer loads at runtime.
+
+See `docs/GLSL_importing.md` for details on the GLSL→HLSL conversion pipeline.

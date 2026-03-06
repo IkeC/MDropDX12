@@ -4,7 +4,9 @@ MDropDX12 is a DirectX 12 music visualizer based on the MilkDrop2 engine. It ren
 
 ## Getting Started
 
-Run `MDropDX12.exe`. The visualizer starts in windowed mode, capturing system audio via WASAPI loopback. Play music through any application and visuals will respond automatically.
+Run `MDropDX12.exe`. On first launch, a **Welcome window** appears with options to browse for a resources folder (containing presets and textures), open the Shader Import window, or open Settings. The visualizer self-bootstraps — no setup commands or external files are needed.
+
+Once running, the visualizer captures system audio via WASAPI loopback. Play music through any application and visuals respond automatically.
 
 Press **F1** for the built-in help overlay (press again for page 2, again to close).
 
@@ -12,7 +14,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 
 ## System Requirements
 
-- Windows 11 64-bit or higher
+- Windows 10 64-bit or higher (Windows 11 recommended)
 - DirectX 12 compatible GPU
 
 ## Window Modes
@@ -777,7 +779,7 @@ Note that this is an MDropDX12-specific change that does not port to other MilkD
 
 ## GLSL-to-HLSL Shader Conversion
 
-MDropDX12 supports converting GLSL shader code (e.g., from Shadertoy) to HLSL for use in presets. The conversion can be done live via the Milkwave Remote Shader tab.
+MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings → About tab → Open Shader Import**, or from the Welcome window on first run.
 
 ### Shadertoy Examples
 
@@ -792,18 +794,25 @@ Some Shadertoy shaders that can be converted to MDropDX12 presets:
 | Fractal Pyramid | [tsXBzS](https://www.shadertoy.com/view/tsXBzS) | Replace `break;` with `i=64.;` |
 | CineShader Lava | [3sySRK](https://www.shadertoy.com/view/3sySRK) | Replace `break;` with `i=64;`, replace aspect correction with `uv.x *= aspect.x;`, remove flipping |
 
+### Shader Import Workflow
+
+1. **Load Import** — load a `.json` project file containing GLSL source for each pass
+2. **Convert** — runs the GLSL→HLSL converter pipeline
+3. **Apply** — compiles HLSL and activates the Shadertoy render path
+4. **Save** — exports as `.milk3` (Shadertoy preset format)
+5. **Save Import** — saves the project back to `.json` for later editing
+
+Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` format stores converted HLSL and is what the visualizer loads at runtime.
+
+The converter automatically handles: `mix`→`lerp`, `mod`→`fmod`, `atan(a,b)`→`atan2(a,b)`, matrix constructors, `texture()`→`tex2D()`, `vec`→`float`, type casts, and many other GLSL→HLSL differences. Multi-pass shaders (Buffer A, Buffer B, Common, Image) are supported.
+
 ### Known GLSL-to-HLSL Limitations
 
-Common terms that cannot be converted automatically and need manual editing:
+Some patterns may need manual correction after conversion:
 
 | Term | Fix |
 |------|-----|
-| `break` | Replace with a statement setting a condition to end the loop |
-| `myFloat3 *= myMatrix` | `myFloat3 = mul(myFloat3, transpose(myMatrix))` |
-| `float3(1)` | Explicitly set all components: `float3(1,1,1)` |
-| `atan(a,b)` | `atan2(a,b)` |
 | `float[3] arr` | `float arr[3]` |
-| `radians(a)` | Multiply by pi/180 directly: `a * (M_PI/180)` |
 | `int[3] arr = int[](1,2,3)` | `int arr[3] = {1,2,3}` |
 | `int ix = i & 1` (bitwise) | `int ix = i % 2` |
 | `int yx = y >> 1` (bitwise) | `int yx = y / 2` |

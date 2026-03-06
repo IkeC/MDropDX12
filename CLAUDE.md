@@ -106,7 +106,7 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 
 - Windows 10 64-bit or higher (Windows 11 recommended)
 - DirectX 12 compatible GPU
-- Microsoft Visual C++ Redistributable (x64)
+- No additional runtime libraries required (VC runtime is statically linked)
 
 ## License
 

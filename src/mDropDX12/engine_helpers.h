@@ -629,6 +629,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WELCOME_SETTINGS      9130  // Button: Open Settings
 #define IDC_MW_WELCOME_SHADER_IMPORT 9131  // Button: Open Shader Import
 #define IDC_MW_WELCOME_PRESETS       9132  // Button: Open Preset Browser
+#define IDC_MW_WELCOME_BROWSE        9133  // Button: Browse for Resources
+#define IDC_MW_WELCOME_PATH          9134  // Static: current path display
 
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080

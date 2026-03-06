@@ -1429,8 +1429,8 @@ void Engine::MyRenderUI(
       }
     }
     else if (m_UI_mode == UI_LOAD) {
-      if (m_nPresets == 0) {
-        // No presets — post dialog to UI thread instead of showing overlay text
+      if (m_nPresets - m_nDirs == 0) {
+        // No preset files (only directories) — post dialog to UI thread
         m_UI_mode = UI_REGULAR;
         HWND hw = GetPluginWindow();
         if (hw) PostMessage(hw, WM_MW_NO_PRESETS_PROMPT, 0, 0);
