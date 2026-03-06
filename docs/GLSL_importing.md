@@ -51,9 +51,11 @@ MDropDX12 automatically detects the correct iChannel mappings when you import sh
 **When you load a .milk3 JSON:**
 
 - JSON channel values are trusted by default (`channelsFromJSON` flag)
-- High-confidence patterns (audio, 3D texture usage) still override wrong JSON values
+- Channel values can be integers (enum index) or strings: `"self"`, `"bufferA"`, `"bufferB"`, `"noiseLQ"`, `"noiseMQ"`, `"noiseHQ"`, `"noiseVolLQ"`, `"noiseVolHQ"`, `"image"`, `"audio"`, `"random"`
+- High-confidence patterns (audio, 3D texture, screen-space self-reads) still override wrong JSON values
 - Low-confidence guessing (Pattern 3: self-feedback heuristic) is skipped for JSON-loaded passes
-- Pattern 2d validates `CHAN_FEEDBACK` entries: on Buffer A, if no `texelFetch(iChannelN)` is found for that channel, it's downgraded to a noise default
+- Pattern 2d detects Buffer A self-feedback via `textureLod(iChannelN, .../iResolution)` — screen-space reads indicate temporal accumulation
+- Pattern 2e validates remaining `CHAN_FEEDBACK` entries: on Buffer A, if no `texelFetch(iChannelN)` or screen-space `textureLod` is found, it's downgraded to a noise default
 
 **When you click Convert:**
 
@@ -66,8 +68,9 @@ MDropDX12 automatically detects the correct iChannel mappings when you import sh
 2. **Pattern 2 — 3D texture**: `iChannelN` used with `vec3`/`float3` coordinates → `CHAN_NOISEVOL_LQ`
 3. **Pattern 2b — sampler3D functions**: `iChannelN` used in `tex3D`, `tex3Dlod`, `fbm1` etc. → `CHAN_NOISEVOL_LQ`
 4. **Pattern 2c — Buffer B cross-ref**: Buffer A referencing Buffer B or vice versa → `CHAN_BUFFER_B`
-5. **Pattern 2d — JSON feedback validation**: `CHAN_FEEDBACK` in Buffer A without matching `texelFetch(iChannelN)` → downgraded to noise default
-6. **Pattern 3 — Self-feedback guess** (skipped for JSON): heuristic based on `textureLod`/`texture` usage → `CHAN_FEEDBACK`
+5. **Pattern 2d — Screen-space self-feedback**: Buffer A channel uses `textureLod(iChannelN, .../iResolution)` — reading at screen-space coordinates is strong evidence of self-feedback (temporal accumulation, reprojection, stored camera matrices). Overrides any JSON value.
+6. **Pattern 2e — JSON feedback validation**: `CHAN_FEEDBACK` in Buffer A without matching `texelFetch(iChannelN)` or screen-space `textureLod` → downgraded to noise default
+7. **Pattern 3 — Self-feedback guess** (skipped for JSON): heuristic based on `textureLod`/`texture` usage → `CHAN_FEEDBACK`
 
 For most Shadertoy shaders, you can just paste the GLSL for each tab and the channels will be configured correctly. If the auto-detection gets it wrong, you can always override by selecting a different channel in the combo box.
 
@@ -304,6 +307,8 @@ Common issues:
 - **"X3500: array reference cannot be used as an l-value"** — dynamic vector indexing that the `_setComp` fix didn't catch
 - **"X3020: type mismatch"** — matrix multiplication missing `mul()` wrapper
 - **Black screen** — check if the shader needs a specific iChannel input that isn't mapped
+- **Progressive blur / image degrades over time** — wrong channel mapping for temporal accumulation. Buffer A self-feedback (for reprojection, TAA) must use `CHAN_FEEDBACK` not `CHAN_BUFFER_B`. Check the channel diagnostics shown when loading a .milk3 JSON.
+- **`return;` in mainImage doesn't output anything** — bare `return;` in GLSL leaves `_return_value` uninitialized. The converter auto-fixes this by inserting `ret = fragColor; _return_value = ret; return;`
 - **System stutters / GPU hang** — usually a raymarcher with bad input data (wrong texture, wrong UV scale). Check the channel mapping.
 
 You can also paste GLSL into the Shader Editor window and click Convert to see the HLSL output without applying it. Edit the HLSL directly if the auto-conversion needs tweaking.

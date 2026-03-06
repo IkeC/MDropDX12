@@ -928,8 +928,10 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
     };
     collapseSpaceAfterParen(src, "texelFetch");
     collapseSpaceAfterParen(src, "texture");
+    collapseSpaceAfterParen(src, "textureLod");
     collapseSpaceAfterParen(combinedSrc, "texelFetch");
     collapseSpaceAfterParen(combinedSrc, "texture");
+    collapseSpaceAfterParen(combinedSrc, "textureLod");
 
     bool isBufferA = (pass.name == L"Buffer A");
     bool isBufferB = (pass.name == L"Buffer B");
@@ -1081,10 +1083,51 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
             }
         }
 
-        // --- Pattern 2d: JSON CHAN_FEEDBACK self-feedback validation ---
+        // --- Pattern 2d: Buffer A self-feedback via textureLod with screen-space UVs ---
+        // Some Shadertoy shaders use textureLod (not texelFetch) for Buffer A self-feedback:
+        //   textureLod(iChannelN, vec2(x,y)/iResolution.xy, 0.0)  — reading stored state
+        //   textureLod(iChannelN, spos, 0.0)  — reprojected screen-space reads
+        // Detect the /iResolution pattern as strong evidence of screen-space self-reads.
+        if (isBufferA) {
+            char lodPat[64];
+            sprintf_s(lodPat, "textureLod(iChannel%d,", ch);
+            size_t lodPos = src.find(lodPat);
+            if (lodPos != std::string::npos) {
+                // Check if any textureLod call uses /iResolution (screen-space coords)
+                bool hasScreenSpaceRead = false;
+                size_t searchPos = lodPos;
+                while (searchPos != std::string::npos) {
+                    // Find the MATCHING closing paren (handle nested parens)
+                    int depth = 1;
+                    size_t scanPos = searchPos + strlen(lodPat);
+                    // We're past the opening '(' of textureLod(
+                    while (scanPos < src.size() && depth > 0) {
+                        if (src[scanPos] == '(') depth++;
+                        else if (src[scanPos] == ')') depth--;
+                        scanPos++;
+                    }
+                    if (depth == 0) {
+                        std::string callText = src.substr(searchPos, scanPos - searchPos);
+                        if (callText.find("/iResolution") != std::string::npos ||
+                            callText.find("/ iResolution") != std::string::npos) {
+                            hasScreenSpaceRead = true;
+                            break;
+                        }
+                    }
+                    searchPos = src.find(lodPat, searchPos + 1);
+                }
+                if (hasScreenSpaceRead) {
+                    pass.channels[ch] = CHAN_FEEDBACK;
+                    continue;
+                }
+            }
+        }
+
+        // --- Pattern 2e: JSON CHAN_FEEDBACK self-feedback validation ---
         // Only applies to Buffer A reading itself (CHAN_FEEDBACK on isBufferA).
-        // Self-feedback on Shadertoy always uses texelFetch. If the channel uses
-        // texture()/textureLod() instead, the JSON value is wrong — it's noise.
+        // Self-feedback on Shadertoy always uses texelFetch or textureLod with
+        // screen-space coords (caught by 2d above). If neither pattern matches,
+        // the JSON value is wrong — it's noise.
         // Cross-buffer reads (CHAN_FEEDBACK on Image/BufferB, CHAN_BUFFER_B on any)
         // can use any sampling method, so we trust the JSON for those.
         if (jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK && isBufferA) {
@@ -2007,6 +2050,29 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
         // Inline-expand so iResolution.z → float3(...).z → 1.0
         replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
+
+        // Replace hardcoded resolution constants with texsize.xy.
+        // Shadertoy authors often hardcode their preview resolution (e.g. vec2(1280,720))
+        // instead of using iResolution. At different resolutions these cause wrong UV offsets,
+        // blur radii, etc. vec2→float2 already happened above, so match HLSL form.
+        {
+            const char* hardcoded[] = {
+                "float2(1280.0,720.0)",  "float2(1280.,720.)",
+                "float2(1920.0,1080.0)", "float2(1920.,1080.)",
+                "float2(800.0,450.0)",   "float2(800.,450.)",
+                "float2(640.0,360.0)",   "float2(640.,360.)",
+                "float2(1024.0,768.0)",  "float2(1024.,768.)",
+                "float2(1280.0,800.0)",  "float2(1280.,800.)",
+                "float2(1024.0,576.0)",  "float2(1024.,576.)",
+            };
+            for (auto& pat : hardcoded) {
+                if (inp.find(pat) != std::string::npos) {
+                    replaceAll(inp, pat, "texsize.xy");
+                    errors += std::string("Replaced hardcoded resolution ") + pat + " with texsize.xy\r\n";
+                }
+            }
+        }
+
         replaceAll(inp, "iFrame", "frame");
         replaceAll(inp, "iMouse", "_c14");  // Direct ref to avoid local 'mouse' shadowing #define
         // ZERO/ZEROU: Shadertoy anti-optimization trick (#define ZERO min(iFrame,0)).
@@ -2585,6 +2651,20 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             inpMain = sbHeader.str() + inpMain.substr(braceIdx + 1);
         else
             inpMain = sbHeader.str() + inpMain;
+
+        // Fix bare return; in mainImage body — must set _return_value before early exit.
+        // _return_value is the out parameter added by engine_shaders.cpp's PS wrapper.
+        // Without this, early return leaves _return_value uninitialized (undefined output).
+        // Also set ret so that both the converter's ret=fragColor and engine's _return_value=ret
+        // paths stay consistent.
+        {
+            size_t pos = 0;
+            std::string retFix = "ret = " + retVarName + "; _return_value = ret; return;";
+            while ((pos = inpMain.find("return;", pos)) != std::string::npos) {
+                inpMain.replace(pos, 7, retFix);
+                pos += retFix.size();
+            }
+        }
 
         inp = inpHeader + inpMain;
 
@@ -3240,6 +3320,45 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // Format
         result = BasicFormatShaderCode(result);
 
+        // Post-conversion validation: warn about incomplete blocks
+        {
+            int braceDepth = 0;
+            int parenDepth = 0;
+            int ifDepth = 0;
+            bool inLineComment = false;
+            bool inBlockComment = false;
+            for (size_t ci = 0; ci < result.size(); ci++) {
+                char c = result[ci];
+                char cn = (ci + 1 < result.size()) ? result[ci + 1] : 0;
+                if (inBlockComment) {
+                    if (c == '*' && cn == '/') { inBlockComment = false; ci++; }
+                    continue;
+                }
+                if (inLineComment) {
+                    if (c == '\n') inLineComment = false;
+                    continue;
+                }
+                if (c == '/' && cn == '/') { inLineComment = true; ci++; continue; }
+                if (c == '/' && cn == '*') { inBlockComment = true; ci++; continue; }
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '(') parenDepth++;
+                else if (c == ')') parenDepth--;
+                else if (c == '#') {
+                    // Check for #if / #endif
+                    std::string rest = result.substr(ci, 20);
+                    if (rest.substr(0, 3) == "#if") ifDepth++;
+                    else if (rest.substr(0, 6) == "#endif") ifDepth--;
+                }
+            }
+            if (braceDepth != 0)
+                errors += "Warning: unmatched braces (depth " + std::to_string(braceDepth) + ")\r\n";
+            if (parenDepth != 0)
+                errors += "Warning: unmatched parentheses (depth " + std::to_string(parenDepth) + ")\r\n";
+            if (ifDepth != 0)
+                errors += "Warning: unmatched #if/#endif (depth " + std::to_string(ifDepth) + ")\r\n";
+        }
+
     } catch (...) {
         errors += "Conversion error (exception)\r\n";
     }
@@ -3400,13 +3519,30 @@ void ShaderImportWindow::LoadImportProject() {
                 else sp.notes += '?';
             }
         }
-        // Load channel inputs (if present)
+        // Load channel inputs (if present) — supports both integer enum values
+        // and string names like "self", "bufferA", "bufferB", "noiseLQ", etc.
         if (p.has(L"channels")) {
             const auto& ch = p[L"channels"];
-            sp.channels[0] = ch[L"ch0"].asInt(CHAN_NOISE_LQ);
-            sp.channels[1] = ch[L"ch1"].asInt(CHAN_NOISE_LQ);
-            sp.channels[2] = ch[L"ch2"].asInt(CHAN_NOISE_MQ);
-            sp.channels[3] = ch[L"ch3"].asInt(CHAN_NOISE_HQ);
+            auto parseChan = [](const JsonValue& v, int def) -> int {
+                if (v.isString()) {
+                    std::wstring s = v.asString(L"");
+                    if (s == L"self" || s == L"bufferA" || s == L"feedback") return CHAN_FEEDBACK;
+                    if (s == L"bufferB") return CHAN_BUFFER_B;
+                    if (s == L"noiseLQ") return CHAN_NOISE_LQ;
+                    if (s == L"noiseMQ") return CHAN_NOISE_MQ;
+                    if (s == L"noiseHQ") return CHAN_NOISE_HQ;
+                    if (s == L"noiseVolLQ") return CHAN_NOISEVOL_LQ;
+                    if (s == L"noiseVolHQ") return CHAN_NOISEVOL_HQ;
+                    if (s == L"image") return CHAN_IMAGE_PREV;
+                    if (s == L"audio") return CHAN_AUDIO;
+                    if (s == L"random") return CHAN_RANDOM_TEX;
+                }
+                return v.asInt(def);
+            };
+            sp.channels[0] = parseChan(ch[L"ch0"], CHAN_NOISE_LQ);
+            sp.channels[1] = parseChan(ch[L"ch1"], CHAN_NOISE_LQ);
+            sp.channels[2] = parseChan(ch[L"ch2"], CHAN_NOISE_MQ);
+            sp.channels[3] = parseChan(ch[L"ch3"], CHAN_NOISE_HQ);
             sp.channelsFromJSON = true;
         }
         m_passes.push_back(std::move(sp));

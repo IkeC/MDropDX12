@@ -64,6 +64,36 @@ sampler2D sampler_image : register(s15);
 sampler2D sampler_audio : register(s10);
 ```
 
+### 6. Bare `return;` in mainImage leaves _return_value uninitialized (FIXED)
+
+**Symptom**: Face region of selfie shader showed per-pixel noise (temporal AA not converging). Background pixels behind the girl bounding box output random values.
+
+**Root cause**: GLSL `return;` in mainImage body exits without setting the `out float4 _return_value` parameter added by engine_shaders.cpp's PS wrapper. The `fragColor` output variable was set before `return;`, but `_return_value` was not.
+
+**Fix**: Converter replaces bare `return;` in mainImage body with `ret = fragColor; _return_value = ret; return;`. Only operates on `inpMain` (mainImage body), not helper functions in `inpHeader`.
+
+### 7. Buffer A self-feedback via textureLod misdetected as Buffer B (FIXED)
+
+**Symptom**: Background of selfie shader progressively blurs over time. Camera reprojection + temporal accumulation reads DoF-blurred Buffer B output instead of Buffer A's own sharp previous frame.
+
+**Root cause**: JSON channel mapping had `ch1:9` (CHAN_BUFFER_B) for Buffer A, but iChannel1 should be self-feedback (CHAN_FEEDBACK). The shader uses `textureLod(iChannel1, .../iResolution.xy, 0.0)` for screen-space reads — not `texelFetch` — so the old Pattern 2d validation didn't catch it.
+
+**Fix**: New Pattern 2d in `AnalyzeChannels()` detects `textureLod(iChannelN, .../iResolution)` as screen-space self-reads for Buffer A. Uses balanced parenthesis matching to extract the full `textureLod()` call text. Added `textureLod` to whitespace normalization. Renumbered old Pattern 2d → 2e.
+
+### 8. Hardcoded resolution constants (FIXED)
+
+**Symptom**: DoF blur in selfie Buffer B was 33% too wide at non-720p resolutions due to `texture(iChannel0, q + off/vec2(1280.0,720.0))`.
+
+**Fix**: Converter auto-replaces common hardcoded resolutions (`float2(1280.0,720.0)`, `float2(1920.0,1080.0)`, etc.) with `texsize.xy`. Runs after `vec2`→`float2` replacement, so matches HLSL form.
+
+### 9. Incomplete block warnings (ADDED)
+
+Post-conversion validation counts braces, parentheses, and `#if`/`#endif` blocks. Warns in the error panel if any are unmatched, helping catch truncated or malformed shader output.
+
+### 10. String channel names in JSON import (ADDED)
+
+JSON channel values now accept strings in addition to integers: `"self"`, `"bufferA"`, `"bufferB"`, `"noiseLQ"`, `"noiseMQ"`, `"noiseHQ"`, `"noiseVolLQ"`, `"noiseVolHQ"`, `"image"`, `"audio"`, `"random"`. Matches the export format and makes JSON files more readable.
+
 ## Channel Mapping
 
 Per-pass channel configuration stored in `ShaderPass::channels[4]`:
@@ -93,7 +123,7 @@ Shadertoy imports use `kChannelSamplers_ST[]` for iChannel→sampler mapping.
 When adding Buffer A, only **Image ch0** is set to CHAN_FEEDBACK (reads Buffer A output).
 Buffer A ch0 stays at CHAN_NOISE_LQ (most Shadertoy shaders use noise, not self-feedback).
 
-**`channelsFromJSON` flag**: When a .milk3 JSON has a `channels` block, `ShaderPass::channelsFromJSON` is set to `true`. This tells `AnalyzeChannels()` to trust the JSON values and skip low-confidence guessing (Pattern 3), while still allowing high-confidence overrides (audio, 3D texture detection).
+**`channelsFromJSON` flag**: When a .milk3 JSON has a `channels` block, `ShaderPass::channelsFromJSON` is set to `true`. This tells `AnalyzeChannels()` to trust the JSON values and skip low-confidence guessing (Pattern 3), while still allowing high-confidence overrides (audio, 3D texture, screen-space self-feedback detection).
 
 **Elevated shader example:**
 
@@ -102,9 +132,11 @@ Buffer A ch0 stays at CHAN_NOISE_LQ (most Shadertoy shaders use noise, not self-
 
 **Selfie shader example (multi-pass):**
 
-- **Buffer A**: iChannel0 → `sampler_noisevol_lq_st` (3D noise), iChannel1 → `sampler_bufferB` (temporal feedback from Buffer B)
+- **Buffer A**: iChannel0 → `sampler_noisevol_lq_st` (3D noise), iChannel1 → `sampler_feedback` (self-feedback for temporal accumulation + camera reprojection), iChannel2/3 → `sampler_noisevol_lq_st` (3D noise)
 - **Buffer B**: iChannel0 → `sampler_feedback` (reads Buffer A output for DoF blur)
 - **Image**: iChannel0 → `sampler_feedback` (reads Buffer A), iChannel1 → `sampler_bufferB` (reads Buffer B)
+
+**Important:** Buffer A iChannel1 must be `sampler_feedback` (self), NOT `sampler_bufferB`. The shader stores camera matrices in pixel row 0 and reads them back via `textureLod(iChannel1, vec2(x,0.5)/iResolution.xy, 0.0)` for temporal reprojection. Pattern 2d detects this `/iResolution` pattern as screen-space self-reads.
 
 ## texelFetch Helpers
 

@@ -1863,6 +1863,15 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
   // Update audio texture (FFT + waveform) for this frame
   UpdateAudioTexture();
 
+  // Truncate binding diagnostics file on first Shadertoy frame
+  if (stFrame == 0) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"w");
+    if (fp) fclose(fp);
+  }
+
   // One-time diagnostics on first Shadertoy frame
   if (stFrame == 0) {
     char dbg[256];
@@ -1934,9 +1943,11 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
     }
 
     if (m_bHasBufferB) {
-      // Buffer B reads FeedbackA[fbRead] + FeedbackB[fbRead] (both from previous frame)
+      // Buffer B reads FeedbackA[fbWrite] (current frame's Buffer A output, rendered before B)
+      // + FeedbackB[fbRead] (own previous output, for self-feedback)
+      // This matches Shadertoy.com's sequential execution: A→B→Image within each frame.
       BuildBindingSlots(&m_shaders.bufferB.params, m_dx12VS[1], bufferBSlots,
-                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
+                        &m_dx12Feedback[fbWrite], imgFbRead, &m_dx12FeedbackB[fbRead]);
     }
 
     if (m_bHasBufferA || m_bHasBufferB) {
@@ -6768,6 +6779,28 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
       break;
     default:
       break;
+    }
+  }
+  // Diagnostic dump for Shadertoy binding verification — write directly to file
+  if (m_bShadertoyMode && !m_bPresetDiagLogged) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"a");
+    if (fp) {
+      fprintf(fp, "Binding: fb=%s(%u) bufB=%s(%u)\n",
+              feedbackTex && feedbackTex->IsValid() ? "OK" : "no",
+              feedbackTex ? feedbackTex->srvIndex : UINT_MAX,
+              bufferBTex && bufferBTex->IsValid() ? "OK" : "no",
+              bufferBTex ? bufferBTex->srvIndex : UINT_MAX);
+      for (int i = 0; i < 16; i++) {
+        if (params->m_texcode[i] != 0 || outSlots[i] != UINT_MAX) {
+          fprintf(fp, "  slot[%d]: texcode=%d srv=%u binding_srv=%u\n", i, params->m_texcode[i], outSlots[i],
+                  params->m_texture_bindings[i].dx12SrvIndex);
+        }
+      }
+      fprintf(fp, "---\n");
+      fclose(fp);
     }
   }
 }

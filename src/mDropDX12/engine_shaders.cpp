@@ -91,6 +91,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #define MAX_RAND_TEX 16
   std::wstring RandTexName[MAX_RAND_TEX];
 
+  // Diagnostic file for Shadertoy sampler debugging
+  FILE* fpDiag = nullptr;
+  if (g_engine.m_bLoadingShadertoyMode || g_engine.m_bShadertoyMode) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", g_engine.m_szBaseDir);
+    _wfopen_s(&fpDiag, diagPath, L"a");
+    if (fpDiag) fprintf(fpDiag, "=== CacheParams: %u constants ===\n", d.Constants);
+  }
+
   {
     char dbg[256];
     sprintf(dbg, "DX12: CacheParams: %u constants", d.Constants);
@@ -103,6 +112,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
 
+    if (fpDiag) fprintf(fpDiag, "  [%u] Name=%s RegSet=%d RegIdx=%d Type=%d\n", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex, cd.Type);
     {
       char dbg[256];
       sprintf(dbg, "DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
@@ -617,6 +627,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     }
   }
 
+  if (fpDiag) {
+    fprintf(fpDiag, "  Result texcodes:");
+    for (int i = 0; i < 16; i++) {
+      if (m_texcode[i] != 0 || m_texture_bindings[i].dx12SrvIndex != UINT_MAX)
+        fprintf(fpDiag, " [%d]=%d(srv=%u)", i, m_texcode[i], m_texture_bindings[i].dx12SrvIndex);
+    }
+    fprintf(fpDiag, "\n---\n");
+    fclose(fpDiag);
+  }
   DebugLogA("DX12: CacheParams: pass 2 done, returning", LOG_VERBOSE);
 }
 
@@ -685,6 +704,14 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
 }
 
 bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
+  // Truncate diagnostic file at start of each shader load
+  if (m_bLoadingShadertoyMode && !bCompileOnly) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"w");
+    if (fp) fclose(fp);
+  }
   if (m_nMaxPSVersion <= 0) {
     DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping", LOG_VERBOSE);
     return true;
