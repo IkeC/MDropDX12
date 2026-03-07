@@ -1,5 +1,18 @@
 # MDropDX12 Changelog
 
+## v1.4.3 (2026-03-07)
+
+### ToolWindow Improvements
+
+- Radio button groups are now auto-toggled by the base class via `radioGroup` parameter on `CreateRadio()` — subclasses no longer need manual toggle boilerplate
+- Updated `docs/tool_window.md` with radio group auto-toggle documentation
+
+### Bug Fixes
+
+- Fixed Messages window checkboxes (Show Messages, Autoplay, Sequential, Autosize) always reading as unchecked — clicking "Show Messages" would silently disable messages
+- Fixed MIDI window Enable checkbox always reading as unchecked
+- Root cause: `IsDlgButtonChecked()` silently returns 0 for BS_OWNERDRAW controls; replaced with `IsChecked()`
+
 ## v1.4.2 (2026-03-06)
 
 ### Packaging
