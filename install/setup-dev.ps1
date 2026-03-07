@@ -131,24 +131,57 @@ if ($needsInstall) {
 }
 
 # Ensure vswhere/MSBuild are on PATH (VS installer may not update current session)
+Write-Step "Locating MSBuild"
+Refresh-Path
+$msbuild = $null
+
+# Try vswhere first
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) {
     $vswhere = "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
 }
 if (Test-Path $vswhere) {
+    Write-Host "  vswhere: $vswhere"
     $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild `
                -find "MSBuild\**\Bin\MSBuild.exe" 2>$null | Select-Object -First 1
-    if ($msbuild -and (Test-Path $msbuild)) {
-        $msbuildDir = Split-Path $msbuild -Parent
-        if ($env:Path -notlike "*$msbuildDir*") {
-            $env:Path += ";$msbuildDir"
-            Write-Host "  Added MSBuild to PATH: $msbuildDir"
-        }
-    } else {
-        Write-Error "VS Build Tools installed but MSBuild not found via vswhere."
+    if (-not $msbuild) {
+        # Try without -requires filter (some installs don't register components correctly)
+        Write-Host "  vswhere -requires filter found nothing, trying without filter..."
+        $msbuild = & $vswhere -latest -find "MSBuild\**\Bin\MSBuild.exe" 2>$null | Select-Object -First 1
     }
+}
+
+# Fallback: search known VS installation paths directly
+if (-not $msbuild -or -not (Test-Path $msbuild)) {
+    Write-Host "  vswhere failed, searching known paths..."
+    $searchPaths = @(
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+    )
+    foreach ($p in $searchPaths) {
+        if (Test-Path $p) {
+            $msbuild = $p
+            Write-Host "  Found at known path: $msbuild"
+            break
+        }
+    }
+}
+
+if ($msbuild -and (Test-Path $msbuild)) {
+    $msbuildDir = Split-Path $msbuild -Parent
+    if ($env:Path -notlike "*$msbuildDir*") {
+        $env:Path += ";$msbuildDir"
+    }
+    Write-Host "  MSBuild: $msbuild"
 } else {
-    Write-Error "vswhere.exe not found after VS Build Tools install."
+    Write-Host "  Searched paths:" -ForegroundColor Yellow
+    if (Test-Path $vswhere) {
+        $allInstalls = & $vswhere -all -format json 2>$null
+        Write-Host "  vswhere -all: $allInstalls"
+    }
+    Write-Error "MSBuild not found. VS Build Tools may not have installed correctly."
 }
 
 # ── 3. Clone repo ────────────────────────────────────────────────────────────
