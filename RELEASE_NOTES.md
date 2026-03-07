@@ -12,7 +12,7 @@ Scripts are plain text files with BPM-driven command sequencing. New in v1.4.1:
 
 - `ACTION=ApplyWorkspaceLayout` — apply your saved workspace layout from a script or hotkey
 - `ACTION=OpenWorkspaceLayout` — open the Workspace Layout configuration window
-- Full documentation: [docs/Scripts.md](https://github.com/shanevbg/MDropDX12/blob/v1.4/docs/Scripts.md)
+- Full documentation: [docs/Scripts.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.1/docs/Scripts.md)
 
 ## Bug Fixes
 
@@ -28,4 +28,4 @@ Press **F8** to open Settings. Press **F1** for keyboard shortcuts.
 
 ## Full Changelog
 
-See [docs/Changes.md](https://github.com/shanevbg/MDropDX12/blob/v1.4/docs/Changes.md) for the complete list of changes.
+See [docs/Changes.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.1/docs/Changes.md) for the complete list of changes.
