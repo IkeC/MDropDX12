@@ -73,28 +73,12 @@ Write-Host "  Repo will be at: $cloneDir"
 Write-Step "Checking winget"
 $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
 if (-not $hasWinget) {
-    Write-Host "  Installing winget (App Installer)..."
-    try {
-        Add-AppxPackage -RegisterByFamilyName Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop
-        Refresh-Path
-        $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
-    } catch {
-        Write-Host "  RegisterByFamilyName failed: $_"
-    }
-    if (-not $hasWinget) {
-        Write-Host "  Downloading winget msixbundle..."
-        # Install VCLibs dependency first
-        try {
-            Add-AppxPackage -Path "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx" -ErrorAction Stop
-        } catch { Write-Host "  VCLibs: $_" }
-        $wingetPath = "$env:TEMP\winget.msixbundle"
-        Download "https://aka.ms/getwinget" $wingetPath
-        try {
-            Add-AppxPackage -Path $wingetPath -ErrorAction Stop
-        } catch { Write-Host "  winget install failed: $_" }
-        Remove-Item $wingetPath -ErrorAction SilentlyContinue
-        Refresh-Path
-    }
+    Write-Host "  Installing WinGet via PowerShell module..."
+    Install-PackageProvider -Name NuGet -Force | Out-Null
+    Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
+    Write-Host "  Bootstrapping WinGet package manager..."
+    Repair-WinGetPackageManager -AllUsers
+    Refresh-Path
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host "  winget installed."
     } else {
