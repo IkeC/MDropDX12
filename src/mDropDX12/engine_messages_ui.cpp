@@ -231,7 +231,7 @@ LRESULT MessagesWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // Checkbox handlers
     if (code == BN_CLICKED) {
-        bool bChecked = IsDlgButtonChecked(hWnd, id) == BST_CHECKED;
+        bool bChecked = IsChecked(id);
         switch (id) {
         case IDC_MW_MSG_AUTOPLAY:
             p->m_bMsgAutoplay = bChecked;

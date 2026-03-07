@@ -640,7 +640,7 @@ LRESULT MidiWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
 
   // Enable checkbox
   if (id == IDC_MW_MIDI_ENABLE && code == BN_CLICKED) {
-    bool enabled = (IsDlgButtonChecked(hWnd, IDC_MW_MIDI_ENABLE) == BST_CHECKED);
+    bool enabled = IsChecked(IDC_MW_MIDI_ENABLE);
     p->m_bMidiEnabled = enabled;
     if (enabled) {
       // Get selected device
