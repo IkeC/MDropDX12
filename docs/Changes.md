@@ -1,6 +1,13 @@
 # MDropDX12 Changelog
 
-## v1.4.1 (2026-03-06)
+## v1.4.2 (2026-03-06)
+
+### Packaging
+
+- Portable zip now contains only the exe and README - the exe self-bootstraps all config files, directories, and defaults on first run
+- Removed bundled presets and textures from repository
+- Added `docs/Resources.md` with links to recommended preset collections
+- Featured IkeC's [Milkwave preset collection](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) as the recommended starting point
 
 ### Scripting
 
@@ -8,12 +15,6 @@
 - Added `ACTION=OpenWorkspaceLayout` hotkey action to open the Workspace Layout window
 - Added `ACTION=ApplyWorkspaceLayout` hotkey action to apply saved workspace layout with a single keypress
 - Workspace layout can now be triggered via script, hotkey binding, or Button Board action
-
-### Resources
-
-- Removed bundled presets and textures from repository — the exe self-bootstraps on first run
-- Added `docs/Resources.md` with links to recommended preset collections
-- Featured IkeC's [Milkwave preset collection](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) as the recommended starting point
 
 ### Bug Fixes
 

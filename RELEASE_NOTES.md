@@ -1,4 +1,4 @@
-# MDropDX12 v1.4.1
+# MDropDX12 v1.4.2
 
 ## What's New
 
@@ -8,11 +8,11 @@
 
 ## Scripting
 
-Scripts are plain text files with BPM-driven command sequencing. New in v1.4.1:
+Scripts are plain text files with BPM-driven command sequencing. New in v1.4.2:
 
 - `ACTION=ApplyWorkspaceLayout` — apply your saved workspace layout from a script or hotkey
 - `ACTION=OpenWorkspaceLayout` — open the Workspace Layout configuration window
-- Full documentation: [docs/Scripts.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.1/docs/Scripts.md)
+- Full documentation: [docs/Scripts.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.2/docs/Scripts.md)
 
 ## Bug Fixes
 
@@ -22,10 +22,10 @@ Scripts are plain text files with BPM-driven command sequencing. New in v1.4.1:
 
 ## Installation
 
-Download `MDropDX12-1.4.1-Portable.zip`, extract to any folder with write access, and run `MDropDX12.exe`. No installer or admin privileges required. No VC++ Redistributable needed.
+Download `MDropDX12-1.4.2-Portable.zip`, extract to any folder with write access, and run `MDropDX12.exe`. No installer or admin privileges required. No VC++ Redistributable needed.
 
 Press **F8** to open Settings. Press **F1** for keyboard shortcuts.
 
 ## Full Changelog
 
-See [docs/Changes.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.1/docs/Changes.md) for the complete list of changes.
+See [docs/Changes.md](https://github.com/shanevbg/MDropDX12/blob/v1.4.2/docs/Changes.md) for the complete list of changes.

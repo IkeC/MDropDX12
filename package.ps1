@@ -36,41 +36,11 @@ New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
 
 Write-Host "Staging to: $staging"
 
-# ── Copy exe ──────────────────────────────────────────────────────────────────
+# ── Copy exe and README ──────────────────────────────────────────────────────
+# The exe is fully self-bootstrapping: it creates config files, resources/,
+# cache/, and capture/ directories on first run. Only the exe is required.
 Copy-Item $exePath $stageRoot
-
-# ── Copy config files ─────────────────────────────────────────────────────────
-$configFiles = @(
-    "config\README.txt"
-    "config\messages.ini"
-    "config\sprites.ini"
-    "config\midi-default.txt"
-    "config\precompile.txt"
-    "config\script-default.txt"
-    "config\visualizer-keys.txt"
-    "config\settings.ini"
-)
-foreach ($f in $configFiles) {
-    if (Test-Path $f) {
-        Copy-Item $f $stageRoot
-    } else {
-        # Fall back to Release/ directory
-        $fallback = Join-Path "Release" (Split-Path $f -Leaf)
-        if (Test-Path $fallback) { Copy-Item $fallback $stageRoot }
-        else { Write-Warning "Config file not found: $f" }
-    }
-}
-
-# ── Create empty directories that the app expects ─────────────────────────────
-# The exe self-bootstraps resources/presets/ and resources/textures/ on first run.
-# See docs/Resources.md for where to download presets and textures.
-@("capture", "cache") | ForEach-Object {
-    New-Item -ItemType Directory -Path (Join-Path $stageRoot $_) -Force | Out-Null
-}
-
-# ── Remove any stale files from staging ───────────────────────────────────────
-Get-ChildItem $stageRoot -Recurse -Include "*.pdb","debug.log","diag_*","*.obj","*.tlog" |
-    Remove-Item -Force -ErrorAction SilentlyContinue
+if (Test-Path "config\README.txt") { Copy-Item "config\README.txt" $stageRoot }
 
 # ── Create zip ────────────────────────────────────────────────────────────────
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

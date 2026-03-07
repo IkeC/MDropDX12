@@ -5,7 +5,7 @@
 - **OS**: Windows 10 64-bit or higher (Windows 11 recommended)
 - **GPU**: DirectX 12 compatible graphics card (dedicated GPU recommended; Intel UHD integrated graphics will work but may struggle with complex presets)
 - **Audio**: Any audio output device (speakers, headphones, virtual audio cable)
-- **Disk**: ~1.5 MB for base install (portable zip); add preset packs as needed (see [Resources Guide](Resources.md))
+- **Disk**: ~1 MB for base install (portable zip); add preset packs as needed (see [Resources Guide](Resources.md))
 
 No additional runtime libraries are required — the Visual C++ runtime is statically linked into the executable.
 
@@ -13,7 +13,7 @@ MDropDX12 captures audio from your system's default output device via WASAPI loo
 
 ## Download
 
-Download `MDropDX12-1.4.1-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
+Download `MDropDX12-1.4.2-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
 
 ## Installation
 
