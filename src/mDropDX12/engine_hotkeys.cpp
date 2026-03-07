@@ -123,6 +123,7 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_MESSAGES,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Messages",         L"OpenMessages");
     HK_DEF(i++, HK_OPEN_SHADER_IMPORT,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Shader Import",    L"OpenShaderImport");
     HK_DEF(i++, HK_OPEN_VIDEO_FX,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Video Effects",    L"OpenVideoFX");
+    HK_DEF(i++, HK_OPEN_VFX_PROFILES,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open VFX Profiles",    L"OpenVFXProfiles");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -669,6 +670,9 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_OPEN_VIDEO_FX:
         OpenVideoEffectsWindow();
+        return true;
+    case HK_OPEN_VFX_PROFILES:
+        OpenVFXProfileWindow();
         return true;
 
     // ── Shader/Effects ──

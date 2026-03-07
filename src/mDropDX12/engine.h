@@ -977,6 +977,20 @@ public:
   void OpenVideoEffectsWindow();
   void CloseVideoEffectsWindow();
 
+  // Video FX Profiles
+  wchar_t m_szCurrentVFXProfile[MAX_PATH] = {};  // currently loaded profile (empty = none)
+  bool    m_bEnableVFXStartup = false;
+  wchar_t m_szVFXStartup[MAX_PATH] = {};
+  bool    m_bEnableVFXStartupSavingOnClose = true;
+  void    SaveVideoFXProfile(const wchar_t* path);
+  bool    LoadVideoFXProfile(const wchar_t* path);
+  void    GetVideoFXProfileDir(wchar_t* out, size_t len);
+
+  // VFX Profile Picker Window
+  class VFXProfileWindow* m_pVFXProfileWindow = nullptr;
+  void OpenVFXProfileWindow();
+  void CloseVFXProfileWindow();
+
   // ── Game Controller ──
   bool    m_bControllerEnabled = false;
   int     m_nControllerDeviceID = -1;    // winmm joy ID (0-15), -1 = none

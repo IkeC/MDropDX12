@@ -3021,6 +3021,10 @@ int Engine::AllocateMyDX9Stuff() {
     else {
       LoadRandomPreset(0.0f);
     }
+    // Load VFX profile on startup
+    if (m_bEnableVFXStartup && wcslen(m_szVFXStartup) > 0)
+        LoadVideoFXProfile(m_szVFXStartup);
+
     if (m_bAutoLockPresetWhenNoMusic)
       m_bPresetLockedByUser = false;
     m_bInitialPresetSelected = true;

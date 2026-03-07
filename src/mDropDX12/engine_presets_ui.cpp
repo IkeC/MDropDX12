@@ -153,6 +153,27 @@ void PresetsWindow::DoBuildControls() {
     m_hChkHardCuts = CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,   x, y, rw, lineH, hFont, p->m_bHardCutsDisabled); y += lineH + 2;
     m_hChkLock     = CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK, x, y, rw, lineH, hFont, p->m_bPresetLockOnAtStartup); y += lineH + 2;
     m_hChkSeq      = CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,   x, y, rw, lineH, hFont, p->m_bSequentialPresetOrder);
+    y += lineH + gap + 4;
+
+    // Startup preset mode combo
+    {
+        int startLblW = MulDiv(60, lineH, 26);
+        CreateLabel(hw, L"Startup:", x, y, startLblW, lineH, hFont);
+        HWND hStartup = CreateWindowExW(0, L"COMBOBOX", NULL,
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+            x + startLblW + 4, y, rw - startLblW - 4, lineH * 5, hw,
+            (HMENU)(INT_PTR)IDC_MW_PRESETS_STARTUP, GetModuleHandle(NULL), NULL);
+        if (hStartup && hFont) SendMessage(hStartup, WM_SETFONT, (WPARAM)hFont, TRUE);
+        SendMessageW(hStartup, CB_ADDSTRING, 0, (LPARAM)L"Random");
+        SendMessageW(hStartup, CB_ADDSTRING, 0, (LPARAM)L"Current Preset");
+        SendMessageW(hStartup, CB_ADDSTRING, 0, (LPARAM)L"Last Used");
+        // Determine current mode
+        int mode = 0; // random
+        if (p->m_bEnablePresetStartup) {
+            mode = p->m_bEnablePresetStartupSavingOnClose ? 2 : 1; // last used or current
+        }
+        SendMessage(hStartup, CB_SETCURSEL, mode, 0);
+    }
 
     // Start a timer to sync current preset display
     SetTimer(hw, 1, 500, NULL);
@@ -421,6 +442,35 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             p->SaveSettingToINI(SET_SEQ_ORDER);
             return 0;
         }
+    }
+
+    // ── Startup mode combo ──
+    if (id == IDC_MW_PRESETS_STARTUP && code == CBN_SELCHANGE) {
+        int mode = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+        wchar_t* pIni = p->GetConfigIniFile();
+        switch (mode) {
+        case 0: // Random
+            p->m_bEnablePresetStartup = false;
+            p->m_bEnablePresetStartupSavingOnClose = false;
+            break;
+        case 1: // Current Preset
+            p->m_bEnablePresetStartup = true;
+            p->m_bEnablePresetStartupSavingOnClose = false;
+            // Set current preset as startup
+            wcscpy_s(p->m_szPresetStartup, p->m_szCurrentPresetFile);
+            WritePrivateProfileStringW(L"Settings", L"szPresetStartup", p->m_szPresetStartup, pIni);
+            break;
+        case 2: // Last Used
+            p->m_bEnablePresetStartup = true;
+            p->m_bEnablePresetStartupSavingOnClose = true;
+            // Set current preset as startup (will be updated on close)
+            wcscpy_s(p->m_szPresetStartup, p->m_szCurrentPresetFile);
+            WritePrivateProfileStringW(L"Settings", L"szPresetStartup", p->m_szPresetStartup, pIni);
+            break;
+        }
+        WritePrivateProfileIntW(p->m_bEnablePresetStartup, L"bEnablePresetStartup", pIni, L"Settings");
+        WritePrivateProfileIntW(p->m_bEnablePresetStartupSavingOnClose, L"bEnablePresetStartupSavingOnClose", pIni, L"Settings");
+        return 0;
     }
 
     return -1;

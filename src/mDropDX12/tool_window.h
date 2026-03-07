@@ -503,6 +503,32 @@ private:
   void SaveFX();
 };
 
+// ── Concrete subclass: VFX Profile Picker window ──
+
+class VFXProfileWindow : public ToolWindow {
+public:
+  VFXProfileWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"VFX Profiles"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12VFXProfileWnd"; }
+  const wchar_t* GetINISection() const override  { return L"VFXProfiles"; }
+  int GetPinControlID() const override       { return IDC_MW_VFXP_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_VFXP_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_VFXP_FONT_MINUS; }
+  int GetMinWidth() const override  { return 280; }
+  int GetMinHeight() const override { return 350; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  void RefreshProfileList();
+  void ApplySelectedProfile();
+  std::vector<std::wstring> m_profilePaths;  // full paths, indexed parallel to listbox
+};
+
 // ── Channel input sources for Shadertoy passes ──
 
 enum ChannelSource {

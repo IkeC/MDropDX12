@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include "video_capture.h"
+#include "json_utils.h"
 
 extern ID3DBlob* g_pBlurVSBlob;
 
@@ -762,6 +763,12 @@ void Engine::LoadSpoutInputSettings()
     readAR(L"AR_Brightness", m_videoFX.arBrightness);
     readAR(L"AR_Saturation", m_videoFX.arSaturation);
     readAR(L"AR_Chromatic",  m_videoFX.arChromatic);
+
+    // VFX Profile startup settings
+    m_bEnableVFXStartup = GetPrivateProfileIntW(L"VideoFX", L"bEnableVFXStartup", 0, pIni) != 0;
+    GetPrivateProfileStringW(L"VideoFX", L"szVFXStartup", L"", m_szVFXStartup, MAX_PATH, pIni);
+    m_bEnableVFXStartupSavingOnClose = GetPrivateProfileIntW(L"VideoFX", L"bEnableVFXStartupSavingOnClose", 1, pIni) != 0;
+    GetPrivateProfileStringW(L"VideoFX", L"szCurrentVFXProfile", L"", m_szCurrentVFXProfile, MAX_PATH, pIni);
 }
 
 void Engine::SaveSpoutInputSettings()
@@ -836,6 +843,139 @@ void Engine::SaveSpoutInputSettings()
     writeAR(L"AR_Brightness", m_videoFX.arBrightness);
     writeAR(L"AR_Saturation", m_videoFX.arSaturation);
     writeAR(L"AR_Chromatic",  m_videoFX.arChromatic);
+
+    // VFX Profile startup settings
+    WritePrivateProfileStringW(L"VideoFX", L"bEnableVFXStartup", m_bEnableVFXStartup ? L"1" : L"0", pIni);
+    WritePrivateProfileStringW(L"VideoFX", L"szVFXStartup", m_szVFXStartup, pIni);
+    WritePrivateProfileStringW(L"VideoFX", L"bEnableVFXStartupSavingOnClose", m_bEnableVFXStartupSavingOnClose ? L"1" : L"0", pIni);
+    WritePrivateProfileStringW(L"VideoFX", L"szCurrentVFXProfile", m_szCurrentVFXProfile, pIni);
+
+    // Auto-save current VFX profile on close
+    if (m_bEnableVFXStartupSavingOnClose && wcslen(m_szCurrentVFXProfile) > 0)
+        SaveVideoFXProfile(m_szCurrentVFXProfile);
+}
+
+// ---------------------------------------------------------------------------
+// Video FX Profile I/O
+// ---------------------------------------------------------------------------
+void Engine::GetVideoFXProfileDir(wchar_t* out, size_t len)
+{
+    swprintf_s(out, len, L"%svideofx\\", m_szMilkdrop2Path);
+}
+
+void Engine::SaveVideoFXProfile(const wchar_t* path)
+{
+    wchar_t dir[MAX_PATH];
+    GetVideoFXProfileDir(dir, MAX_PATH);
+    CreateDirectoryW(dir, NULL);
+
+    JsonWriter w;
+    w.BeginObject();
+    w.Int(L"version", 1);
+
+    w.BeginObject(L"transform");
+    w.Float(L"posX", m_videoFX.posX);
+    w.Float(L"posY", m_videoFX.posY);
+    w.Float(L"scale", m_videoFX.scale);
+    w.Float(L"rotation", m_videoFX.rotation);
+    w.Bool(L"mirrorH", m_videoFX.mirrorH);
+    w.Bool(L"mirrorV", m_videoFX.mirrorV);
+    w.EndObject();
+
+    w.BeginObject(L"color");
+    w.Float(L"tintR", m_videoFX.tintR);
+    w.Float(L"tintG", m_videoFX.tintG);
+    w.Float(L"tintB", m_videoFX.tintB);
+    w.Float(L"brightness", m_videoFX.brightness);
+    w.Float(L"contrast", m_videoFX.contrast);
+    w.Float(L"saturation", m_videoFX.saturation);
+    w.Float(L"hueShift", m_videoFX.hueShift);
+    w.Bool(L"invert", m_videoFX.invert);
+    w.EndObject();
+
+    w.BeginObject(L"effects");
+    w.Float(L"pixelation", m_videoFX.pixelation);
+    w.Float(L"chromatic", m_videoFX.chromatic);
+    w.Bool(L"edgeDetect", m_videoFX.edgeDetect);
+    w.EndObject();
+
+    w.Int(L"blendMode", m_videoFX.blendMode);
+
+    auto writeAudioLink = [&](const wchar_t* key, const AudioLink& ar) {
+        w.BeginObject(key);
+        w.Int(L"source", ar.source);
+        w.Float(L"intensity", ar.intensity);
+        w.EndObject();
+    };
+    w.BeginObject(L"audio");
+    writeAudioLink(L"posX",       m_videoFX.arPosX);
+    writeAudioLink(L"posY",       m_videoFX.arPosY);
+    writeAudioLink(L"scale",      m_videoFX.arScale);
+    writeAudioLink(L"rotation",   m_videoFX.arRotation);
+    writeAudioLink(L"brightness", m_videoFX.arBrightness);
+    writeAudioLink(L"saturation", m_videoFX.arSaturation);
+    writeAudioLink(L"chromatic",  m_videoFX.arChromatic);
+    w.EndObject();
+
+    w.EndObject();
+    w.SaveToFile(path);
+}
+
+bool Engine::LoadVideoFXProfile(const wchar_t* path)
+{
+    JsonValue root = JsonLoadFile(path);
+    if (root.isNull()) return false;
+
+    auto& t = root[L"transform"];
+    if (!t.isNull()) {
+        m_videoFX.posX     = t[L"posX"].asFloat(0);
+        m_videoFX.posY     = t[L"posY"].asFloat(0);
+        m_videoFX.scale    = t[L"scale"].asFloat(1.0f);
+        m_videoFX.rotation = t[L"rotation"].asFloat(0);
+        m_videoFX.mirrorH  = t[L"mirrorH"].asBool(false);
+        m_videoFX.mirrorV  = t[L"mirrorV"].asBool(false);
+    }
+
+    auto& c = root[L"color"];
+    if (!c.isNull()) {
+        m_videoFX.tintR      = c[L"tintR"].asFloat(1);
+        m_videoFX.tintG      = c[L"tintG"].asFloat(1);
+        m_videoFX.tintB      = c[L"tintB"].asFloat(1);
+        m_videoFX.brightness = c[L"brightness"].asFloat(0);
+        m_videoFX.contrast   = c[L"contrast"].asFloat(1.0f);
+        m_videoFX.saturation = c[L"saturation"].asFloat(1.0f);
+        m_videoFX.hueShift   = c[L"hueShift"].asFloat(0);
+        m_videoFX.invert     = c[L"invert"].asBool(false);
+    }
+
+    auto& e = root[L"effects"];
+    if (!e.isNull()) {
+        m_videoFX.pixelation = e[L"pixelation"].asFloat(0);
+        m_videoFX.chromatic  = e[L"chromatic"].asFloat(0);
+        m_videoFX.edgeDetect = e[L"edgeDetect"].asBool(false);
+    }
+
+    m_videoFX.blendMode = root[L"blendMode"].asInt(0);
+
+    auto readAudioLink = [](const JsonValue& obj, AudioLink& ar) {
+        if (!obj.isNull()) {
+            ar.source    = obj[L"source"].asInt(0);
+            ar.intensity = obj[L"intensity"].asFloat(0.5f);
+        }
+    };
+    auto& a = root[L"audio"];
+    if (!a.isNull()) {
+        readAudioLink(a[L"posX"],       m_videoFX.arPosX);
+        readAudioLink(a[L"posY"],       m_videoFX.arPosY);
+        readAudioLink(a[L"scale"],      m_videoFX.arScale);
+        readAudioLink(a[L"rotation"],   m_videoFX.arRotation);
+        readAudioLink(a[L"brightness"], m_videoFX.arBrightness);
+        readAudioLink(a[L"saturation"], m_videoFX.arSaturation);
+        readAudioLink(a[L"chromatic"],  m_videoFX.arChromatic);
+    }
+
+    wcscpy_s(m_szCurrentVFXProfile, path);
+    return true;
 }
 
 } // namespace mdrop

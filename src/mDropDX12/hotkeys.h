@@ -130,6 +130,7 @@ enum HotkeyAction : int {
     HK_OPEN_MESSAGES,            // (unbound) — open Messages window
     HK_OPEN_SHADER_IMPORT,       // (unbound) — open Shader Import window
     HK_OPEN_VIDEO_FX,            // (unbound) — open Video Effects window
+    HK_OPEN_VFX_PROFILES,        // (unbound) — open VFX Profile Picker window
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };

@@ -582,6 +582,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_PRESETS_PIN          9020
 #define IDC_MW_PRESETS_FONT_PLUS    9021
 #define IDC_MW_PRESETS_FONT_MINUS   9022
+#define IDC_MW_PRESETS_STARTUP      9023  // Combo: startup mode (Random/Current/Last Used)
 
 // Sprites window controls (9040-9059)
 #define IDC_MW_SPRITES_WIN_PIN          9040
@@ -691,6 +692,19 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_VFX_RESET_AUDIO    9274
 // Open button on Displays window
 #define IDC_MW_OPEN_VFX           9280
+// Save/Load buttons on Video Effects window
+#define IDC_MW_VFX_SAVE_PROFILE   9281
+#define IDC_MW_VFX_LOAD_PROFILE   9282  // Opens profile picker
+
+// VFX Profile Picker window controls (9290-9299)
+#define IDC_MW_VFXP_PIN           9290
+#define IDC_MW_VFXP_FONT_PLUS     9291
+#define IDC_MW_VFXP_FONT_MINUS    9292
+#define IDC_MW_VFXP_LIST          9293  // Listbox: profile list
+#define IDC_MW_VFXP_SAVE          9294  // Button: Save As...
+#define IDC_MW_VFXP_DELETE        9295  // Button: Delete
+#define IDC_MW_VFXP_STARTUP       9296  // Checkbox: Load on startup
+#define IDC_MW_VFXP_SAVECLOSE     9297  // Checkbox: Save on close
 
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080

@@ -5,6 +5,7 @@
 #include "engine.h"
 #include "tool_window.h"
 #include "engine_helpers.h"
+#include <shlwapi.h>
 
 namespace mdrop {
 
@@ -38,6 +39,12 @@ void VideoEffectsWindow::DoBuildControls()
     auto base = BuildBaseControls();
     int y = base.y, lineH = base.lineH, gap = base.gap;
     int x = base.x, rw = base.rw;
+
+    // Profile save/load buttons (above tabs)
+    int profileBtnW = MulDiv(100, lineH, 26);
+    CreateBtn(m_hWnd, L"Save Profile...", IDC_MW_VFX_SAVE_PROFILE, x, y, profileBtnW, lineH, m_hFont);
+    CreateBtn(m_hWnd, L"Profiles...", IDC_MW_VFX_LOAD_PROFILE, x + profileBtnW + 8, y, profileBtnW, lineH, m_hFont);
+    y += lineH + gap;
 
     RECT rc;
     GetClientRect(m_hWnd, &rc);
@@ -366,6 +373,40 @@ LRESULT VideoEffectsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
         fx.arPosX = {}; fx.arPosY = {}; fx.arScale = {}; fx.arRotation = {};
         fx.arBrightness = {}; fx.arSaturation = {}; fx.arChromatic = {};
         SaveFX(); RebuildFonts(); return 0;
+
+    // ── Profile buttons ──
+    case IDC_MW_VFX_SAVE_PROFILE: {
+        wchar_t dir[MAX_PATH];
+        m_pEngine->GetVideoFXProfileDir(dir, MAX_PATH);
+        CreateDirectoryW(dir, NULL);
+
+        wchar_t filePath[MAX_PATH] = {};
+        if (wcslen(m_pEngine->m_szCurrentVFXProfile) > 0) {
+            const wchar_t* fname = PathFindFileNameW(m_pEngine->m_szCurrentVFXProfile);
+            wcscpy_s(filePath, fname);
+        }
+
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = m_hWnd;
+        ofn.lpstrFilter = L"VFX Profile (*.json)\0*.json\0All Files\0*.*\0";
+        ofn.lpstrFile = filePath;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrInitialDir = dir;
+        ofn.lpstrDefExt = L"json";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+
+        if (GetSaveFileNameW(&ofn)) {
+            m_pEngine->SaveVideoFXProfile(filePath);
+            wcscpy_s(m_pEngine->m_szCurrentVFXProfile, filePath);
+            m_pEngine->SaveSpoutInputSettings();
+        }
+        return 0;
+    }
+
+    case IDC_MW_VFX_LOAD_PROFILE:
+        m_pEngine->OpenVFXProfileWindow();
+        return 0;
     }
     return -1;
 }
