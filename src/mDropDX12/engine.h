@@ -922,6 +922,61 @@ public:
   void SaveSpoutInputSettings();
   void LoadSpoutInputSettings();
 
+  // ── Video Effects ──
+  struct AudioLink {
+      int   source    = 0;    // 0=none, 1=bass, 2=mid, 3=treb, 4=vol
+      float intensity = 0.5f; // 0.0–2.0
+  };
+  struct VideoEffectParams {
+      // Transform
+      float posX = 0, posY = 0;       // -1 to 1
+      float scale = 1.0f;             // 0.1 to 5.0
+      float rotation = 0;             // 0–360 degrees
+      bool  mirrorH = false, mirrorV = false;
+      // Color
+      float tintR = 1, tintG = 1, tintB = 1; // 0–2
+      float brightness = 0;           // -1 to 1
+      float contrast = 1.0f;          // 0–3
+      float saturation = 1.0f;        // 0–3
+      float hueShift = 0;             // 0–360
+      bool  invert = false;
+      // Effects
+      float pixelation = 0;           // 0 (off) to 1 (max)
+      float chromatic = 0;            // 0 (off) to 0.05
+      bool  edgeDetect = false;
+      // Blend: 0=Alpha, 1=Additive, 2=Multiply, 3=Screen, 4=Overlay, 5=Difference
+      int   blendMode = 0;
+      // Audio-reactive links
+      AudioLink arPosX, arPosY, arScale, arRotation;
+      AudioLink arBrightness, arSaturation, arChromatic;
+
+      bool IsDefault() const {
+          return posX == 0 && posY == 0 && scale == 1.0f && rotation == 0
+              && !mirrorH && !mirrorV
+              && tintR == 1 && tintG == 1 && tintB == 1
+              && brightness == 0 && contrast == 1.0f && saturation == 1.0f
+              && hueShift == 0 && !invert
+              && pixelation == 0 && chromatic == 0 && !edgeDetect
+              && blendMode == 0
+              && arPosX.source == 0 && arPosY.source == 0
+              && arScale.source == 0 && arRotation.source == 0
+              && arBrightness.source == 0 && arSaturation.source == 0
+              && arChromatic.source == 0;
+      }
+  };
+  VideoEffectParams m_videoFX;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Alpha;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Additive;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Solid;   // for shader-based blend modes 2-5
+  DX12Texture m_dx12VideoFXDest;                       // RT copy for shader-based blends
+  void CompileVideoFXPSOs();
+  void CompositeVideoInputFX(bool isBackground, DX12Texture& tex, UINT srcW, UINT srcH);
+
+  // Video Effects Window
+  class VideoEffectsWindow* m_pVideoEffectsWindow = nullptr;
+  void OpenVideoEffectsWindow();
+  void CloseVideoEffectsWindow();
+
   // ── Game Controller ──
   bool    m_bControllerEnabled = false;
   int     m_nControllerDeviceID = -1;    // winmm joy ID (0-15), -1 = none

@@ -2581,6 +2581,7 @@ int Engine::AllocateMyDX9Stuff() {
 
     // Spout video input luma-key PSO (alpha blended)
     CompileSpoutInputPSO();
+    CompileVideoFXPSOs();
   }
 
   m_fAspectX = (m_nTexSizeY > m_nTexSizeX) ? m_nTexSizeX / (float)m_nTexSizeY : 1.0f;

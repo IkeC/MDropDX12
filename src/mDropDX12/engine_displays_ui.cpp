@@ -328,6 +328,12 @@ void DisplaysWindow::BuildVideoInputPage(int x, int y, int rw, int lineH, int ga
     SetWindowLongPtrW(m_childCtrls.back(), GWLP_ID, IDC_MW_SPINPUT_LUMA_SOFT_LBL);
     if (!active || !p->m_bSpoutInputLumaKey)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_SOFT), FALSE);
+    y += lineH + gap;
+
+    // Effects... button
+    int btnW = MulDiv(80, lineH, 26);
+    PAGE_TC(1, CreateBtn(hw, L"Effects...", IDC_MW_OPEN_VFX, x, y, btnW, lineH, hFont));
+    if (!active) EnableWindow(GetDlgItem(hw, IDC_MW_OPEN_VFX), FALSE);
   }
 
   #undef PAGE_TC
@@ -509,6 +515,9 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       p->m_bVideoLoop = bChecked;
       if (p->m_videoCapture) p->m_videoCapture->m_bLoop = bChecked;
       p->SaveSpoutInputSettings();
+      return 0;
+    case IDC_MW_OPEN_VFX:
+      p->OpenVideoEffectsWindow();
       return 0;
     }
   }
@@ -717,6 +726,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     bool lumaOn = active && p->m_bSpoutInputLumaKey;
     EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
     EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
+    EnableWindow(GetDlgItem(hWnd, IDC_MW_OPEN_VFX), active);
 
     p->SaveSpoutInputSettings();
     return 0;

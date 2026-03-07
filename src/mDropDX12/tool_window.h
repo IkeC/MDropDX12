@@ -475,6 +475,34 @@ private:
   HMENU BuildActionSubMenu();
 };
 
+// ── Concrete subclass: Video Effects window ──
+
+class VideoEffectsWindow : public ToolWindow {
+public:
+  VideoEffectsWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Video Effects"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12VideoFXWnd"; }
+  const wchar_t* GetINISection() const override  { return L"VideoFX"; }
+  int GetPinControlID() const override       { return IDC_MW_VFX_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_VFX_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_VFX_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 550; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
+  void    DoDestroy() override;
+
+private:
+  void BuildTransformPage(int x, int y, int rw, int lineH, int gap);
+  void BuildEffectsPage(int x, int y, int rw, int lineH, int gap);
+  void BuildAudioPage(int x, int y, int rw, int lineH, int gap);
+  void SaveFX();
+};
+
 // ── Channel input sources for Shadertoy passes ──
 
 enum ChannelSource {

@@ -2223,7 +2223,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
       cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
       SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
-      CompositeVideoInput(true, *pTex, srcW, srcH);
+      CompositeVideoInputFX(true, *pTex, srcW, srcH);
       if (m_nVideoInputSource == VID_SOURCE_SPOUT)
         m_lpDX->TransitionResource(*pTex, D3D12_RESOURCE_STATE_COPY_DEST);
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -2578,7 +2578,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
       UpdateSpoutInputTexture();
       if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
-        CompositeVideoInput(false, m_spoutInput->dx12InputTex, m_spoutInput->nSenderWidth, m_spoutInput->nSenderHeight);
+        CompositeVideoInputFX(false, m_spoutInput->dx12InputTex, m_spoutInput->nSenderWidth, m_spoutInput->nSenderHeight);
         m_lpDX->TransitionResource(m_spoutInput->dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
       }
     } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
@@ -2587,7 +2587,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       if (m_videoCapture && m_videoCapture->IsConnected()) {
         UpdateVideoCaptureTexture();
         if (m_videoCapture->m_dx12Tex.IsValid()) {
-          CompositeVideoInput(false, m_videoCapture->m_dx12Tex, m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
+          CompositeVideoInputFX(false, m_videoCapture->m_dx12Tex, m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
         }
       }
     }

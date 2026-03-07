@@ -633,6 +633,65 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WELCOME_BROWSE        9133  // Button: Browse for Resources
 #define IDC_MW_WELCOME_PATH          9134  // Static: current path display
 
+// Video Effects window (9200-9280)
+#define IDC_MW_VFX_PIN            9200
+#define IDC_MW_VFX_FONT_PLUS      9201
+#define IDC_MW_VFX_FONT_MINUS     9202
+#define IDC_MW_VFX_TAB            9203
+// Transform tab
+#define IDC_MW_VFX_POSX           9210
+#define IDC_MW_VFX_POSX_LBL      9211
+#define IDC_MW_VFX_POSY           9212
+#define IDC_MW_VFX_POSY_LBL      9213
+#define IDC_MW_VFX_SCALE          9214
+#define IDC_MW_VFX_SCALE_LBL     9215
+#define IDC_MW_VFX_ROTATION       9216
+#define IDC_MW_VFX_ROTATION_LBL  9217
+#define IDC_MW_VFX_MIRRORH        9218
+#define IDC_MW_VFX_MIRRORV        9219
+#define IDC_MW_VFX_BLENDMODE      9220
+#define IDC_MW_VFX_RESET_XFORM    9221
+// Effects tab
+#define IDC_MW_VFX_TINTR          9230
+#define IDC_MW_VFX_TINTR_LBL     9231
+#define IDC_MW_VFX_TINTG          9232
+#define IDC_MW_VFX_TINTG_LBL     9233
+#define IDC_MW_VFX_TINTB          9234
+#define IDC_MW_VFX_TINTB_LBL     9235
+#define IDC_MW_VFX_BRIGHTNESS     9236
+#define IDC_MW_VFX_BRIGHTNESS_LBL 9237
+#define IDC_MW_VFX_CONTRAST       9238
+#define IDC_MW_VFX_CONTRAST_LBL  9239
+#define IDC_MW_VFX_SATURATION     9240
+#define IDC_MW_VFX_SATURATION_LBL 9241
+#define IDC_MW_VFX_HUESHIFT       9242
+#define IDC_MW_VFX_HUESHIFT_LBL  9243
+#define IDC_MW_VFX_INVERT         9244
+#define IDC_MW_VFX_PIXELATION     9245
+#define IDC_MW_VFX_PIXELATION_LBL 9246
+#define IDC_MW_VFX_CHROMATIC      9247
+#define IDC_MW_VFX_CHROMATIC_LBL 9248
+#define IDC_MW_VFX_EDGEDETECT     9249
+#define IDC_MW_VFX_RESET_EFFECTS  9250
+// Audio tab
+#define IDC_MW_VFX_AR_POSX_SRC    9260
+#define IDC_MW_VFX_AR_POSX_INT    9261
+#define IDC_MW_VFX_AR_POSY_SRC    9262
+#define IDC_MW_VFX_AR_POSY_INT    9263
+#define IDC_MW_VFX_AR_SCALE_SRC   9264
+#define IDC_MW_VFX_AR_SCALE_INT   9265
+#define IDC_MW_VFX_AR_ROT_SRC     9266
+#define IDC_MW_VFX_AR_ROT_INT     9267
+#define IDC_MW_VFX_AR_BRIGHT_SRC  9268
+#define IDC_MW_VFX_AR_BRIGHT_INT  9269
+#define IDC_MW_VFX_AR_SAT_SRC     9270
+#define IDC_MW_VFX_AR_SAT_INT     9271
+#define IDC_MW_VFX_AR_CHROM_SRC   9272
+#define IDC_MW_VFX_AR_CHROM_INT   9273
+#define IDC_MW_VFX_RESET_AUDIO    9274
+// Open button on Displays window
+#define IDC_MW_OPEN_VFX           9280
+
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
 #define IDC_MW_OPEN_SPRITES       9081
