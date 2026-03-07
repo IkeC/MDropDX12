@@ -9,6 +9,12 @@
 - Added `ACTION=ApplyWorkspaceLayout` hotkey action to apply saved workspace layout with a single keypress
 - Workspace layout can now be triggered via script, hotkey binding, or Button Board action
 
+### Resources
+
+- Removed bundled presets and textures from repository — the exe self-bootstraps on first run
+- Added `docs/Resources.md` with links to recommended preset collections
+- Featured IkeC's [Milkwave preset collection](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) as the recommended starting point
+
 ### Bug Fixes
 
 - Fixed owner-draw checkboxes always reading as unchecked in ToolWindows (base class auto-toggle)

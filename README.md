@@ -28,7 +28,7 @@
 * HLSL variable shadowing fix for improved preset compatibility
 * 3D volume texture support (noisevol_lq/noisevol_hq)
 * Fallback texture search paths, Random Textures Directory, and resource viewer
-* Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
+* Self-bootstrapping exe — no bundled presets required (see [Resources Guide](docs/Resources.md) for preset collections)
 * Native webcam and video file input mixing (background/overlay compositing with luma key)
 * Shadertoy import: GLSL→HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
 * Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export

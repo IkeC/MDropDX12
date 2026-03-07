@@ -5,7 +5,7 @@
 - **OS**: Windows 10 64-bit or higher (Windows 11 recommended)
 - **GPU**: DirectX 12 compatible graphics card (dedicated GPU recommended; Intel UHD integrated graphics will work but may struggle with complex presets)
 - **Audio**: Any audio output device (speakers, headphones, virtual audio cable)
-- **Disk**: ~2 MB for base install (portable zip); add preset packs as needed
+- **Disk**: ~1.5 MB for base install (portable zip); add preset packs as needed (see [Resources Guide](Resources.md))
 
 No additional runtime libraries are required — the Visual C++ runtime is statically linked into the executable.
 
@@ -102,7 +102,7 @@ To add presets:
 
 You can also drag and drop `.milk` files or folders directly onto the visualizer window.
 
-Thousands of additional presets are available from the [projectM preset collection](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets).
+See the [Resources Guide](Resources.md) for recommended preset collections, including the excellent [Milkwave preset library](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) and [projectM presets](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets).
 
 ## Updating
 

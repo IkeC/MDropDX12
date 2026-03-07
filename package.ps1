@@ -61,16 +61,9 @@ foreach ($f in $configFiles) {
     }
 }
 
-# ── Copy resources (presets + textures) ───────────────────────────────────────
-$resSource = "Release\resources"
-if (Test-Path $resSource) {
-    $resDest = Join-Path $stageRoot "resources"
-    Copy-Item $resSource $resDest -Recurse
-} else {
-    Write-Warning "Release\resources not found - zip will not include presets/textures"
-}
-
 # ── Create empty directories that the app expects ─────────────────────────────
+# The exe self-bootstraps resources/presets/ and resources/textures/ on first run.
+# See docs/Resources.md for where to download presets and textures.
 @("capture", "cache") | ForEach-Object {
     New-Item -ItemType Directory -Path (Join-Path $stageRoot $_) -Force | Out-Null
 }
