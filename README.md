@@ -30,7 +30,11 @@
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Native webcam and video file input mixing (background/overlay compositing with luma key)
-* ToolWindow system — Settings, Displays, Song Info, Hotkeys, and MIDI windows run on their own threads with sticky positions and tab memory
+* Shadertoy import: GLSL→HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
+* Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
+* Video Effects window with transform, color, and audio-reactive controls; VFX JSON profiles
+* Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
+* ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, and Workspace Layout windows run on their own threads with sticky positions and tab memory
 * Improved window handling, input methods and stability
 * Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, shader conversion, wave manipulation, and more)
 
@@ -159,7 +163,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 * Windows 10 64-bit or higher (Windows 11 recommended)
 * DirectX 12 compatible GPU
-* [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+* No additional runtime libraries required (VC++ runtime is statically linked)
 * [Milkwave](https://github.com/IkeC/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
 ## Installation
