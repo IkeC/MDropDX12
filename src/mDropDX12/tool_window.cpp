@@ -748,9 +748,8 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
-    // Owner-draw BN_CLICKED: auto-toggle checkbox state.
-    // Checkboxes are toggled here so subclasses don't need to.
-    // Radio groups are NOT toggled here — subclasses must handle group logic.
+    // Owner-draw BN_CLICKED: auto-toggle checkbox and radio state.
+    // Checkboxes and radio groups are toggled here so subclasses don't need to.
     if (code == BN_CLICKED) {
       HWND hCtrl = (HWND)lParam;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
@@ -758,6 +757,20 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
         SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
         InvalidateRect(hCtrl, NULL, TRUE);
+      }
+
+      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
+      if (bIsRadio) {
+        int group = (int)(intptr_t)GetPropW(hCtrl, L"RadioGroup");
+        if (group != 0) {
+          for (HWND hChild : tw->m_childCtrls) {
+            if ((bool)(intptr_t)GetPropW(hChild, L"IsRadio") &&
+                (int)(intptr_t)GetPropW(hChild, L"RadioGroup") == group) {
+              SetPropW(hChild, L"Checked", (HANDLE)(intptr_t)(hChild == hCtrl ? 1 : 0));
+              InvalidateRect(hChild, NULL, TRUE);
+            }
+          }
+        }
       }
     }
 

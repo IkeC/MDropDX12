@@ -39,8 +39,8 @@ In `engine_helpers.h`, add unique IDs for your window's controls:
 #define IDC_MW_MYWIN_FONT_PLUS    9401
 #define IDC_MW_MYWIN_FONT_MINUS   9402
 #define IDC_MW_MYWIN_MY_CHECK     9403
-#define IDC_MW_MYWIN_MY_RADIO_A   9404
-#define IDC_MW_MYWIN_MY_RADIO_B   9405
+#define IDC_MW_MYWIN_MY_RADIO_A   9404  // radioGroup = IDC_MW_MYWIN_MY_RADIO_A
+#define IDC_MW_MYWIN_MY_RADIO_B   9405  // radioGroup = IDC_MW_MYWIN_MY_RADIO_A
 #define IDC_MW_MYWIN_MY_BUTTON    9406
 ```
 
@@ -173,7 +173,7 @@ All helpers are global functions in `engine.cpp` (namespace `mdrop`). All create
 |--------|-----------|
 | `CreateLabel` | `(HWND parent, const wchar_t* text, int x, int y, int w, int h, HFONT, bool visible=true)` — No ID (static text) |
 | `CreateCheck` | `(HWND parent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT, bool checked, bool visible=true)` |
-| `CreateRadio` | `(HWND parent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT, bool checked, bool firstInGroup, bool visible=true)` |
+| `CreateRadio` | `(HWND parent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT, bool checked, bool firstInGroup, bool visible=true, int radioGroup=0)` |
 | `CreateBtn` | `(HWND parent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT, bool visible=true)` |
 | `CreateSlider` | `(HWND parent, int id, int x, int y, int w, int h, int min, int max, int pos, bool visible=true)` |
 | `CreateEdit` | `(HWND parent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT, DWORD extraStyle=0, bool visible=true)` |
@@ -212,41 +212,41 @@ case IDC_MY_CHECKBOX:
 
 You do **not** need to toggle checkboxes yourself.
 
-### Radio Groups: Subclass Must Handle
+### Radio Groups: Auto-toggled via `radioGroup` Parameter
 
-Radio buttons are NOT auto-toggled because the base class doesn't know which radios belong to the same group. Toggle them in `DoCommand()`:
+Pass a non-zero `radioGroup` ID to `CreateRadio()` to enable auto-toggle. All radios with the same `radioGroup` value form a group — when one is clicked, the base class unchecks all others in the group.
+
+Use the first control ID in the group as the group identifier (natural, unique, self-documenting):
 
 ```cpp
-LRESULT MyWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
-    if (code != BN_CLICKED) return -1;
-
-    // Toggle radio group
-    HWND hCtrl = (HWND)lParam;
-    bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-    if (bIsRadio) {
-        static const int groupIDs[] = { IDC_MY_RADIO_A, IDC_MY_RADIO_B, IDC_MY_RADIO_C };
-        for (int rid : groupIDs) {
-            if (rid == id) {
-                for (int gid : groupIDs) {
-                    HWND hR = GetDlgItem(hWnd, gid);
-                    if (hR) {
-                        SetPropW(hR, L"Checked", (HANDLE)(intptr_t)(gid == id ? 1 : 0));
-                        InvalidateRect(hR, NULL, TRUE);
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    // Handle the selection
-    switch (id) {
-    case IDC_MY_RADIO_A: /* ... */ return 0;
-    case IDC_MY_RADIO_B: /* ... */ return 0;
-    }
-    return -1;
+void MyWindow::DoBuildControls() {
+    // ...
+    // Three radios in one group — use IDC_MY_RADIO_A as the group ID
+    TrackControl(CreateRadio(hw, L"Option A", IDC_MY_RADIO_A, x, y, w, lineH, hFont,
+        true, true, true, IDC_MY_RADIO_A));
+    y += lineH + 2;
+    TrackControl(CreateRadio(hw, L"Option B", IDC_MY_RADIO_B, x, y, w, lineH, hFont,
+        false, false, true, IDC_MY_RADIO_A));
+    y += lineH + 2;
+    TrackControl(CreateRadio(hw, L"Option C", IDC_MY_RADIO_C, x, y, w, lineH, hFont,
+        false, false, true, IDC_MY_RADIO_A));
 }
 ```
+
+In `DoCommand()`, just read the state — no toggle code needed:
+
+```cpp
+case IDC_MY_RADIO_A:
+case IDC_MY_RADIO_B:
+case IDC_MY_RADIO_C:
+    // Radio group already toggled by base class — just act on the selection
+    if (IsChecked(IDC_MY_RADIO_A)) m_pEngine->SetMode(MODE_A);
+    else if (IsChecked(IDC_MY_RADIO_B)) m_pEngine->SetMode(MODE_B);
+    else m_pEngine->SetMode(MODE_C);
+    return 0;
+```
+
+**Note**: `radioGroup=0` (the default) means no auto-toggle. This is used for radios in non-ToolWindow dialogs (e.g., standalone modal `WndProc`).
 
 ## BuildBaseControls and BaseLayout
 
@@ -359,9 +359,9 @@ For dark theme support. Standard Win32 buttons/checkboxes cannot be custom-paint
 
 Win32 `GetDlgItem(hwnd, id)` identifies controls by integer ID within a single window. The base class WndProc compares `id == GetPinControlID()` to handle the pin button. If two windows shared the same ID, there would be no ambiguity (different HWNDs), but the virtual method pattern allows the base class to dispatch correctly without knowing the concrete subclass. Each window's IDs are defined in `engine_helpers.h` in a reserved range.
 
-### Why doesn't the base class auto-toggle radio groups?
+### How does radio group auto-toggle work?
 
-Radio groups vary per subclass — some windows have 1 group, some have 3, some have none. The base class has no way to know which radio buttons belong together. Auto-toggling checkboxes is safe because every checkbox toggles independently. Radio groups require domain knowledge (which IDs form a group), so the subclass handles it.
+Each `CreateRadio()` call can take an optional `radioGroup` parameter. The base class stores this as a `"RadioGroup"` window property. When a radio is clicked, the base `WndProc` finds all tracked controls (`m_childCtrls`) with the same `RadioGroup` value and unchecks them, then checks the clicked one. Use `radioGroup=0` (the default) to opt out of auto-toggle for non-ToolWindow contexts.
 
 ### How does font sync work?
 

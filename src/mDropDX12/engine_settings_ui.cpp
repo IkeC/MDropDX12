@@ -1441,64 +1441,39 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // (IDC_MW_SETTINGS_PIN handled by BaseWndProc)
 
-    // Checkbox toggles — save immediately
-    // Owner-drawn checkboxes: toggle the "Checked" property on click
+    // Checkbox and radio state is auto-toggled by the base class before DoCommand.
     if (code == BN_CLICKED) {
       HWND hCtrl = (HWND)lParam;
-      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
-      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-      bool bChecked;
-      if (bIsRadio) {
-        // Helper: toggle visual state for a radio group
-        auto toggleGroup = [&](const int* ids, int count) {
-          for (int i = 0; i < count; i++) {
-            HWND hSib = GetDlgItem(hWnd, ids[i]);
-            if (hSib) {
-              SetPropW(hSib, L"Checked", (HANDLE)(intptr_t)(hSib == hCtrl ? 1 : 0));
-              InvalidateRect(hSib, NULL, TRUE);
-            }
-          }
-        };
-
-        // Log level radios: handle entirely here
-        static const int logRadioIDs[] = { IDC_MW_LOGLEVEL_OFF, IDC_MW_LOGLEVEL_ERROR, IDC_MW_LOGLEVEL_WARN, IDC_MW_LOGLEVEL_INFO, IDC_MW_LOGLEVEL_VERBOSE };
-        bool isLogLevel = false;
-        for (int rid : logRadioIDs) if (rid == id) { isLogLevel = true; break; }
-        if (isLogLevel) {
-          toggleGroup(logRadioIDs, _countof(logRadioIDs));
-          int newLevel = 0;
-          switch (id) {
-            case IDC_MW_LOGLEVEL_OFF:     newLevel = 0; break;
-            case IDC_MW_LOGLEVEL_ERROR:   newLevel = 1; break;
-            case IDC_MW_LOGLEVEL_WARN:    newLevel = 2; break;
-            case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
-            case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
-          }
-          // When enabling logging from Off, auto-enable both output destinations
-          if (p->m_LogLevel == 0 && newLevel > 0) {
-            p->m_LogOutput = LOG_OUTPUT_BOTH;
-            DebugLogSetOutput(p->m_LogOutput);
-            WritePrivateProfileIntW(p->m_LogOutput, L"LogOutput", p->GetConfigIniFile(), L"Milkwave");
-            // Update checkbox visuals
-            HWND hwFile = GetDlgItem(GetParent(hCtrl), IDC_MW_LOGOUTPUT_FILE);
-            HWND hwODS  = GetDlgItem(GetParent(hCtrl), IDC_MW_LOGOUTPUT_ODS);
-            if (hwFile) { SetPropW(hwFile, L"Checked", (HANDLE)(intptr_t)1); InvalidateRect(hwFile, NULL, TRUE); }
-            if (hwODS)  { SetPropW(hwODS,  L"Checked", (HANDLE)(intptr_t)1); InvalidateRect(hwODS,  NULL, TRUE); }
-          }
-          p->m_LogLevel = newLevel;
-          DebugLogSetLevel(newLevel);
-          WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
-          return 0;
-        }
-
-        bChecked = true; // radio is always "checked" when clicked
-      } else if (bIsCheckbox) {
-        bChecked = IsChecked(id); // base class already toggled checkbox state
-      } else {
-        bChecked = false; // not a checkbox, but let BN_CLICKED handling proceed
-      }
+      bool bChecked = IsChecked(id);
       HWND hw = p->GetPluginWindow();
       switch (id) {
+      case IDC_MW_LOGLEVEL_OFF:
+      case IDC_MW_LOGLEVEL_ERROR:
+      case IDC_MW_LOGLEVEL_WARN:
+      case IDC_MW_LOGLEVEL_INFO:
+      case IDC_MW_LOGLEVEL_VERBOSE:
+      {
+        int newLevel = 0;
+        switch (id) {
+          case IDC_MW_LOGLEVEL_OFF:     newLevel = 0; break;
+          case IDC_MW_LOGLEVEL_ERROR:   newLevel = 1; break;
+          case IDC_MW_LOGLEVEL_WARN:    newLevel = 2; break;
+          case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
+          case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
+        }
+        // When enabling logging from Off, auto-enable both output destinations
+        if (p->m_LogLevel == 0 && newLevel > 0) {
+          p->m_LogOutput = LOG_OUTPUT_BOTH;
+          DebugLogSetOutput(p->m_LogOutput);
+          WritePrivateProfileIntW(p->m_LogOutput, L"LogOutput", p->GetConfigIniFile(), L"Milkwave");
+          SetChecked(IDC_MW_LOGOUTPUT_FILE, true);
+          SetChecked(IDC_MW_LOGOUTPUT_ODS, true);
+        }
+        p->m_LogLevel = newLevel;
+        DebugLogSetLevel(newLevel);
+        WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      }
       case IDC_MW_LOGOUTPUT_FILE:
       case IDC_MW_LOGOUTPUT_ODS:
       {
@@ -2866,15 +2841,15 @@ void SettingsWindow::DoBuildControls() {
   {
     int rx = x + lw + 4;
     int rbw = 80;
-    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false, IDC_MW_LOGLEVEL_OFF));
     rx += rbw;
-    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false, IDC_MW_LOGLEVEL_OFF));
     rx += rbw;
-    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false, IDC_MW_LOGLEVEL_OFF));
     rx += rbw;
-    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false, IDC_MW_LOGLEVEL_OFF));
     rx += rbw;
-    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
+    PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false, IDC_MW_LOGLEVEL_OFF));
   }
   y += lineH + 4;
 

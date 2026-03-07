@@ -215,16 +215,16 @@ void WorkspaceLayoutWindow::DoBuildControls() {
 
     // Mode radios (separate group from corner radios)
     TrackControl(CreateRadio(hw, L"Corner of work display",
-        IDC_MW_WSLAYOUT_MODE_CORNER, x + 8, y, w - 16, lineH, hFont, true, true));
+        IDC_MW_WSLAYOUT_MODE_CORNER, x + 8, y, w - 16, lineH, hFont, true, true, true, IDC_MW_WSLAYOUT_MODE_CORNER));
     y += lineH + 2;
 
     // Corner sub-options (indented)
     int rbw = (w - 40) / 2;
-    TrackControl(CreateRadio(hw, L"Top-Left",     IDC_MW_WSLAYOUT_CORNER_TL, x + 24,          y, rbw, lineH, hFont, false, true));
-    TrackControl(CreateRadio(hw, L"Top-Right",    IDC_MW_WSLAYOUT_CORNER_TR, x + 24 + rbw + 8, y, rbw, lineH, hFont, true, false));
+    TrackControl(CreateRadio(hw, L"Top-Left",     IDC_MW_WSLAYOUT_CORNER_TL, x + 24,          y, rbw, lineH, hFont, false, true,  true, IDC_MW_WSLAYOUT_CORNER_TL));
+    TrackControl(CreateRadio(hw, L"Top-Right",    IDC_MW_WSLAYOUT_CORNER_TR, x + 24 + rbw + 8, y, rbw, lineH, hFont, true,  false, true, IDC_MW_WSLAYOUT_CORNER_TL));
     y += lineH + 2;
-    TrackControl(CreateRadio(hw, L"Bottom-Left",  IDC_MW_WSLAYOUT_CORNER_BL, x + 24,          y, rbw, lineH, hFont, false, false));
-    TrackControl(CreateRadio(hw, L"Bottom-Right", IDC_MW_WSLAYOUT_CORNER_BR, x + 24 + rbw + 8, y, rbw, lineH, hFont, false, false));
+    TrackControl(CreateRadio(hw, L"Bottom-Left",  IDC_MW_WSLAYOUT_CORNER_BL, x + 24,          y, rbw, lineH, hFont, false, false, true, IDC_MW_WSLAYOUT_CORNER_TL));
+    TrackControl(CreateRadio(hw, L"Bottom-Right", IDC_MW_WSLAYOUT_CORNER_BR, x + 24 + rbw + 8, y, rbw, lineH, hFont, false, false, true, IDC_MW_WSLAYOUT_CORNER_TL));
     y += lineH + 4;
 
     // Size slider (indented)
@@ -238,7 +238,7 @@ void WorkspaceLayoutWindow::DoBuildControls() {
 
     // Fullscreen on separate display mode
     TrackControl(CreateRadio(hw, L"Fullscreen on separate display",
-        IDC_MW_WSLAYOUT_MODE_DISPLAY, x + 8, y, w - 16, lineH, hFont, false, false));
+        IDC_MW_WSLAYOUT_MODE_DISPLAY, x + 8, y, w - 16, lineH, hFont, false, false, true, IDC_MW_WSLAYOUT_MODE_CORNER));
     y += lineH + 4;
 
     // Display combo (indented)
@@ -543,34 +543,7 @@ void WorkspaceLayoutWindow::ResetDefaults() {
 LRESULT WorkspaceLayoutWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     if (code != BN_CLICKED) return -1;
 
-    // Checkbox state is auto-toggled by base class. Handle radio groups here.
-    HWND hCtrl = (HWND)lParam;
-    bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-    if (bIsRadio) {
-        // Mode radio group
-        static const int modeRadioIDs[] = { IDC_MW_WSLAYOUT_MODE_CORNER, IDC_MW_WSLAYOUT_MODE_DISPLAY };
-        for (int rid : modeRadioIDs) {
-            if (rid == id) {
-                for (int gid : modeRadioIDs) {
-                    HWND hR = GetDlgItem(hWnd, gid);
-                    if (hR) { SetPropW(hR, L"Checked", (HANDLE)(intptr_t)(gid == id ? 1 : 0)); InvalidateRect(hR, NULL, TRUE); }
-                }
-                break;
-            }
-        }
-        // Corner radio group
-        static const int cornerRadioIDs[] = { IDC_MW_WSLAYOUT_CORNER_TL, IDC_MW_WSLAYOUT_CORNER_TR,
-                                               IDC_MW_WSLAYOUT_CORNER_BL, IDC_MW_WSLAYOUT_CORNER_BR };
-        for (int rid : cornerRadioIDs) {
-            if (rid == id) {
-                for (int gid : cornerRadioIDs) {
-                    HWND hR = GetDlgItem(hWnd, gid);
-                    if (hR) { SetPropW(hR, L"Checked", (HANDLE)(intptr_t)(gid == id ? 1 : 0)); InvalidateRect(hR, NULL, TRUE); }
-                }
-                break;
-            }
-        }
-    }
+    // Checkbox and radio state is auto-toggled by the base class before DoCommand.
 
     // ── Action buttons ──
     switch (id) {

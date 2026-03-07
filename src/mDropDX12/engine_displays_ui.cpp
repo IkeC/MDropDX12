@@ -284,8 +284,8 @@ void DisplaysWindow::BuildVideoInputPage(int x, int y, int rw, int lineH, int ga
     int layLbl = MulDiv(50, lineH, 26);
     int radioW = MulDiv(110, lineH, 26);
     PAGE_TC(1, CreateLabel(hw, L"Layer:", x, y, layLbl, lineH, hFont));
-    PAGE_TC(1, CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !p->m_bSpoutInputOnTop, true));
-    PAGE_TC(1, CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, p->m_bSpoutInputOnTop));
+    PAGE_TC(1, CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !p->m_bSpoutInputOnTop, true, true, IDC_MW_SPINPUT_LAYER_BG));
+    PAGE_TC(1, CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, p->m_bSpoutInputOnTop, false, true, IDC_MW_SPINPUT_LAYER_BG));
     if (!active) {
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_BG), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_OV), FALSE);
@@ -404,32 +404,9 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   HWND hw = p->GetPluginWindow();  // render window for PostMessage
 
   // ── Owner-draw BN_CLICKED handling ──
-  // Note: checkbox state is auto-toggled by the base class before DoCommand is called.
-  // Radio groups must still be toggled manually here.
+  // Checkbox and radio state is auto-toggled by the base class before DoCommand.
   if (code == BN_CLICKED) {
-    HWND hCtrl = (HWND)lParam;
-    bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-    bool bChecked = false;
-
-    if (bIsRadio) {
-      // Toggle radio group for layer radios
-      static const int layerRadioIDs[] = { IDC_MW_SPINPUT_LAYER_BG, IDC_MW_SPINPUT_LAYER_OV };
-      for (int rid : layerRadioIDs) {
-        if (rid == id) {
-          for (int gid : layerRadioIDs) {
-            HWND hR = GetDlgItem(hWnd, gid);
-            if (hR) {
-              SetPropW(hR, L"Checked", (HANDLE)(intptr_t)(gid == id ? 1 : 0));
-              InvalidateRect(hR, NULL, TRUE);
-            }
-          }
-          break;
-        }
-      }
-      bChecked = true;
-    } else {
-      bChecked = IsChecked(id); // base already toggled checkbox
-    }
+    bool bChecked = IsChecked(id);
 
     switch (id) {
     // ── Display Outputs checkboxes ──

@@ -3819,7 +3819,7 @@ void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORRE
   }
 }
 
-HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup, bool visible) {
+HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup, bool visible, int radioGroup) {
   DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | (visible ? WS_VISIBLE : 0);
   if (firstInGroup) style |= WS_GROUP;
   HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
@@ -3828,6 +3828,8 @@ HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w,
     if (hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
     SetPropW(hw, L"IsRadio", (HANDLE)(intptr_t)1);
     SetPropW(hw, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
+    if (radioGroup != 0)
+      SetPropW(hw, L"RadioGroup", (HANDLE)(intptr_t)radioGroup);
   }
   return hw;
 }
