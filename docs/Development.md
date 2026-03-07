@@ -68,11 +68,12 @@ winget install VSCodium.VSCodium
 
 Or download from [vscodium.com](https://vscodium.com/).
 
-After installing, open VSCodium and install the **C/C++** extension:
+After installing, open VSCodium and install a C/C++ extension:
 
 1. Open the Extensions panel (Ctrl+Shift+X)
-2. Search for `C/C++` by Microsoft
-3. Install the `ms-vscode.cpptools` extension from Open VSX
+2. Search for `clangd` and install `llvm-vs-code-extensions.vscode-clangd`
+
+> **Note:** The Microsoft `ms-vscode.cpptools` extension is not available on Open VSX (VSCodium's default registry). The `clangd` extension provides equivalent IntelliSense and navigation.
 
 ## Clone the Repository
 
