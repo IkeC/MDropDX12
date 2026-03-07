@@ -213,6 +213,30 @@ float4 texsize_noise_hq;
 float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
+// Shadertoy-compatible noise textures (uniform white noise, no interpolation, fixed seed):
+sampler2D sampler_noise_lq_st;
+sampler2D sampler_noise_mq_st;
+sampler2D sampler_noise_hq_st;
+sampler3D sampler_noisevol_lq_st;
+sampler3D sampler_noisevol_hq_st;
+
+// user/random disk textures (auto-assigned, used by Shadertoy channel mapping):
+sampler2D sampler_rand00;
+sampler2D sampler_rand01;
+sampler2D sampler_rand02;
+sampler2D sampler_rand03;
+
+// feedback buffer for Shadertoy temporal reprojection (comp shader reads own previous output):
+// Explicit register required — without it, the compiler merges sampler_feedback with sampler_main
+// (same sampler state) and the SRV never appears in reflection, so CacheParams can't detect it.
+sampler2D sampler_feedback : register(s14);
+// Image self-feedback (Image pass reads own previous frame output):
+sampler2D sampler_image : register(s15);
+// Buffer B output (second Shadertoy compute buffer):
+sampler2D sampler_bufferB : register(s9);
+// Audio texture (512x2: row 0 = FFT spectrum, row 1 = PCM waveform):
+sampler2D sampler_audio : register(s10);
+
 // procedural blur textures:
 sampler2D sampler_blur1 : register(s11);
 sampler2D sampler_blur2 : register(s12);

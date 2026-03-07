@@ -91,11 +91,16 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #define MAX_RAND_TEX 16
   std::wstring RandTexName[MAX_RAND_TEX];
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: CacheParams: %u constants", d.Constants);
-    DebugLogA(dbg, LOG_VERBOSE);
+  // Diagnostic file for Shadertoy sampler debugging (Verbose only)
+  FILE* fpDiag = nullptr;
+  if (DLOG_DIAG_ENABLED() && (g_engine.m_bLoadingShadertoyMode || g_engine.m_bShadertoyMode)) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", g_engine.m_szBaseDir);
+    _wfopen_s(&fpDiag, diagPath, L"a");
+    if (fpDiag) fprintf(fpDiag, "=== CacheParams: %u constants ===\n", d.Constants);
   }
+
+  DLOG_VERBOSE("DX12: CacheParams: %u constants", d.Constants);
 
   // pass 1: find all the samplers (and texture bindings).
   for (UINT i = 0; i < d.Constants; i++) {
@@ -103,11 +108,8 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
 
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    if (fpDiag) fprintf(fpDiag, "  [%u] Name=%s RegSet=%d RegIdx=%d Type=%d\n", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex, cd.Type);
+    DLOG_VERBOSE("DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
 
     // cd.Name          = VS_Sampler
     // cd.RegisterSet   = D3DXRS_SAMPLER
@@ -162,6 +164,38 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
       if (!wcscmp(L"main", szRootName)) {
         m_texture_bindings[cd.RegisterIndex].texptr = NULL;
         m_texcode[cd.RegisterIndex] = TEX_VS;
+      }
+      else if (!wcscmp(L"feedback", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_FEEDBACK;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP for feedback
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
+      else if (!wcscmp(L"image", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_IMAGE_FEEDBACK;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
+      else if (!wcscmp(L"audio", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_AUDIO;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
+      else if (!wcscmp(L"bufferB", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_BUFFER_B;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP for feedback
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
       }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
@@ -223,6 +257,33 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
         }
       }
 #endif
+      else if (!wcsncmp(L"chtex", szRootName, 5) &&
+               szRootName[5] >= L'0' && szRootName[5] <= L'3' && szRootName[6] == 0) {
+        // Custom channel texture from Shader Import UI (sampler_chtex0..3)
+        int chIdx = szRootName[5] - L'0';
+        m_texcode[cd.RegisterIndex] = TEX_DISK;
+        if (g_engine.m_dx12ChannelTex[chIdx].IsValid()) {
+          m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = g_engine.m_dx12ChannelTex[chIdx].srvIndex;
+          m_texture_bindings[cd.RegisterIndex].bWrap = true;
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+          DLOG_INFO("CacheParams: sampler_chtex%d → loaded texture (srv=%u)",
+            chIdx, g_engine.m_dx12ChannelTex[chIdx].srvIndex);
+        } else if (!g_engine.m_szChannelTexPath[chIdx].empty()) {
+          // Load the texture file now
+          DX12Texture tex = g_engine.m_lpDX->LoadTextureFromFile(g_engine.m_szChannelTexPath[chIdx].c_str());
+          if (tex.IsValid()) {
+            g_engine.m_dx12ChannelTex[chIdx] = tex;
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = tex.srvIndex;
+            m_texture_bindings[cd.RegisterIndex].bWrap = true;
+            m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+            DLOG_INFO("CacheParams: sampler_chtex%d → loaded '%ls' (srv=%u)",
+              chIdx, g_engine.m_szChannelTexPath[chIdx].c_str(), tex.srvIndex);
+          } else {
+            DLOG_WARN("CacheParams: sampler_chtex%d → FAILED to load '%ls'",
+              chIdx, g_engine.m_szChannelTexPath[chIdx].c_str());
+          }
+        }
+      }
       else {
         m_texcode[cd.RegisterIndex] = TEX_DISK;
 
@@ -289,7 +350,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           {
             static const wchar_t* kBuiltinNoise[] = {
                 L"noise_lq", L"noise_lq_lite", L"noise_mq", L"noise_hq",
-                L"noisevol_lq", L"noisevol_hq", nullptr
+                L"noisevol_lq", L"noisevol_hq",
+                L"noise_lq_st", L"noise_mq_st", L"noise_hq_st",
+                L"noisevol_lq_st", L"noisevol_hq_st", nullptr
             };
             bool bBuiltin = false;
             for (int k = 0; kBuiltinNoise[k]; k++)
@@ -302,11 +365,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             // DX12 path: load via WIC
             wchar_t szFilename[MAX_PATH];
             bool found = false;
-            {
-              char dbg[512];
-              sprintf(dbg, "CacheParams: searching for texture '%ls'", szRootName);
-              DebugLogA(dbg, LOG_VERBOSE);
-            }
+            DLOG_VERBOSE("CacheParams: searching for texture '%ls'", szRootName);
             for (int z = 0; z < texture_exts_count; z++) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_engine.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
@@ -353,9 +412,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 x.nAge = g_engine.m_nPresetsLoadedTotal;
                 x.nSizeInBytes = x.w * x.h * 4 + 16384;
                 found = true;
-                char dbg[512];
-                sprintf(dbg, "CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
-                DebugLogA(dbg, LOG_VERBOSE);
+                DLOG_VERBOSE("CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
                 break;
               }
               // WIC couldn't decode this format (e.g. .dds) — try next extension
@@ -365,13 +422,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
               g_engine.dumpmsg(buf, LOG_WARN);
-              {
-                char dbg[512];
-                sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
+              DLOG_VERBOSE("CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
                         szRootName, g_engine.m_szMilkdrop2Path, g_engine.m_szPresetDir,
                         (int)g_engine.m_fallbackPaths.size());
-                DebugLogA(dbg, LOG_VERBOSE);
-              }
               if (bHardErrors)
                 MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
@@ -479,11 +532,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
 
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: CacheParams pass2: [%u] Name=%s RegSet=%d Class=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.Class);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    DLOG_VERBOSE("DX12: CacheParams pass2: [%u] Name=%s RegSet=%d Class=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.Class);
 
     if (cd.RegisterSet == D3DXRS_FLOAT4) {
       if (cd.Class == D3DXPC_MATRIX_COLUMNS) {
@@ -583,6 +632,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     }
   }
 
+  if (fpDiag) {
+    fprintf(fpDiag, "  Result texcodes:");
+    for (int i = 0; i < 16; i++) {
+      if (m_texcode[i] != 0 || m_texture_bindings[i].dx12SrvIndex != UINT_MAX)
+        fprintf(fpDiag, " [%d]=%d(srv=%u)", i, m_texcode[i], m_texture_bindings[i].dx12SrvIndex);
+    }
+    fprintf(fpDiag, "\n---\n");
+    fclose(fpDiag);
+  }
   DebugLogA("DX12: CacheParams: pass 2 done, returning", LOG_VERBOSE);
 }
 
@@ -592,10 +650,7 @@ bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int sh
   si->Clear();
 
   char ver[16];
-  if (m_IsAMD)
-    lstrcpy(ver, "vs_3_0");
-  else
-    lstrcpy(ver, "vs_1_1");
+  lstrcpy(ver, "vs_1_1");
 
   // LOAD SHADER
   if (!LoadShaderFromMemory(szShadersText, "VS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, nullptr))
@@ -610,7 +665,7 @@ bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int sh
   return true;
 }
 
-bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly) {
+bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly, const char* szDiagName) {
   assert(m_nMaxPSVersion > 0);
 
   si->Clear();
@@ -632,10 +687,11 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   case MD2_PS_2_X: lstrcpy(ver, "ps_2_a"); break; // we'll try ps_2_a first, LoadShaderFromMemory will try ps_2_b if compilation fails
   case MD2_PS_3_0: lstrcpy(ver, "ps_3_0"); break;
   case MD2_PS_4_0: lstrcpy(ver, "ps_4_0"); break;
+  case MD2_PS_5_0: lstrcpy(ver, "ps_5_0"); break;
   default: assert(0); break;
   }
 
-  if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob)) {
+  if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob, szDiagName)) {
     DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory FAILED", LOG_ERROR);
     return false;
   }
@@ -653,26 +709,26 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
 }
 
 bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
+  // Truncate diagnostic file at start of each shader load (Verbose only)
+  if (DLOG_DIAG_ENABLED() && m_bLoadingShadertoyMode && !bCompileOnly) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"w");
+    if (fp) fclose(fp);
+  }
   if (m_nMaxPSVersion <= 0) {
     DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping", LOG_VERBOSE);
     return true;
   }
 
   // load one of the pixel shaders
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaders: warp.ptr=%p warp.CT=%p nWarpPSVersion=%d nMaxPS=%d",
+  DLOG_VERBOSE("DX12: LoadShaders: warp.ptr=%p warp.CT=%p nWarpPSVersion=%d nMaxPS=%d",
             (void*)sh->warp.ptr, (void*)sh->warp.CT, pState->m_nWarpPSVersion, m_nMaxPSVersion);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
   if (!sh->warp.ptr && !sh->warp.CT && pState->m_nWarpPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szWarpShadersText, &sh->warp, SHADER_WARP, false, pState->m_nWarpPSVersion, bCompileOnly);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaders warp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
+    DLOG_VERBOSE("DX12: LoadShaders warp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->warp.bytecodeBlob, (void*)sh->warp.CT, (void*)sh->warp.ptr);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
     if (!bOK) {
       // switch to fallback shader
       if (m_fallbackShaders_ps.warp.ptr) m_fallbackShaders_ps.warp.ptr->AddRef();
@@ -685,20 +741,25 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       return true;
   }
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaders: comp.ptr=%p comp.CT=%p nCompPSVersion=%d",
-            (void*)sh->comp.ptr, (void*)sh->comp.CT, pState->m_nCompPSVersion);
-    DebugLogA(dbg, LOG_VERBOSE);
+  // Buffer A shader (Shadertoy two-pass) — each pass writes its own diag files directly
+  // NOTE: Do NOT set m_bHasBufferA/B or m_bCompUsesFeedback here — this may run on a
+  // background thread. Those flags are derived in LoadPresetTick after the shader swap.
+  if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly, "bufferA");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
   }
+
+  // Buffer B shader (Shadertoy three-pass)
+  if (!sh->bufferB.ptr && !sh->bufferB.CT && pState->m_nBufferBPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferBShadersText, &sh->bufferB, SHADER_COMP, false, pState->m_nBufferBPSVersion, bCompileOnly, "bufferB");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferB: compiled OK" : "DX12: LoadShaders bufferB: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+  }
+
+  // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaders comp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
+    DLOG_VERBOSE("DX12: LoadShaders comp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->comp.bytecodeBlob, (void*)sh->comp.CT, (void*)sh->comp.ptr);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
     if (!bOK) {
       // switch to fallback shader
       if (m_fallbackShaders_ps.comp.ptr) m_fallbackShaders_ps.comp.ptr->AddRef();
@@ -714,6 +775,11 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
 void Engine::CreateDX12PresetPSOs() {
   if (!m_lpDX || !m_lpDX->m_device.Get() || !m_lpDX->m_rootSignature.Get())
     return;
+
+  // Wait for GPU to finish all in-flight command lists before releasing old PSOs.
+  // Without this, the GPU may still be executing a previous frame's command list
+  // that references the old PSOs — releasing them causes use-after-free / TDR.
+  m_lpDX->WaitForGpu();
 
   ID3D12Device* device = m_lpDX->m_device.Get();
   ID3D12RootSignature* rootSig = m_lpDX->m_rootSignature.Get();
@@ -734,11 +800,20 @@ void Engine::CreateDX12PresetPSOs() {
   }
 
   // Create comp PSO from current shader bytecode
+  // In Shadertoy mode (.milk3): comp/Image always writes to UNORM backbuffer.
+  // In MilkDrop mode with single-pass feedback: comp writes to FLOAT32 feedback buffer.
+  DXGI_FORMAT compRtvFormat;
+  if (m_bShadertoyMode)
+    compRtvFormat = rtvFormat;  // backbuffer UNORM
+  else if (m_bCompUsesFeedback && !m_bHasBufferA)
+    compRtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  else
+    compRtvFormat = rtvFormat;
   m_dx12CompPSO.Reset();
   m_compMainTexSlot = 0;
   if (m_shaders.comp.bytecodeBlob && g_pCompVSBlob) {
     m_dx12CompPSO = DX12CreatePresetPSO(
-      device, rootSig, rtvFormat,
+      device, rootSig, compRtvFormat,
       g_pCompVSBlob,
       m_shaders.comp.bytecodeBlob->GetBufferPointer(),
       (UINT)m_shaders.comp.bytecodeBlob->GetBufferSize(),
@@ -747,13 +822,184 @@ void Engine::CreateDX12PresetPSOs() {
     if (m_compMainTexSlot == UINT_MAX) m_compMainTexSlot = 0;
   }
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
-    DebugLogA(dbg, LOG_VERBOSE);
-    sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
-    DebugLogA(dbg, LOG_VERBOSE);
+  // Create Buffer A PSO — always renders to FLOAT32 feedback buffer (Shadertoy uses float32)
+  DXGI_FORMAT feedbackRtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  m_dx12BufferAPSO.Reset();
+  if (m_shaders.bufferA.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferAPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferA.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferA.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
   }
+
+  // Create Buffer B PSO — same FLOAT32 feedback format as Buffer A
+  m_dx12BufferBPSO.Reset();
+  if (m_shaders.bufferB.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferBPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferB.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferB.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
+  DLOG_VERBOSE("DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
+  DLOG_VERBOSE("DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
+  if (m_dx12BufferAPSO)
+    DebugLogA("DX12: Preset bufferA PSO: OK");
+  if (m_dx12BufferBPSO)
+    DebugLogA("DX12: Preset bufferB PSO: OK");
+}
+
+// Preprocessor: fix matrix * vector multiplication.
+// HLSL requires mul() for matrix-vector multiply; the * operator causes X3020 type mismatch.
+// Finds variables declared as float2x2/float3x3/float4x4 and wraps their * operations.
+static void FixMatrixVarMultiply(char* szShaderText) {
+  auto isIdent = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  // Phase 1: collect matrix variable names
+  static const char* matTypes[] = {
+    "float2x2", "float2x3", "float2x4",
+    "float3x2", "float3x3", "float3x4",
+    "float4x2", "float4x3", "float4x4"
+  };
+  char matVars[64][64];  // up to 64 matrix variables
+  int matVarLens[64];
+  int nMatVars = 0;
+
+  for (auto& mt : matTypes) {
+    int mtLen = (int)strlen(mt);
+    const char* s = szShaderText;
+    while ((s = strstr(s, mt)) != NULL) {
+      if (s > szShaderText && isIdent(s[-1])) { s += mtLen; continue; }
+      if (isIdent(s[mtLen])) { s += mtLen; continue; }
+      const char* p = s + mtLen;
+      while (*p == ' ' || *p == '\t') p++;
+      const char* nameStart = p;
+      while (isIdent(*p)) p++;
+      int nameLen = (int)(p - nameStart);
+      if (nameLen > 0 && nameLen < 63) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '(') {  // not a function declaration
+          memcpy(matVars[nMatVars], nameStart, nameLen);
+          matVars[nMatVars][nameLen] = '\0';
+          matVarLens[nMatVars] = nameLen;
+          nMatVars++;
+          if (nMatVars >= 64) break;
+        }
+      }
+      s = p;
+    }
+    if (nMatVars >= 64) break;
+  }
+
+  if (nMatVars == 0) return;
+
+  // Phase 2: replace matVar*ident → mul(matVar, ident) and ident*matVar → mul(ident, matVar)
+  int srcLen = (int)strlen(szShaderText);
+  char* tmp = (char*)malloc(srcLen + 32768);
+  if (!tmp) return;
+
+  for (int mi = 0; mi < nMatVars; mi++) {
+    const char* mv = matVars[mi];
+    int mvLen = matVarLens[mi];
+    int wi = 0;
+
+    for (int i = 0; i < srcLen; ) {
+      // Check for word-boundary match of matrix variable name
+      if (strncmp(&szShaderText[i], mv, mvLen) == 0 &&
+          (i == 0 || !isIdent(szShaderText[i - 1])) &&
+          !isIdent(szShaderText[i + mvLen])) {
+        // Forward: matVar * ident
+        int afterMv = i + mvLen;
+        int s = afterMv;
+        while (szShaderText[s] == ' ') s++;
+        if (szShaderText[s] == '*' && szShaderText[s + 1] != '=') {
+          int afterStar = s + 1;
+          while (szShaderText[afterStar] == ' ') afterStar++;
+          int opStart = afterStar;
+          while (isIdent(szShaderText[afterStar])) afterStar++;
+          if (afterStar > opStart) {
+            // If the identifier is followed by '(' it's a function call — include the args
+            if (szShaderText[afterStar] == '(') {
+              int depth = 1;
+              afterStar++; // skip opening '('
+              while (szShaderText[afterStar] && depth > 0) {
+                if (szShaderText[afterStar] == '(') depth++;
+                else if (szShaderText[afterStar] == ')') depth--;
+                afterStar++;
+              }
+            }
+            // Include trailing .swizzle (e.g., n.yzw, func().xyz)
+            if (szShaderText[afterStar] == '.') {
+              afterStar++; // skip '.'
+              while (isIdent(szShaderText[afterStar])) afterStar++;
+            }
+            // Write: mul(matVar, operand)
+            memcpy(&tmp[wi], "mul(", 4); wi += 4;
+            memcpy(&tmp[wi], mv, mvLen); wi += mvLen;
+            memcpy(&tmp[wi], ", ", 2); wi += 2;
+            memcpy(&tmp[wi], &szShaderText[opStart], afterStar - opStart);
+            wi += afterStar - opStart;
+            tmp[wi++] = ')';
+            i = afterStar;
+            continue;
+          }
+        }
+        // Reverse: check if preceded by ident * matVar
+        if (i > 0) {
+          int bk = i;
+          while (bk > 0 && szShaderText[bk - 1] == ' ') bk--;
+          if (bk > 0 && szShaderText[bk - 1] == '*' && (bk < 2 || szShaderText[bk - 2] != '=')) {
+            int starIdx = bk - 1;
+            int opEnd = starIdx;
+            while (opEnd > 0 && szShaderText[opEnd - 1] == ' ') opEnd--;
+            int opStart = opEnd;
+            while (opStart > 0 && isIdent(szShaderText[opStart - 1])) opStart--;
+            // Include preceding ident.swizzle pattern (e.g., n.yzw → capture full "n.yzw")
+            if (opStart > 1 && szShaderText[opStart - 1] == '.') {
+              int dotPos = opStart - 1;
+              int identStart = dotPos;
+              while (identStart > 0 && isIdent(szShaderText[identStart - 1])) identStart--;
+              if (identStart < dotPos)
+                opStart = identStart;  // include "n." prefix
+            }
+            if (opEnd > opStart) {
+              // Rewind output to before operand * matVar
+              wi -= (i - opStart);  // remove already-written "operand * " from tmp
+              memcpy(&tmp[wi], "mul(", 4); wi += 4;
+              memcpy(&tmp[wi], &szShaderText[opStart], opEnd - opStart);
+              wi += opEnd - opStart;
+              memcpy(&tmp[wi], ", ", 2); wi += 2;
+              memcpy(&tmp[wi], mv, mvLen); wi += mvLen;
+              tmp[wi++] = ')';
+              i += mvLen;
+              continue;
+            }
+          }
+        }
+        // No match — copy as-is
+        memcpy(&tmp[wi], mv, mvLen);
+        wi += mvLen;
+        i += mvLen;
+      } else {
+        tmp[wi++] = szShaderText[i++];
+      }
+    }
+    tmp[wi] = 0;
+    memcpy(szShaderText, tmp, wi + 1);
+    srcLen = wi;
+  }
+
+  free(tmp);
 }
 
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
@@ -866,7 +1112,7 @@ static void FixShadowedBuiltins(char* szShaderText) {
 
 bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
   LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
-  LPD3DXBUFFER* ppBytecodeOut) {
+  LPD3DXBUFFER* ppBytecodeOut, const char* szDiagName) {
 
   const char szWarpDefines[] = "#define rad _rad_ang.x\n"
     "#define ang _rad_ang.y\n"
@@ -898,7 +1144,6 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // DIAG: log original shader text (before include.fx prepend)
   {
-    char dbg[512];
     int origLen = szOrigShaderText ? (int)strlen(szOrigShaderText) : 0;
     char preview[301] = {0};
     if (origLen > 0) {
@@ -906,9 +1151,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       for (int i = 0; i < 300 && preview[i]; i++)
         if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
     }
-    sprintf(dbg, "DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
+    DLOG_VERBOSE("DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
             shaderType, szWhichShader, origLen, preview);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   char szShaderText[128000];
@@ -991,12 +1235,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       p++;
 
     // DIAG: log whether shader_body was found
-    {
-      char dbg[256];
-      sprintf(dbg, "DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
+    DLOG_VERBOSE("DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
               shaderType, (*p != 0) ? 1 : 0, (int)(p - &szShaderText[shaderStartPos]));
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
 
     if (*p) {
       for (int i = 0; i < 11; i++)
@@ -1019,21 +1259,38 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       if (p) {
         // skip over it
         p++;
-        // then insert "float3 ret = 0;"
+        // then insert first line(s)
         lstrcpy(temp, p);
-        sprintf(p, "%s\n", szFirstLine);
+        if (m_bLoadingShadertoyMode && !bHardErrors) {
+          // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
+          // Use m_bLoadingShadertoyMode (set before async thread) not m_bShadertoyMode
+          // (set after compilation in LoadPresetTick — too late for shader text generation)
+          sprintf(p, "    float4 ret = 0;\n");
+        } else {
+          sprintf(p, "%s\n", szFirstLine);
+        }
         p += lstrlen(p);
         lstrcpy(p, temp);
 
         // find the ending curly brace
         p = strrchr(p, '}');
-        // add the last line - "    _return_value = float4(ret.xyz, _vDiffuse.w);"
         if (p) {
-          // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
-          // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
-          // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
-          char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-          sprintf(p, " %s\n}\n", szLastLine);
+          if (m_bLoadingShadertoyMode && !bHardErrors) {
+            // Shadertoy output: Buffer A/B preserve full float4 (alpha stores data);
+            // Image/comp forces alpha=1 (shaders that write .rgb leave alpha=0 which
+            // would be transparent — the old non-Shadertoy wrapper used _vDiffuse.w=1).
+            bool bIsBuffer = szDiagName && (strcmp(szDiagName, "bufferA") == 0 || strcmp(szDiagName, "bufferB") == 0);
+            const char* szLastLine = bIsBuffer
+              ? "    _return_value = ret;"
+              : "    _return_value = float4(ret.xyz, 1.0);";
+            sprintf(p, " %s\n}\n", szLastLine);
+          } else {
+            // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
+            // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
+            // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
+            char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
+            sprintf(p, " %s\n}\n", szLastLine);
+          }
         }
       }
     }
@@ -1050,13 +1307,22 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
 
-  // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
-  if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+  // Fix matrix * vector multiplication (HLSL requires mul())
+  FixMatrixVarMultiply(szShaderText);
+
+  // Dump assembled shader text to file for diagnostics (Verbose only)
+  if (DLOG_DIAG_ENABLED() && (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
+    const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
     char dumpPath[MAX_PATH];
-    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir,
-            shaderType == SHADER_COMP ? "comp" : "warp");
+    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
     FILE* f = fopen(dumpPath, "w");
-    if (f) { fputs(szShaderText, f); fclose(f); }
+    if (f) {
+      fprintf(f, "// DIAG: type=%s profile=%s len=%d preset=%ls\n",
+              typeName, szProfile, lstrlen(szShaderText),
+              m_pState ? m_pState->m_szDesc : L"(unknown)");
+      fputs(szShaderText, f);
+      fclose(f);
+    }
   }
 
   // now really try to compile it.
@@ -1064,35 +1330,13 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   bool failed = false;
   int len = lstrlen(szShaderText);
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaderFromMemory: len=%d profile=%s fn=%s shaderType=%d", len, szProfile, szFn, shaderType);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
-
-  std::wstring wideShaderText = std::wstring(szShaderText, szShaderText + strlen(szShaderText));
-  wchar_t tempBuffer[32768]; // Ensure the buffer size is sufficient for the content.
-  wcsncpy(tempBuffer, wideShaderText.c_str(), 32767); // Copy the content safely.
-  tempBuffer[32767] = L'\0'; // Null-terminate to avoid overflow.
-  dumpmsg(tempBuffer, LOG_VERBOSE); // Full shader text — only at verbose level
-
-  DebugLogA("DX12: LoadShaderFromMemory: after dumpmsg, computing checksum...", LOG_VERBOSE);
-
   uint32_t checksum = crc32(szShaderText, len);
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaderFromMemory: checksum=0x%08X caching=%d", checksum, m_ShaderCaching);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
+  DLOG_VERBOSE("DX12: LoadShaderFromMemory: checksum=0x%08X caching=%d", checksum, m_ShaderCaching);
 
   if (m_ShaderCaching) {
     pShaderByteCode = LoadShaderBytecodeFromFile(checksum, &szProfile[0]);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaderFromMemory: cache %s (bytecode=%p)", pShaderByteCode ? "HIT" : "MISS", (void*)pShaderByteCode);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    DLOG_VERBOSE("DX12: LoadShaderFromMemory: cache %s (bytecode=%p)", pShaderByteCode ? "HIT" : "MISS", (void*)pShaderByteCode);
   }
 
   if (pShaderByteCode != NULL && !compileOnly) {
@@ -1132,14 +1376,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     QueryPerformanceCounter(&compileEnd);
     double compileMs = (double)(compileEnd.QuadPart - compileStart.QuadPart) * 1000.0 / (double)compileFreq;
 
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
-      DebugLogA(dbg, LOG_VERBOSE);
-      if (compileMs > 500.0) {
-        sprintf(dbg, "DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
-        DebugLogA(dbg, LOG_VERBOSE);
-      }
+    DLOG_VERBOSE("DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
+    if (compileMs > 500.0) {
+      DLOG_VERBOSE("DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
     }
 
     if (D3D_OK != hresult) {
@@ -1163,6 +1402,21 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         MultiByteToWideChar(CP_ACP, 0, errorMsg, -1, wideErrorMsg, _countof(wideErrorMsg));
         dumpmsg(wideErrorMsg, LOG_WARN);
 
+        // Write D3DCompile error to diagnostic file for Shader Import window
+        if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+          const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
+          char errPath[MAX_PATH];
+          sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
+          FILE* ef = fopen(errPath, "w");
+          if (ef) {
+            fprintf(ef, "// DIAG: type=%s profile=%s shaderLen=%d preset=%ls\n",
+                    typeName, szProfile, len,
+                    m_pState ? m_pState->m_szDesc : L"(unknown)");
+            fputs(errorMsg, ef);
+            fclose(ef);
+          }
+        }
+
         SafeRelease(m_pShaderCompileErrors);
         AddNotification(wideErrorMsg);
       }
@@ -1173,6 +1427,19 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         }
       }
       return false;
+    }
+
+    // Clear stale error file on successful compilation
+    if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+      const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
+      char errPath[MAX_PATH];
+      sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
+      FILE* ef = fopen(errPath, "w");
+      if (ef) {
+        fprintf(ef, "// OK: type=%s len=%d preset=%ls\n",
+                typeName, len, m_pState ? m_pState->m_szDesc : L"(unknown)");
+        fclose(ef);
+      }
     }
 
     if (m_ShaderCaching) {

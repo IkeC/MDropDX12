@@ -43,11 +43,15 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.3)
+## Key Features (current: v1.4)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
-- In-app Settings window (F8 / Ctrl+L) with dark theme, 11-tab UI, preset browser, resource viewer, path display on About tab
+- In-app Settings window (F8 / Ctrl+L) with tri-mode theme (Dark/Light/Follow System), 11-tab UI, preset browser, resource viewer, path display on About tab
+- ToolWindow system: Settings, Displays, Song Info, Hotkeys, and Button Board windows run on their own threads with independent always-on-top, sticky positions, and tab memory
+- Configurable hotkeys (Ctrl+F7) with per-binding local/global scope, conflict detection, dynamic Script/Launch entries, and Reset to Defaults
+- Native MIDI input (50 mapping slots, Button/Knob actions, learn mode, JSON persistence)
+- Standalone Song Info window (Shift+Ctrl+F8) and Displays window (Ctrl+F8)
 - Self-bootstrapping exe with embedded shaders (no external .fx files required)
 - Fallback texture search paths and dedicated Random Textures Directory
 - HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
@@ -57,14 +61,16 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Preset change on track change; preset tagging system
 - Window transparency, borderless, clickthrough ("watermark mode")
 - Window title regex parsing with named profiles for track info extraction
-- Game controller support with JSON config
+- Game controller support with JSON config and IPC command binding
 - Hue/Saturation/Brightness color shifting
 - Shader precompiling and caching
+- Native webcam and video file input mixing (background/overlay compositing with luma key)
 - Spout video input mixing (background/overlay compositing)
 - Idle timer / screensaver mode
 - Drag-and-drop presets, folders, and textures
 - Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via IPC)
 - File association registration for .milk/.milk2 (Settings → About, HKCU, no admin)
+- Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_importing.md`)
 - Preset filter by type (All / .milk / .milk2) in preset browser; random/sequential selection respects filter
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 
@@ -100,7 +106,7 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 
 - Windows 10 64-bit or higher (Windows 11 recommended)
 - DirectX 12 compatible GPU
-- Microsoft Visual C++ Redistributable (x64)
+- No additional runtime libraries required (VC runtime is statically linked)
 
 ## License
 

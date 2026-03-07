@@ -1,17 +1,21 @@
 ﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 1.3** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 1.4** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
-* In-app Settings window (F8) with dark theme, 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
+* In-app Settings window (F8) with tri-mode theme (Dark / Light / Follow System), 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
 * Preset browser with type filtering (.milk/.milk2), tagging, and subdirectory navigation
 * Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via IPC)
 * One-click file association registration for .milk and .milk2 (Settings → About, no admin required)
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
+* Configurable hotkeys with per-binding local/global scope, dynamic Script/Launch entries (Hotkeys window, Ctrl+F7)
+* Native MIDI input with 50 mapping slots, learn mode, button/knob actions (MIDI window from Settings)
+* Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
+* Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs
 * Configurable window titles for Remote discovery (Settings → Remote tab)
 * Save Screenshot from Settings UI with file dialog, or via IPC `CAPTURE` command
 * TDR recovery and GPU protection with automatic device restart
@@ -25,8 +29,14 @@
 * 3D volume texture support (noisevol_lq/noisevol_hq)
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
+* Native webcam and video file input mixing (background/overlay compositing with luma key)
+* Shadertoy import: GLSL→HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
+* Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
+* Video Effects window with transform, color, and audio-reactive controls; VFX JSON profiles
+* Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
+* ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, and Workspace Layout windows run on their own threads with sticky positions and tab memory
 * Improved window handling, input methods and stability
-* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
+* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, shader conversion, wave manipulation, and more)
 
 ## Keyboard Shortcuts
 
@@ -107,6 +117,9 @@
 | F3 | Cycle FPS limit (30/60/90/120/144/240/360/unlimited) | ✅ |
 | Ctrl+F3 | Display current FPS setting | ✅ |
 | F8 / Ctrl+L | Open Settings window | ✅ |
+| Ctrl+F7 | Open Hotkeys window | ✅ |
+| Ctrl+F8 | Open Displays window | ✅ |
+| Shift+Ctrl+F8 | Open Song Info window | ✅ |
 | Ctrl+D | Set audio device to default | ✅ |
 | Ctrl+Shift+D | Display current audio device | ✅ |
 | Ctrl+M | Toggle mouse interaction mode | ✅ |
@@ -150,12 +163,12 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 * Windows 10 64-bit or higher (Windows 11 recommended)
 * DirectX 12 compatible GPU
-* [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+* No additional runtime libraries required (VC++ runtime is statically linked)
 * [Milkwave](https://github.com/IkeC/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
 ## Installation
 
-Download `MDropDX12-1.3-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
+Download `MDropDX12-1.4-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
 
 See the [Installation Guide](docs/Install.md) for detailed instructions, directory layout, configuration files, and troubleshooting.
 

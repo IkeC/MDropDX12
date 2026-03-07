@@ -72,6 +72,20 @@ DXContext::DXContext(
 
     StringCbCopyW(m_szIniFile, sizeof(m_szIniFile), szIniFile);
 
+    // Read fallback texture paths from INI for styles 3-5
+    GetPrivateProfileStringW(L"FallbackPaths", L"RandomTexDir", L"",
+        m_szFallbackRandomTexDir, MAX_PATH, m_szIniFile);
+    GetPrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile", L"",
+        m_szFallbackCustomFile, MAX_PATH, m_szIniFile);
+    // Construct textures dir from exe path (m_szIniFile is in the base dir)
+    {
+        wchar_t szDir[MAX_PATH];
+        wcscpy_s(szDir, MAX_PATH, m_szIniFile);
+        wchar_t* lastSlash = wcsrchr(szDir, L'\\');
+        if (lastSlash) lastSlash[1] = L'\0';
+        swprintf(m_szFallbackTexturesDir, MAX_PATH, L"%sresources\\textures\\", szDir);
+    }
+
     // Store device references passed from the initializer
     m_device       = device;
     m_commandQueue = commandQueue;
@@ -504,13 +518,19 @@ bool DXContext::ResizeSwapChain(int newWidth, int newHeight)
         m_fenceValues[i] = m_fenceValues[m_frameIndex];
     }
 
+    UINT swapFlags = m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     HRESULT hr = m_swapChain->ResizeBuffers(
         DXC_FRAME_COUNT,
         (UINT)newWidth,
         (UINT)newHeight,
         k_BackBufferFormat,
-        0);
+        swapFlags);
     if (FAILED(hr)) {
+        HRESULT devReason = m_device->GetDeviceRemovedReason();
+        char buf[256];
+        sprintf(buf, "DX12: ResizeBuffers FAILED hr=0x%08X deviceRemovedReason=0x%08X",
+                (unsigned)hr, (unsigned)devReason);
+        DebugLogA(buf, LOG_ERROR);
         m_lastErr = DXC_ERR_RESIZEFAILED;
         return false;
     }
@@ -719,12 +739,7 @@ DX12Texture DXContext::CreateRenderTargetTexture(UINT width, UINT height, DXGI_F
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
     tex.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format                  = format;
-    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels     = 1;
-    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpuHandle);
+    CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpuHandle);
 
     AllocateSrvGpu();  // bump the slot counter
 
@@ -816,8 +831,8 @@ bool DXContext::CreateRootSignature()
         staticSamplers[i].ShaderRegister   = i;
         staticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur)
-    for (int i : {1, 2, 11, 12, 13}) {
+    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur), s14 (feedback)
+    for (int i : {1, 2, 11, 12, 13, 14}) {
         staticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -977,6 +992,33 @@ D3D12_GPU_VIRTUAL_ADDRESS DXContext::UploadConstantBuffer(const void* data, UINT
 // Null texture + binding block (Phase 5)
 // ---------------------------------------------------------------------------
 
+// Pick a random image file from a directory (jpg/png/bmp/tga/dds)
+static bool PickRandomTextureFile(const wchar_t* szDir, wchar_t* szOut, size_t cchOut)
+{
+    if (!szDir || !szDir[0]) return false;
+    std::vector<std::wstring> files;
+    const wchar_t* exts[] = { L"*.jpg", L"*.jpeg", L"*.png", L"*.bmp", L"*.tga", L"*.dds" };
+    for (auto ext : exts) {
+        wchar_t mask[MAX_PATH];
+        swprintf(mask, MAX_PATH, L"%s%s", szDir, ext);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW(mask, &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring full = szDir;
+                    full += fd.cFileName;
+                    files.push_back(full);
+                }
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    if (files.empty()) return false;
+    wcscpy_s(szOut, cchOut, files[rand() % files.size()].c_str());
+    return true;
+}
+
 bool DXContext::CreateNullTexture(int fallbackStyle)
 {
     // Create a 1x1 black RGBA texture for filling unused SRV slots
@@ -1070,12 +1112,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
     m_nullTexture.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(m_nullTexture.resource.Get(), &srvDesc, srvCpuHandle);
+    CreateSRV2D(m_device.Get(), m_nullTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, srvCpuHandle);
 
     AllocateSrvGpu(); // bump counter
 
@@ -1086,6 +1123,28 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     m_nullTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     // --- Fallback texture for missing disk textures ---
+    // For styles 3-5, try to load an image file. Fall back to Hue Gradient on failure.
+    if (fallbackStyle >= 3 && fallbackStyle <= 5) {
+        wchar_t szPath[MAX_PATH] = {};
+        bool gotFile = false;
+        if (fallbackStyle == 3)
+            gotFile = PickRandomTextureFile(m_szFallbackRandomTexDir, szPath, MAX_PATH);
+        else if (fallbackStyle == 4)
+            gotFile = PickRandomTextureFile(m_szFallbackTexturesDir, szPath, MAX_PATH);
+        else if (fallbackStyle == 5 && m_szFallbackCustomFile[0])
+            gotFile = (wcscpy_s(szPath, MAX_PATH, m_szFallbackCustomFile) == 0);
+
+        if (gotFile) {
+            DX12Texture loaded = LoadTextureFromFile(szPath);
+            if (loaded.resource) {
+                m_fallbackTexture = loaded;
+                return true;
+            }
+        }
+        // File load failed — fall through to Hue Gradient (style 0)
+        fallbackStyle = 0;
+    }
+
     // Generate pixel data based on style
     UINT fbW = 1, fbH = 1;
     std::vector<UINT8> fbPixels;
@@ -1207,7 +1266,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     D3D12_CPU_DESCRIPTOR_HANDLE fbSrvCpu = AllocateSrvCpu();
     m_fallbackTexture.srvIndex = m_nextFreeSrvSlot;
 
-    m_device->CreateShaderResourceView(m_fallbackTexture.resource.Get(), &srvDesc, fbSrvCpu);
+    CreateSRV2D(m_device.Get(), m_fallbackTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, fbSrvCpu);
     AllocateSrvGpu();
 
     m_fallbackTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1332,12 +1391,7 @@ DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, U
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
     tex.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = format;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpu);
+    CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpu);
     AllocateSrvGpu(); // bump counter
 
     tex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1622,22 +1676,23 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBindingBlockGpuHandleByIndex(UINT bloc
 
 bool DXContext::AllocatePerFrameBindings()
 {
-    // Reserve 64 contiguous SRV slots: 2 frames × 2 passes × 16 descriptors
+    // Reserve 96 contiguous SRV slots: 2 frames × 3 passes (warp+bufferA+comp) × 16 descriptors
     m_perFrameBindingBase = m_nextFreeSrvSlot;
-    m_nextFreeSrvSlot += DXC_FRAME_COUNT * 2 * BINDING_BLOCK_SIZE;
+    m_nextFreeSrvSlot += DXC_FRAME_COUNT * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
     char buf[128];
     sprintf(buf, "DX12: AllocatePerFrameBindings: base=%u (reserved %u slots)",
-            m_perFrameBindingBase, DXC_FRAME_COUNT * 2 * BINDING_BLOCK_SIZE);
+            m_perFrameBindingBase, DXC_FRAME_COUNT * PASSES_PER_FRAME * BINDING_BLOCK_SIZE);
     DebugLogA(buf);
     return true;
 }
 
-void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT compSrvSlots[16])
+void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
+                                      const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16])
 {
     if (m_perFrameBindingBase == UINT_MAX) return;
 
-    // Each frame gets 32 slots: [0..15] = warp, [16..31] = comp
-    UINT frameBase = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE;
+    // Each frame gets 64 slots: [0..15] = warp, [16..31] = bufferA, [32..47] = bufferB, [48..63] = comp
+    UINT frameBase = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
     nullSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
@@ -1645,41 +1700,47 @@ void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT c
 
     D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    // Warp binding block
-    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
-        D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = heapStart.ptr + (SIZE_T)(frameBase + i) * m_srvDescriptorSize;
-
-        D3D12_CPU_DESCRIPTOR_HANDLE src;
-        if (warpSrvSlots[i] != UINT_MAX) {
-            src.ptr = heapStart.ptr + (SIZE_T)warpSrvSlots[i] * m_srvDescriptorSize;
-        } else {
-            src = nullSrc;
+    // Helper to fill a 16-slot binding block
+    auto fillBlock = [&](UINT base, const UINT slots[16]) {
+        for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
+            D3D12_CPU_DESCRIPTOR_HANDLE dst;
+            dst.ptr = heapStart.ptr + (SIZE_T)(base + i) * m_srvDescriptorSize;
+            D3D12_CPU_DESCRIPTOR_HANDLE src;
+            if (slots[i] != UINT_MAX)
+                src.ptr = heapStart.ptr + (SIZE_T)slots[i] * m_srvDescriptorSize;
+            else
+                src = nullSrc;
+            m_device->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         }
-        m_device->CopyDescriptorsSimple(1, dst, src,
-                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
+    };
 
-    // Comp binding block
-    UINT compBase = frameBase + BINDING_BLOCK_SIZE;
-    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
-        D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = heapStart.ptr + (SIZE_T)(compBase + i) * m_srvDescriptorSize;
-
-        D3D12_CPU_DESCRIPTOR_HANDLE src;
-        if (compSrvSlots[i] != UINT_MAX) {
-            src.ptr = heapStart.ptr + (SIZE_T)compSrvSlots[i] * m_srvDescriptorSize;
-        } else {
-            src = nullSrc;
-        }
-        m_device->CopyDescriptorsSimple(1, dst, src,
-                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
+    fillBlock(frameBase, warpSrvSlots);                              // pass 0: warp
+    fillBlock(frameBase + BINDING_BLOCK_SIZE, bufferASrvSlots);      // pass 1: bufferA
+    fillBlock(frameBase + 2 * BINDING_BLOCK_SIZE, bufferBSrvSlots);  // pass 2: bufferB
+    fillBlock(frameBase + 3 * BINDING_BLOCK_SIZE, compSrvSlots);     // pass 3: comp
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
 {
-    UINT slot = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE;
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferABindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferBBindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 2 * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;
@@ -1688,7 +1749,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
 {
-    UINT slot = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE + BINDING_BLOCK_SIZE;
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 3 * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;

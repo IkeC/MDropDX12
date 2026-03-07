@@ -4,15 +4,16 @@
 
 - **OS**: Windows 10 64-bit or higher (Windows 11 recommended)
 - **GPU**: DirectX 12 compatible graphics card (dedicated GPU recommended; Intel UHD integrated graphics will work but may struggle with complex presets)
-- **Runtime**: [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (x64) -- required if not already installed
 - **Audio**: Any audio output device (speakers, headphones, virtual audio cable)
 - **Disk**: ~2 MB for base install (portable zip); add preset packs as needed
+
+No additional runtime libraries are required — the Visual C++ runtime is statically linked into the executable.
 
 MDropDX12 captures audio from your system's default output device via WASAPI loopback — no special audio setup is needed. If sound is playing on your PC, MDropDX12 can visualize it.
 
 ## Download
 
-Download `MDropDX12-1.3-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
+Download `MDropDX12-1.4-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
 
 ## Installation
 
@@ -29,7 +30,13 @@ No registry entries are created and nothing is installed system-wide. To remove,
 
 ## First Run
 
-When MDropDX12 starts, it immediately begins visualizing audio from your default output device. Play some music and you should see the visualization respond.
+On first launch, MDropDX12 self-bootstraps: it creates `resources/presets/`, `resources/textures/`, and other directories automatically. A **Welcome window** appears with options to:
+
+- **Browse for Resources Folder** — point it at an existing folder containing presets (`.milk` files) and textures
+- **Open Shader Import** — import Shadertoy shaders directly (no presets needed)
+- **Open Settings** — configure paths, audio, display options
+
+Once presets are loaded, the visualizer begins rendering. It captures audio from your system's default output device via WASAPI loopback — play some music and the visuals respond automatically.
 
 **Essential shortcuts to get started:**
 
@@ -79,6 +86,7 @@ MDropDX12 stores all configuration in plain text files in its directory:
 | `midi-default.txt` | MIDI controller automation mappings |
 | `precompile.txt` | List of presets to compile shaders for at startup (reduces stutter) |
 | `controller.json` | Game controller button mappings (auto-created when controller connected) |
+| `midi.json` | MIDI controller mapping definitions (auto-created from MIDI window) |
 
 All files are human-readable and can be edited with any text editor. The Settings window (F8) provides a GUI for most options.
 
@@ -123,11 +131,6 @@ Delete the folder. No registry entries or system files are affected.
 - MDropDX12 includes TDR recovery and will automatically restart the GPU device.
 - If crashes persist, open Settings (F8) → System tab and enable "Skip Heavy Presets" or reduce the shader timeout.
 - Some complex presets may exceed your GPU's capabilities — press SPACE to skip them.
-
-### VCRUNTIME140_1.dll not found
-
-- Download and install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
-- Restart MDropDX12 after installing.
 
 ### Visualizer won't start
 

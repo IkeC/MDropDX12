@@ -596,6 +596,8 @@ SPOUT :
 */
 
 #include "engine.h"
+#include "tool_window.h"
+#include "video_capture.h"
 #include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
@@ -637,7 +639,6 @@ std::chrono::steady_clock::time_point LastSentMDropDX12Message{};
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "AMDDetection.h"
 #include <cstdint>
 #include <commctrl.h>  // Trackbar, tab, and list-view controls
 #include <commdlg.h>   // ChooseFont, ChooseColor common dialogs
@@ -996,12 +997,13 @@ void Engine::MyPreInitialize() {
   // seed the system's random number generator w/the current system time:
   //srand((unsigned)time(NULL));  -don't - let winamp do it
 
-// attempt to load a unicode F1 help message otherwise revert to the ansi version
-  g_szHelp = (wchar_t*)GetTextResource(IDR_TEXT2, 1);
-  if (!g_szHelp) g_szHelp = (wchar_t*)GetTextResource(IDR_TEXT1, 0);
-  else g_szHelp_W = 1;
-  g_szHelp_Page2 = (wchar_t*)GetTextResource(IDR_TEXT2_PAGE2, 1);
-  if (!g_szHelp_Page2) g_szHelp_Page2 = (wchar_t*)GetTextResource(IDR_TEXT1_PAGE2, 0);
+// Generate F1 help text dynamically from the hotkey binding table.
+  // This replaces the old static .bin resource loading so the help
+  // overlay always reflects the user's current key assignments.
+  GenerateHelpText();
+  g_szHelp = m_szHelpPage1;
+  g_szHelp_Page2 = m_szHelpPage2;
+  g_szHelp_W = 1;
 
   // CONFIG PANEL SETTINGS THAT WE'VE ADDED (TAB #2)
   m_bFirstRun = true;
@@ -1149,8 +1151,7 @@ void Engine::MyPreInitialize() {
   m_fShowRatingUntilThisTime = -1.0f;
   ClearErrors();
   m_szDebugMessage[0] = 0;
-  m_szSongTitle[0] = 0;
-  m_szSongTitlePrev[0] = 0;
+  // m_szSongTitle preserved across resize — track info has its own bucket
 
   m_lpVS[0] = NULL;
   m_lpVS[1] = NULL;
@@ -1248,6 +1249,10 @@ void Engine::MyReadConfig() {
   LoadControllerSettings();
   LoadControllerJSON();
 
+  // MIDI input
+  LoadMidiSettings();
+  LoadMidiJSON();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
@@ -1281,9 +1286,8 @@ void Engine::MyReadConfig() {
     if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
     mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   }
-  { char dbg[128]; sprintf(dbg, "AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
+  DLOG_INFO("AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
     m_fAudioSensitivity, (int)mdropdx12_audio_adaptive, mdropdx12_audio_sensitivity);
-    DebugLogA(dbg); }
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
@@ -1442,11 +1446,12 @@ void Engine::MyReadConfig() {
   if (m_bSelfBootstrapped && m_LogLevel < 4)
     m_LogLevel = 4; // verbose logging for first-run diagnostics
   DebugLogSetLevel(m_LogLevel); // apply log level to DebugLog system
+  m_LogOutput = GetPrivateProfileIntW(L"Milkwave", L"LogOutput", m_LogOutput, pIni);
+  DebugLogSetOutput(m_LogOutput);
   GetPrivateProfileStringW(L"Milkwave", L"WindowTitle", L"", m_szWindowTitle, 256, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
 
   m_blackmode = GetPrivateProfileBoolW(L"Milkwave", L"BlackMode", m_blackmode, pIni);
-  m_AMDDetectionMode = GetPrivateProfileIntW(L"Milkwave", L"AMDDetectionMode", m_AMDDetectionMode, pIni);
 
   m_MessageDefaultBurnTime = GetPrivateProfileFloatW(L"Milkwave", L"MessageDefaultBurnTime", m_MessageDefaultBurnTime, pIni);
   m_MessageDefaultFadeinTime = GetPrivateProfileFloatW(L"Milkwave", L"MessageDefaultFadeinTime", m_MessageDefaultFadeinTime, pIni);
@@ -1456,7 +1461,7 @@ void Engine::MyReadConfig() {
   m_MinPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MinPSVersion", m_MinPSVersionConfig, pIni);
   if (m_MinPSVersionConfig < 0) m_MinPSVersionConfig = 2;
   m_MaxPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MaxPSVersion", m_MaxPSVersionConfig, pIni);
-  if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 4;
+  if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 6;
   m_nMixType = GetPrivateProfileIntW(L"Settings", L"Mixtype", m_nMixType, pIni);
 
   m_ShowUpArrowInDescriptionIfPSMinVersionForced = GetPrivateProfileBoolW(L"Milkwave", L"ShowUpArrowInDescriptionIfPSMinVersionForced", m_ShowUpArrowInDescriptionIfPSMinVersionForced, pIni);
@@ -1483,22 +1488,20 @@ void Engine::MyReadConfig() {
   m_WindowY = GetPrivateProfileIntW(L"Milkwave", L"WindowY", m_WindowY, pIni);
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
-  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 620, pIni);
-  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 850, pIni);
+  // Settings window position/size now managed by ToolWindow::LoadWindowPosition()
   m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
-  if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
-  if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
-  { // Cap to screen work area instead of hardcoded 2000
-    int scrW = GetSystemMetrics(SM_CXSCREEN);
-    int scrH = GetSystemMetrics(SM_CYSCREEN);
-    if (m_nSettingsWndW > scrW) m_nSettingsWndW = scrW;
-    if (m_nSettingsWndH > scrH) m_nSettingsWndH = scrH;
-  }
   if (m_nSettingsFontSize > -12) m_nSettingsFontSize = -12;  // min font size
   if (m_nSettingsFontSize < -24) m_nSettingsFontSize = -24;  // max font size
 
-  // Settings window dark theme — just on/off toggle, colors come from code defaults
-  m_bSettingsDarkTheme = GetPrivateProfileBoolW(L"SettingsTheme", L"DarkTheme", m_bSettingsDarkTheme, pIni);
+  // Settings window theme mode (Dark/Light/Follow System)
+  // Migration: if new ThemeMode key doesn't exist yet, read old DarkTheme bool
+  if (GetPrivateProfileIntW(L"SettingsTheme", L"ThemeMode", -1, pIni) == -1) {
+    bool oldDark = GetPrivateProfileIntW(L"SettingsTheme", L"DarkTheme", 1, pIni) != 0;
+    m_nThemeMode = oldDark ? THEME_DARK : THEME_LIGHT;
+  } else {
+    m_nThemeMode = (ThemeMode)GetPrivateProfileIntW(L"SettingsTheme", L"ThemeMode", (int)m_nThemeMode, pIni);
+    if (m_nThemeMode < THEME_DARK || m_nThemeMode > THEME_SYSTEM) m_nThemeMode = THEME_DARK;
+  }
   m_WindowFixedWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedWidth", m_WindowFixedWidth, pIni);
   m_WindowFixedHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowFixedHeight", m_WindowFixedHeight, pIni);
 
@@ -1701,8 +1704,7 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowY, L"WindowY", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowWidth, L"WindowWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
+  // Settings window position/size now managed by ToolWindow::SaveWindowPosition()
   WritePrivateProfileIntW(m_nSettingsFontSize, L"SettingsFontSize", pIni, L"Milkwave");
 
   // GPU Protection
@@ -1868,8 +1870,18 @@ void Engine::CleanUpMyNonDx9Stuff() {
   // Be sure to clean up any objects here that were
   //   created/initialized in AllocateMyNonDx9Stuff.
 
-  // Close settings window if open
+  // Close settings window and tool windows if open
   CloseSettingsWindow();
+  CloseDisplaysWindow();
+  CloseSongInfoWindow();
+  CloseHotkeysWindow();
+  CloseMidiWindow();
+  CloseBoardWindow();
+  ClosePresetsWindow();
+  CloseSpritesWindow();
+  CloseMessagesWindow();
+  CloseWorkspaceLayoutWindow();
+  CloseMidiDevice();
 
   // Join any in-flight preset load thread
   if (m_presetLoadThread.joinable())
@@ -2172,7 +2184,7 @@ int Engine::AllocateMyDX9Stuff() {
     }
 
     // Load the FALLBACK shaders...
-    int PSVersion = m_IsAMD ? m_nMaxPSVersion_DX9 : 2;
+    int PSVersion = 2;
     if (!RecompilePShader(m_szDefaultWarpPShaderText, &m_fallbackShaders_ps.warp, SHADER_WARP, true, PSVersion, false)) {
       wchar_t szSM[64];
       switch (m_nMaxPSVersion_DX9) {
@@ -2281,9 +2293,7 @@ int Engine::AllocateMyDX9Stuff() {
             m_BlurShaders[bi].ps.bytecodeBlob->GetBufferPointer(),
             (UINT)m_BlurShaders[bi].ps.bytecodeBlob->GetBufferSize(),
             g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-          char dbg[128];
-          sprintf(dbg, "DX12: Blur PSO[%d] %s", bi, m_dx12BlurPSO[bi] ? "created" : "FAILED");
-          DebugLogA(dbg);
+          DLOG_INFO("DX12: Blur PSO[%d] %s", bi, m_dx12BlurPSO[bi] ? "created" : "FAILED");
         }
       }
     }
@@ -2489,10 +2499,46 @@ int Engine::AllocateMyDX9Stuff() {
       DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED");
     }
 
+    // Feedback buffers for Shadertoy temporal reprojection (ping-pong pair, VS-resolution)
+    // Must match m_nTexSizeX/Y because comp shader's texsize constant = VS size,
+    // and Shadertoy shaders compute fragCoord / texelFetch using texsize.
+    {
+      UINT fbW = (UINT)max(1, m_nTexSizeX);
+      UINT fbH = (UINT)max(1, m_nTexSizeY);
+      m_dx12Feedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12Feedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12ImageFeedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12ImageFeedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      // Binding blocks needed for the blit pass (feedback → backbuffer for display)
+      if (m_dx12Feedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[0]);
+      if (m_dx12Feedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[1]);
+      if (m_dx12ImageFeedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[0]);
+      if (m_dx12ImageFeedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[1]);
+      // Buffer B feedback pair (same FLOAT32 format as Buffer A)
+      m_dx12FeedbackB[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12FeedbackB[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      if (m_dx12FeedbackB[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[0]);
+      if (m_dx12FeedbackB[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[1]);
+      m_nFeedbackIdx = 0;
+      DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
+                ? "DX12: Feedback buffers: created (ping-pong pair)"
+                : "DX12: Feedback buffers: FAILED");
+      DebugLogA(m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid()
+                ? "DX12: Image feedback buffers: created (ping-pong pair)"
+                : "DX12: Image feedback buffers: FAILED");
+      DebugLogA(m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid()
+                ? "DX12: FeedbackB buffers: created (ping-pong pair)"
+                : "DX12: FeedbackB buffers: FAILED");
+    }
+
+    // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
+    CreateAudioTexture();
+
     // Inject effect pixel shader PSO
     // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
     // mode.y = per-preset effect bitmask (bit0=brighten, bit1=darken, bit2=solarize, bit3=invert)
     //          Per-preset effects use DX9-compatible math (blend-state equivalent).
+    // mode.z = sRGB gamma (1=apply linear→sRGB for Shadertoy presets)
     if (m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
       static const char szInjectPS[] =
         "Texture2D<float4> tex : register(t0);\n"
@@ -2500,6 +2546,8 @@ int Engine::AllocateMyDX9Stuff() {
         "cbuffer cbInject : register(b0) { uint4 mode; }\n"
         "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
         "    float4 ret = tex.Sample(samp, uv);\n"
+        "    // sRGB gamma correction (Shadertoy presets output linear; display expects sRGB)\n"
+        "    if (mode.z == 1u) ret.rgb = pow(max(ret.rgb, 0.0), 1.0/2.2);\n"
         "    // Per-preset post-process effects (DX9 blend-state equivalent math)\n"
         "    if (mode.y & 1u) ret.rgb = ret.rgb * (2.0 - ret.rgb);\n"         // brighten = invert→square→invert
         "    if (mode.y & 2u) ret.rgb = ret.rgb * ret.rgb;\n"                  // darken = square
@@ -2534,6 +2582,7 @@ int Engine::AllocateMyDX9Stuff() {
 
     // Spout video input luma-key PSO (alpha blended)
     CompileSpoutInputPSO();
+    CompileVideoFXPSOs();
   }
 
   m_fAspectX = (m_nTexSizeY > m_nTexSizeX) ? m_nTexSizeX / (float)m_nTexSizeY : 1.0f;
@@ -2739,12 +2788,7 @@ int Engine::AllocateMyDX9Stuff() {
       D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
       m_dx12Title[i].srvIndex = m_lpDX->m_nextFreeSrvSlot;
 
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-      srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
-      srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
-      srvDesc.Texture2D.MipLevels = 1;
-      dev->CreateShaderResourceView(m_dx12Title[i].resource.Get(), &srvDesc, srvCpu);
+      CreateSRV2D(dev, m_dx12Title[i].resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
       m_lpDX->AllocateSrvGpu();
 
       m_lpDX->CreateBindingBlockForTexture(m_dx12Title[i]);
@@ -2938,6 +2982,13 @@ int Engine::AllocateMyDX9Stuff() {
 
     if (!AddNoiseVol(L"noisevol_lq", 32, 1)) return false;
     if (!AddNoiseVol(L"noisevol_hq", 32, 4)) return false;
+
+    // Shadertoy-compatible noise (uniform white noise, no interpolation, fixed seed)
+    if (!AddNoiseTex_ST(L"noise_lq_st", 256)) return false;
+    if (!AddNoiseTex_ST(L"noise_mq_st", 256)) return false;
+    if (!AddNoiseTex_ST(L"noise_hq_st", 256)) return false;
+    if (!AddNoiseVol_ST(L"noisevol_lq_st", 32)) return false;
+    if (!AddNoiseVol_ST(L"noisevol_hq_st", 32)) return false;
   }
 
   if (!m_bInitialPresetSelected) {
@@ -2971,6 +3022,10 @@ int Engine::AllocateMyDX9Stuff() {
     else {
       LoadRandomPreset(0.0f);
     }
+    // Load VFX profile on startup
+    if (m_bEnableVFXStartup && wcslen(m_szVFXStartup) > 0)
+        LoadVideoFXProfile(m_szVFXStartup);
+
     if (m_bAutoLockPresetWhenNoMusic)
       m_bPresetLockedByUser = false;
     m_bInitialPresetSelected = true;
@@ -2978,6 +3033,52 @@ int Engine::AllocateMyDX9Stuff() {
   else {
     LoadShaders(&m_shaders, m_pState, false, false);  // Also force-load the shaders - otherwise they'd only get compiled on a preset switch.
     CreateDX12PresetPSOs();
+
+    // Reset Shadertoy start frame so iFrame restarts at 0 after resize.
+    // Feedback buffers are fresh (recreated above), so the shader must
+    // re-run its initialization code (e.g. "if (iFrame < 2) clear").
+    if (m_bShadertoyMode)
+      m_nShadertoyStartFrame = GetFrame();
+  }
+
+  // After resize, flush GPU and clear feedback buffers immediately so the
+  // first Shadertoy frame doesn't sample uninitialised FLOAT32 VRAM.
+  if (m_bShadertoyMode && m_lpDX && m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()) {
+    m_lpDX->m_uploadAllocator->Reset();
+    m_lpDX->m_uploadCommandList->Reset(m_lpDX->m_uploadAllocator.Get(), nullptr);
+    float black[] = { 0.f, 0.f, 0.f, 0.f };
+    // Clear all feedback buffer pairs (Buffer A + Buffer B + Image)
+    DX12Texture* clearList[] = {
+        &m_dx12Feedback[0], &m_dx12Feedback[1],
+        &m_dx12FeedbackB[0], &m_dx12FeedbackB[1],
+        &m_dx12ImageFeedback[0], &m_dx12ImageFeedback[1]
+    };
+    for (auto* tex : clearList) {
+      if (!tex->IsValid()) continue;
+      // Transition SRV → RT
+      D3D12_RESOURCE_BARRIER barrier = {};
+      barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+      barrier.Transition.pResource = tex->resource.Get();
+      barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+      barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+      barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+      m_lpDX->m_uploadCommandList->ResourceBarrier(1, &barrier);
+      // Clear
+      m_lpDX->m_uploadCommandList->ClearRenderTargetView(
+          m_lpDX->GetRtvCpuHandle(*tex), black, 0, nullptr);
+      // Transition RT → SRV
+      barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+      barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+      m_lpDX->m_uploadCommandList->ResourceBarrier(1, &barrier);
+    }
+    m_lpDX->m_uploadCommandList->Close();
+    ID3D12CommandList* lists[] = { m_lpDX->m_uploadCommandList.Get() };
+    m_lpDX->m_commandQueue->ExecuteCommandLists(1, lists);
+    m_lpDX->m_uploadFenceValue++;
+    m_lpDX->m_commandQueue->Signal(m_lpDX->m_uploadFence.Get(), m_lpDX->m_uploadFenceValue);
+    m_lpDX->m_uploadFence->SetEventOnCompletion(m_lpDX->m_uploadFenceValue, m_lpDX->m_uploadFenceEvent);
+    WaitForSingleObjectEx(m_lpDX->m_uploadFenceEvent, 5000, FALSE);
+    DebugLogA("DX12: Shadertoy feedback buffers cleared after resize");
   }
 
   // Re-wrap backbuffers for Spout if active (render targets were just recreated)
@@ -3122,10 +3223,13 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
 
   m_shaders.comp.Clear();
   m_shaders.warp.Clear();
+  m_shaders.bufferA.Clear();
   m_OldShaders.comp.Clear();
   m_OldShaders.warp.Clear();
+  m_OldShaders.bufferA.Clear();
   m_NewShaders.comp.Clear();
   m_NewShaders.warp.Clear();
+  m_NewShaders.bufferA.Clear();
   m_fallbackShaders_vs.comp.Clear();
   m_fallbackShaders_ps.comp.Clear();
   m_fallbackShaders_vs.warp.Clear();
@@ -3136,6 +3240,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   m_BlurShaders[1].ps.Clear();
   m_dx12BlurPSO[0].Reset();
   m_dx12BlurPSO[1].Reset();
+  m_dx12BufferAPSO.Reset();
   /*
   SafeRelease( m_shaders.comp.ptr );
   SafeRelease( m_shaders.warp.ptr );
@@ -3158,9 +3263,20 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_dx12VS[0].Reset();
     m_dx12VS[1].Reset();
     m_injectEffectTex.Reset();
+    m_dx12Feedback[0].Reset();
+    m_dx12Feedback[1].Reset();
+    m_dx12ImageFeedback[0].Reset();
+    m_dx12ImageFeedback[1].Reset();
+    m_dx12FeedbackB[0].Reset();
+    m_dx12FeedbackB[1].Reset();
+    m_dx12AudioTex.Reset();
+    m_audioUploadBuffer.Reset();
+    m_dx12BufferAPSO.Reset();
+    m_dx12BufferBPSO.Reset();
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
     DestroySpoutInput();
+    DestroyVideoCapture();
 #if (NUM_BLUR_TEX > 0)
     for (int bi = 0; bi < NUM_BLUR_TEX; bi++)
       m_dx12Blur[bi].Reset();
@@ -3256,13 +3372,13 @@ void Engine::MyRenderFn(int redraw) {
       AddError(L"Preset directory not found. Press F8 to open Settings.", 8.0f, ERR_MISC, true);
     }
 
-    // Self-bootstrap: open settings to About tab, notify user about verbose logging
-    if (m_bSelfBootstrapped && m_UI_mode == UI_REGULAR) {
-      m_bSelfBootstrapped = false; // only once
-      // Set ActiveTab to About (page 10) so settings opens there
-      WritePrivateProfileStringW(L"Settings", L"ActiveTab", L"10", GetConfigIniFile());
-      OpenSettingsWindow();
-      AddError(L"First run: debug logging set to max (verbose). Add presets to resources\\presets\\.", 10.0f, ERR_MISC, true);
+    // First run or self-bootstrap: show Welcome window to let user choose resources folder
+    // Force UI_REGULAR first — LoadRandomPreset may have set UI_LOAD when preset dir is empty
+    if (m_bSelfBootstrapped || m_bFirstRun) {
+      m_bSelfBootstrapped = false;
+      m_bFirstRun = false; // only once per session
+      m_UI_mode = UI_REGULAR;
+      OpenWelcomeWindow();
     }
 
     float dt = GetTime() - m_prev_time;
@@ -3499,7 +3615,16 @@ void Engine::MyRenderFn(int redraw) {
     // Convert to lower-left origin: (0,0)=lower-left, (1,1)=upper-right
     m_mouseX = fx;        // 0 = left, 1 = right
     m_mouseY = 1.0f - fy; // 0 = bottom, 1 = top
+
+    // Shadertoy iMouse: update drag position in pixels while left button held
+    if (m_stMouseDown) {
+      m_stMouseX = clamp(sx, 0.f, static_cast<float>(targetW - 1));
+      m_stMouseY = clamp(static_cast<float>(targetH - 1) - sy, 0.f, static_cast<float>(targetH - 1));
+    }
   }
+
+  // Shadertoy iMouse: clear just-clicked flag after one frame
+  if (m_stMouseJustClicked) m_stMouseJustClicked = false;
 
   //Duration of the click called from WM_LBUTTONDOWN
   if (m_mouseClicked > 0) {
@@ -3569,6 +3694,13 @@ void Engine::MyRenderFn(int redraw) {
     DoCustomSoundAnalysis();    // emulates old pre-vms milkdrop sound analysis
 
   RenderFrame(redraw);  // see milkdropfs.cpp
+
+  CopyBackbufferToFeedback();  // capture comp output for Shadertoy temporal feedback (no-op when unused)
+
+  // Swap feedback ping-pong: current write becomes next frame's read
+  // (shared index for Buffer A, Buffer B, and Image feedback pairs)
+  if (m_bCompUsesFeedback || m_bCompUsesImageFeedback || m_bHasBufferA || m_bHasBufferB)
+    m_nFeedbackIdx = 1 - m_nFeedbackIdx;
 
   RenderInjectEffect();  // F11 inject effect post-process pass (no-op when mode==0)
 
@@ -3788,6 +3920,18 @@ HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, i
   return hw;
 }
 
+HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h,
+                   int rangeMin, int rangeMax, int pos, bool visible) {
+  DWORD style = WS_CHILD | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, TRACKBAR_CLASSW, NULL, style,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw) {
+    SendMessage(hw, TBM_SETRANGE, TRUE, MAKELPARAM(rangeMin, rangeMax));
+    SendMessage(hw, TBM_SETPOS, TRUE, pos);
+  }
+  return hw;
+}
+
 // Draw a single 3D edge (1px highlight on top-left, shadow on bottom-right)
 void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised) {
   COLORREF topLeft  = raised ? hi : shadow;
@@ -3868,5 +4012,151 @@ void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark,
   if (hOldFont) SelectObject(hdc, hOldFont);
 }
 
+// ---------------------------------------------------------------------------
+// Audio texture (512x2, R32_FLOAT) — Shadertoy-compatible FFT + waveform
+// Row 0: FFT spectrum (512 bins, bass→treble), Row 1: PCM waveform (512 samples)
+// ---------------------------------------------------------------------------
+void Engine::CreateAudioTexture()
+{
+    if (!m_lpDX || !m_lpDX->m_device) return;
+
+    const UINT W = 512, H = 2;
+    const DXGI_FORMAT fmt = DXGI_FORMAT_R32_FLOAT;
+    const UINT bytesPerPixel = 4; // R32_FLOAT = 4 bytes
+
+    // 1. Create GPU texture (DEFAULT heap, SRV-readable)
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width            = W;
+    texDesc.Height           = H;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels        = 1;
+    texDesc.Format           = fmt;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    HRESULT hr = m_lpDX->m_device->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&m_dx12AudioTex.resource));
+    if (FAILED(hr)) {
+        DebugLogA("DX12: Audio texture creation FAILED", LOG_WARN);
+        return;
+    }
+
+    m_dx12AudioTex.width  = W;
+    m_dx12AudioTex.height = H;
+    m_dx12AudioTex.format = fmt;
+    m_dx12AudioTex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+    // Allocate SRV
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
+    m_dx12AudioTex.srvIndex = m_lpDX->m_nextFreeSrvSlot;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format                  = fmt;
+    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels     = 1;
+    m_lpDX->m_device->CreateShaderResourceView(m_dx12AudioTex.resource.Get(), &srvDesc, srvCpu);
+    m_lpDX->AllocateSrvGpu();
+
+    m_lpDX->CreateBindingBlockForTexture(m_dx12AudioTex);
+
+    // 2. Create persistent upload buffer (row pitch must be 256-byte aligned)
+    UINT alignedRowPitch = (W * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    UINT64 uploadSize = (UINT64)alignedRowPitch * H;
+
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC bufDesc = {};
+    bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Width            = uploadSize;
+    bufDesc.Height           = 1;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.MipLevels        = 1;
+    bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    hr = m_lpDX->m_device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&m_audioUploadBuffer));
+    if (FAILED(hr)) {
+        DebugLogA("DX12: Audio upload buffer creation FAILED", LOG_WARN);
+        m_dx12AudioTex.Reset();
+        return;
+    }
+
+    DebugLogA("DX12: Audio texture created (512x2 R32_FLOAT)");
+}
+
+void Engine::UpdateAudioTexture()
+{
+    if (!m_dx12AudioTex.IsValid() || !m_audioUploadBuffer || !m_lpDX) return;
+
+    const UINT W = 512, H = 2;
+    const UINT bytesPerPixel = 4;
+    UINT alignedRowPitch = (W * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+
+    // Map upload buffer
+    UINT8* mapped = nullptr;
+    D3D12_RANGE readRange = { 0, 0 }; // not reading
+    HRESULT hr = m_audioUploadBuffer->Map(0, &readRange, (void**)&mapped);
+    if (FAILED(hr)) return;
+
+    // Row 0: FFT spectrum (512 bins) — normalize with sqrt + scale to match Shadertoy
+    {
+        float* row0 = (float*)mapped;
+        for (UINT i = 0; i < W; i++) {
+            // Average left + right channels, apply sqrt for perceptual scaling
+            float mag = (mysound.fSpecLeft[i] + mysound.fSpecRight[i]) * 0.5f;
+            // Shadertoy-style scaling: sqrt(magnitude) * scale, clamped 0-1
+            row0[i] = min(1.0f, sqrtf(mag) * 4.0f);
+        }
+    }
+
+    // Row 1: PCM waveform (512 samples from 576) — normalize -1..1 → 0..1
+    {
+        float* row1 = (float*)(mapped + alignedRowPitch);
+        for (UINT i = 0; i < W; i++) {
+            // Average left + right channels, normalize: waveform is -128..128 range
+            float sample = (mysound.fWave[0][i] + mysound.fWave[1][i]) * 0.5f;
+            row1[i] = sample / 256.0f + 0.5f; // map to 0..1
+        }
+    }
+
+    m_audioUploadBuffer->Unmap(0, nullptr);
+
+    // Copy upload buffer → GPU texture
+    auto* cmdList = m_lpDX->m_commandList.Get();
+
+    m_lpDX->TransitionResource(m_dx12AudioTex, D3D12_RESOURCE_STATE_COPY_DEST);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = m_audioUploadBuffer.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcLoc.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_R32_FLOAT;
+    srcLoc.PlacedFootprint.Footprint.Width    = W;
+    srcLoc.PlacedFootprint.Footprint.Height   = H;
+    srcLoc.PlacedFootprint.Footprint.Depth    = 1;
+    srcLoc.PlacedFootprint.Footprint.RowPitch = alignedRowPitch;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = m_dx12AudioTex.resource.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+
+    cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    m_lpDX->TransitionResource(m_dx12AudioTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+}
 
 } // namespace mdrop

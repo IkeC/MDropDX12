@@ -24,6 +24,56 @@ namespace mdrop {
 extern Engine g_engine;
 extern float timetick;
 
+void Engine::CopyBackbufferToFeedback()
+{
+  // Single-pass feedback: comp now renders directly to FLOAT16 feedback buffer
+  // and blits to the backbuffer, so no copy is needed.
+  // Two-pass (Buffer A + Image): Buffer A writes directly to feedback.
+  // This function is kept as a stub; the old backbuffer→feedback copy was removed
+  // because the backbuffer is UNORM (clamps negatives) while feedback is FLOAT16.
+  return;
+
+  int writeIdx = 1 - m_nFeedbackIdx;
+  DX12Texture& fbWrite = m_dx12Feedback[writeIdx];
+  if (!fbWrite.IsValid()) return;
+  if (!m_lpDX || !m_lpDX->m_ready) return;
+
+  // Size guard: feedback texture must match backbuffer for CopyResource
+  if (fbWrite.width  != (UINT)m_lpDX->m_backbuffer_width ||
+      fbWrite.height != (UINT)m_lpDX->m_backbuffer_height)
+    return;
+
+  auto* cl = m_lpDX->m_commandList.Get();
+  ID3D12Resource* pBackBuf = m_lpDX->m_renderTargets[m_lpDX->m_frameIndex].Get();
+
+  // 1. Transition backbuffer RENDER_TARGET → COPY_SOURCE
+  D3D12_RESOURCE_BARRIER toSrc = {};
+  toSrc.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toSrc.Transition.pResource        = pBackBuf;
+  toSrc.Transition.StateBefore      = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toSrc.Transition.StateAfter       = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toSrc.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toSrc);
+
+  // 2. Transition feedback write buffer → COPY_DEST
+  m_lpDX->TransitionResource(fbWrite, D3D12_RESOURCE_STATE_COPY_DEST);
+
+  // 3. Copy backbuffer → feedback write buffer
+  cl->CopyResource(fbWrite.resource.Get(), pBackBuf);
+
+  // 4. Transition feedback COPY_DEST → PIXEL_SHADER_RESOURCE
+  m_lpDX->TransitionResource(fbWrite, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  // 5. Transition backbuffer COPY_SOURCE → RENDER_TARGET
+  D3D12_RESOURCE_BARRIER toRT = {};
+  toRT.Type                        = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toRT.Transition.pResource        = pBackBuf;
+  toRT.Transition.StateBefore      = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toRT.Transition.StateAfter       = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toRT.Transition.Subresource      = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  cl->ResourceBarrier(1, &toRT);
+}
+
 void Engine::RenderInjectEffect()
 {
   // Post-process pass: applies the F11 inject effect and (for non-shader presets)
@@ -43,8 +93,13 @@ void Engine::RenderInjectEffect()
     if (m_pState->var_pf_invert   && *m_pState->var_pf_invert   > 0.5) presetFxMask |= 8u;
   }
 
+  // Shadertoy sRGB gamma: disabled. Shadertoy.com actually uses RGBA8 (NOT sRGB).
+  // Shaders that need gamma encode it manually (e.g. pow(col, 0.45)).
+  // Applying sRGB here would double-gamma those shaders.
+  UINT srgbGamma = 0u;
+
   // Skip if nothing to do
-  if (m_nInjectEffectMode == 0 && presetFxMask == 0) return;
+  if (m_nInjectEffectMode == 0 && presetFxMask == 0 && srgbGamma == 0) return;
   if (!m_pInjectEffectPSO || !m_injectEffectTex.IsValid()) return;
   if (!m_lpDX || !m_lpDX->m_ready) return;
 
@@ -89,12 +144,7 @@ void Engine::RenderInjectEffect()
   cl->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
   // 7. Set viewport + scissor
-  float bbW = (float)m_lpDX->m_backbuffer_width;
-  float bbH = (float)m_lpDX->m_backbuffer_height;
-  D3D12_VIEWPORT vp     = { 0.f, 0.f, bbW, bbH, 0.f, 1.f };
-  D3D12_RECT     scissor = { 0, 0, (LONG)bbW, (LONG)bbH };
-  cl->RSSetViewports(1, &vp);
-  cl->RSSetScissorRects(1, &scissor);
+  SetViewportAndScissor(cl, m_lpDX->m_backbuffer_width, m_lpDX->m_backbuffer_height);
 
   // 8. Set PSO + root signature
   cl->SetPipelineState(m_pInjectEffectPSO.Get());
@@ -105,8 +155,8 @@ void Engine::RenderInjectEffect()
   cl->SetDescriptorHeaps(_countof(heaps), heaps);
 
   // 10. Upload mode CBV (b0 = uint4 mode)
-  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask
-  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, 0, 0 } };
+  //     mode.x = F11 inject effect, mode.y = per-preset effect bitmask, mode.z = sRGB gamma
+  struct { UINT mode[4]; } cbData = { { (UINT)m_nInjectEffectMode, presetFxMask, srgbGamma, 0 } };
   D3D12_GPU_VIRTUAL_ADDRESS cbva = m_lpDX->UploadConstantBuffer(&cbData, sizeof(cbData));
   if (cbva)
     cl->SetGraphicsRootConstantBufferView(0, cbva);
@@ -320,12 +370,18 @@ void Engine::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
 void Engine::ClearErrors(int category)  // 0=all categories
 {
   int N = (int)m_errors.size();
-  for (int i = 0; i < N; i++)
-    if (category == ERR_ALL || m_errors[i].category == category) {
+  for (int i = 0; i < N; i++) {
+    int cat = m_errors[i].category;
+    // Track info (BOTTOM_EXTRA) has its own bucket — only cleared explicitly
+    if (category == ERR_ALL &&
+        (cat == ERR_MSG_BOTTOM_EXTRA_1 || cat == ERR_MSG_BOTTOM_EXTRA_2 || cat == ERR_MSG_BOTTOM_EXTRA_3))
+      continue;
+    if (category == ERR_ALL || cat == category) {
       m_errors.erase(m_errors.begin() + i);
       i--;
       N--;
     }
+  }
 }
 
 void Engine::MyRenderUI(
@@ -1373,12 +1429,11 @@ void Engine::MyRenderUI(
       }
     }
     else if (m_UI_mode == UI_LOAD) {
-      if (m_nPresets == 0) {
-        // note: this error message is repeated in milkdrop.cpp in LoadRandomPreset()
-        wchar_t buf[1024];
-        swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
-        AddError(buf, 6.0f, ERR_MISC, true);
+      if (m_nPresets - m_nDirs == 0) {
+        // No preset files (only directories) — post dialog to UI thread
         m_UI_mode = UI_REGULAR;
+        HWND hw = GetPluginWindow();
+        if (hw) PostMessage(hw, WM_MW_NO_PRESETS_PROMPT, 0, 0);
       }
       else {
         MyTextOut(wasabiApiLangString(IDS_LOAD_WHICH_PRESET_PLUS_COMMANDS), MTO_UPPER_LEFT, true);

@@ -177,7 +177,15 @@ namespace fs = std::filesystem;
 #define DEFAULT_WIDTH 720;
 #define DEFAULT_HEIGHT 720;
 
-namespace mdrop { Engine g_engine; }
+namespace mdrop {
+  Engine g_engine;
+  extern bool TranspaMode;
+  extern int ToggleFPSNumPressed;
+  extern int HardcutMode;
+  extern int beatcount;
+  void ToggleTransparency(HWND);
+  void ToggleWindowOpacity(HWND, bool);
+}
 using namespace mdrop;
 MDropDX12 mdropdx12;
 HINSTANCE api_orig_hinstance = nullptr;
@@ -211,7 +219,6 @@ static HMODULE module = nullptr;
 static std::atomic<HANDLE> threadRender = nullptr;
 static std::atomic<HANDLE> threadSetup = nullptr;
 static unsigned threadId = 0;
-static std::mutex pcmMutex;
 static unsigned char pcmLeftIn[SAMPLE_SIZE];
 static unsigned char pcmRightIn[SAMPLE_SIZE];
 static unsigned char pcmLeftOut[SAMPLE_SIZE];
@@ -1436,9 +1443,17 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_HOTKEY:
   {
     int id = (int)wParam;
+    // Window-open actions: delegate to engine dispatch
+    if (id == HK_OPEN_SETTINGS || id == HK_OPEN_DISPLAYS ||
+        id == HK_OPEN_SONGINFO || id == HK_OPEN_HOTKEYS) {
+      g_engine.DispatchHotkeyAction(id);
+      break;
+    }
+    // Toggle actions: handle inline (need local hWnd/fullscreen state)
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
       ToggleFullScreen(hWnd);
+      SetForegroundWindow(hWnd);
       break;
     case HK_TOGGLE_STRETCH:
       if (g_engine.m_bMirrorModeForAltS) {
@@ -1461,7 +1476,139 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       } else {
         ToggleStretch(hWnd);
       }
+      SetForegroundWindow(hWnd);
       break;
+    }
+    break;
+  }
+
+  case WM_MW_HOTKEY_ACTION:
+  {
+    // Dispatched from DispatchHotkeyAction() for actions that need App.cpp locals
+    // or render-window-level state (HWND, TranspaMode, media keys, UI mode, etc.)
+    int id = (int)wParam;
+    switch (id) {
+    case HK_TOGGLE_FULLSCREEN:
+      ToggleFullScreen(hWnd);
+      SetForegroundWindow(hWnd);
+      break;
+    case HK_TOGGLE_STRETCH:
+      if (g_engine.m_bMirrorModeForAltS) {
+        if (!g_engine.m_bMirrorsActive) {
+          auto result = g_engine.TryActivateMirrors(hWnd);
+          if (result != Engine::MirrorCancelled) {
+            if (!fullscreen) ToggleFullScreen(hWnd);
+          }
+          if (result == Engine::MirrorActivated) {
+            g_engine.m_bMirrorsActive = true;
+            g_engine.AddNotification(L"Mirror outputs active");
+          } else if (result == Engine::MirrorFullscreenOnly) {
+            g_engine.AddNotification(L"Fullscreen (no mirrors)");
+          }
+        } else {
+          g_engine.m_bMirrorsActive = false;
+          if (fullscreen) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs disabled");
+        }
+      } else {
+        ToggleStretch(hWnd);
+      }
+      SetForegroundWindow(hWnd);
+      break;
+    case HK_ALWAYS_ON_TOP:
+      g_engine.m_bAlwaysOnTop = !g_engine.m_bAlwaysOnTop;
+      g_engine.ToggleAlwaysOnTop(hWnd);
+      g_engine.AddNotification(g_engine.m_bAlwaysOnTop
+          ? L"Always On Top enabled" : L"Always On Top disabled");
+      break;
+    case HK_TRANSPARENCY_MODE:
+      TranspaMode = !TranspaMode;
+      ToggleTransparency(hWnd);
+      g_engine.AddNotification(TranspaMode
+          ? L"Transparency Mode enabled" : L"Transparency Mode disabled");
+      break;
+    case HK_BLACK_MODE:
+      g_engine.m_blackmode = !g_engine.m_blackmode;
+      g_engine.AddNotification(g_engine.m_blackmode
+          ? L"Black Mode enabled" : L"Black Mode disabled");
+      break;
+    case HK_FPS_CYCLE: {
+      static const int cycle[] = { 60, 90, 120, 144, 240, 360, 720, 0, 30 };
+      static const wchar_t* labels[] = { L"60 fps", L"90 fps", L"120 fps", L"144 fps",
+        L"240 fps", L"360 fps", L"720 fps", L"Unlimited fps", L"30 fps" };
+      ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % 9;
+      g_engine.SetFPSCap(cycle[ToggleFPSNumPressed]);
+      g_engine.AddNotification((wchar_t*)labels[ToggleFPSNumPressed]);
+      break;
+    }
+    case HK_OPACITY_UP:
+      ToggleWindowOpacity(hWnd, false);
+      break;
+    case HK_OPACITY_DOWN:
+      ToggleWindowOpacity(hWnd, true);
+      break;
+    case HK_OPACITY_25:
+    case HK_OPACITY_50:
+    case HK_OPACITY_75:
+    case HK_OPACITY_100:
+      g_engine.SetOpacity(hWnd);
+      break;
+    case HK_MEDIA_PLAY_PAUSE:
+      g_engine.AddError(L"Play/Pause", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
+      keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_STOP:
+      g_engine.AddError(L"Stop", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_STOP, 0, 0, 0);
+      keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_PREV_TRACK:
+      g_engine.AddError(L"Previous", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_PREV_TRACK, 0, 0, 0);
+      keybd_event(VK_MEDIA_PREV_TRACK, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_NEXT_TRACK:
+      g_engine.AddError(L"Next", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
+      keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
+      break;
+    case HK_MEDIA_REWIND:
+      g_engine.AddError(L"Rewind", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_REWIND));
+      break;
+    case HK_MEDIA_FAST_FORWARD:
+      g_engine.AddError(L"Fast Forward", g_engine.m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+      SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_FAST_FORWARD));
+      break;
+    case HK_INJECT_EFFECT_CYCLE: {
+      static wchar_t* kInjectNames[] = {
+          L"Inject Effect: Off", L"Inject Effect: Brighten",
+          L"Inject Effect: Darken", L"Inject Effect: Solarize", L"Inject Effect: Invert"
+      };
+      g_engine.m_nInjectEffectMode = (g_engine.m_nInjectEffectMode + 1) % 5;
+      g_engine.AddNotificationColored(kInjectNames[g_engine.m_nInjectEffectMode], 1.5f, 0xFF00FFFF);
+      break;
+    }
+    case HK_HARDCUT_MODE_CYCLE: {
+      HardcutMode++;
+      if (HardcutMode == 1)  { g_engine.m_bHardCutsDisabled = false; g_engine.AddNotification(L"Hard Cut Mode: Normal"); }
+      if (HardcutMode == 2)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Blend"); }
+      if (HardcutMode == 3)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass"); }
+      if (HardcutMode == 4)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Middle"); }
+      if (HardcutMode == 5)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Treble"); }
+      if (HardcutMode == 6)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Fast Blend"); }
+      if (HardcutMode == 7)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Treble Fast Blend"); }
+      if (HardcutMode == 8)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Bass Blend and Hardcut Treble"); }
+      if (HardcutMode == 9)  { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Rhythmic Hardcut"); }
+      if (HardcutMode == 10) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: 2 beats"); beatcount = -1; }
+      if (HardcutMode == 11) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: 4 beats"); beatcount = -1; }
+      if (HardcutMode == 12) { g_engine.m_bHardCutsDisabled = true;  g_engine.AddNotification(L"Hard Cut Mode: Kinetronix (Vizikord)"); beatcount = -1; }
+      if (HardcutMode == 13) { HardcutMode = 0; g_engine.m_bHardCutsDisabled = true; g_engine.AddNotification(L"Hard Cut Mode: OFF"); }
+      break;
+    }
+    // HK_OPEN_PRESET_LIST, HK_SAVE_PRESET, HK_OPEN_MENU, HK_SPRITE_MODE
+    // are handled directly in DispatchHotkeyAction (Engine member access)
     }
     break;
   }
@@ -1918,6 +2065,43 @@ static void PollWindowTitle() {
   }
 }
 
+// Helper: display song info overlay messages using the current track info.
+// Called on track change, explicit poll, and to refresh "Always Show" after device recovery.
+static void ShowSongInfoOverlay() {
+  if (!g_engine.m_bSongInfoOverlay && !g_engine.m_bSongInfoAlwaysShow) return;
+  if (mdropdx12.currentTitle.empty() && mdropdx12.currentArtist.empty()) return;
+
+  float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
+  wchar_t buf[512];
+
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+  std::string format = converter.to_bytes(g_engine.m_SongInfoFormat);
+  std::istringstream stream(format);
+  std::vector<std::string> tokens;
+  std::string token;
+  while (std::getline(stream, token, ';'))
+    tokens.push_back(token);
+
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
+
+  for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
+    std::string cur = *it;
+    std::transform(cur.begin(), cur.end(), cur.begin(), ::tolower);
+    if (cur == "artist" && mdropdx12.currentArtist.length() > 0) {
+      wcscpy(buf, mdropdx12.currentArtist.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_1, false);
+    } else if (cur == "title" && mdropdx12.currentTitle.length() > 0) {
+      wcscpy(buf, mdropdx12.currentTitle.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_2, false);
+    } else if (cur == "album" && mdropdx12.currentAlbum.length() > 0) {
+      wcscpy(buf, mdropdx12.currentAlbum.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_3, false);
+    }
+  }
+}
+
 void RenderFrame() {
 
   // Process any commands enqueued from the message pump thread
@@ -1930,13 +2114,11 @@ void RenderFrame() {
     return;
   }
 
-  {
-    std::unique_lock<std::mutex> lock(pcmMutex);
-    memcpy(pcmLeftOut, pcmLeftIn, SAMPLE_SIZE);
-    memcpy(pcmRightOut, pcmRightIn, SAMPLE_SIZE);
-    memset(pcmLeftIn, 128, SAMPLE_SIZE);   // 128 = silence in unsigned 8-bit PCM
-    memset(pcmRightIn, 128, SAMPLE_SIZE);
-  }
+  // pcmLeftIn/pcmRightIn are only accessed on this (render) thread — no mutex needed
+  memcpy(pcmLeftOut, pcmLeftIn, SAMPLE_SIZE);
+  memcpy(pcmRightOut, pcmRightIn, SAMPLE_SIZE);
+  memset(pcmLeftIn, 128, SAMPLE_SIZE);   // 128 = silence in unsigned 8-bit PCM
+  memset(pcmRightIn, 128, SAMPLE_SIZE);
 
   // Poll track info based on selected source
   if (g_engine.m_nTrackInfoSource == Engine::TRACK_SOURCE_SMTC) {
@@ -1966,28 +2148,9 @@ void RenderFrame() {
 
     mdropdx12.doPollExplicit = false;
 
-    // Only display song info on actual track change or explicit user request
-    // (skip initial detection on startup to avoid showing stale media titles)
-    if (mdropdx12.isSongChange || wasExplicit) {
-      wchar_t buf[512];
-
-      // Convert wchar_t array to std::string
-      std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-      std::string format = converter.to_bytes(g_engine.m_SongInfoFormat);
-      std::istringstream stream(format);
-      std::vector<std::string> tokens;
-      std::string token;
-
-      // Split the string into tokens
-      while (std::getline(stream, token, ';')) {
-        tokens.push_back(token);
-      }
-
-      // remove existing song info display
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
-
+    // Display song info on track change, explicit user request,
+    // or when "Always Show" is enabled (includes initial detection)
+    if (mdropdx12.isSongChange || wasExplicit || g_engine.m_bSongInfoAlwaysShow) {
       // Build "Artist - Title" for the animated song title system
       {
         std::wstring songTitle;
@@ -1998,37 +2161,7 @@ void RenderFrame() {
         lstrcpynW(g_engine.m_szSongTitle, songTitle.c_str(), 511);
       }
 
-      // Show overlay notifications if enabled
-      if (g_engine.m_bSongInfoOverlay) {
-        float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
-
-        // Iterate over tokens in reverse order
-        for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
-          std::string currentToken = *it;
-
-          // Convert token to lowercase for case-insensitive comparison
-          std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
-
-          if (currentToken == "artist") {
-            if (mdropdx12.currentArtist.length() > 0) {
-              wcscpy(buf, mdropdx12.currentArtist.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_1, false);
-            }
-          }
-          else if (currentToken == "title") {
-            if (mdropdx12.currentTitle.length() > 0) {
-              wcscpy(buf, mdropdx12.currentTitle.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_2, false);
-            }
-          }
-          else if (currentToken == "album") {
-            if (mdropdx12.currentAlbum.length() > 0) {
-              wcscpy(buf, mdropdx12.currentAlbum.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_3, false);
-            }
-          }
-        }
-      }
+      ShowSongInfoOverlay();
     }
 
     mdropdx12.updated = false;

@@ -4,7 +4,9 @@ MDropDX12 is a DirectX 12 music visualizer based on the MilkDrop2 engine. It ren
 
 ## Getting Started
 
-Run `MDropDX12.exe`. The visualizer starts in windowed mode, capturing system audio via WASAPI loopback. Play music through any application and visuals will respond automatically.
+Run `MDropDX12.exe`. On first launch, a **Welcome window** appears with options to browse for a resources folder (containing presets and textures), open the Shader Import window, or open Settings. The visualizer self-bootstraps — no setup commands or external files are needed.
+
+Once running, the visualizer captures system audio via WASAPI loopback. Play music through any application and visuals respond automatically.
 
 Press **F1** for the built-in help overlay (press again for page 2, again to close).
 
@@ -12,7 +14,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 
 ## System Requirements
 
-- Windows 11 64-bit or higher
+- Windows 10 64-bit or higher (Windows 11 recommended)
 - DirectX 12 compatible GPU
 
 ## Window Modes
@@ -37,117 +39,130 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 
 ## Keyboard Shortcuts
 
-### General
+All keyboard shortcuts below are **reassignable** via the Hotkeys window (Ctrl+F7) unless marked as fixed. Press **F1** in-app for a live reference that reflects your current bindings.
+
+### Fixed Keys (not reassignable)
 
 | Key | Action |
 |-----|--------|
 | F1 | Help overlay (page 1 / page 2 / off) |
 | F2 | Toggle borderless window |
 | CTRL+F2 | Disable all display outputs (kill switch) |
-| F3 | Cycle FPS cap: 30/60/90/120/144/240/360/720/Unlimited |
-| F4 | Show/hide preset name |
-| F5 | Show/hide FPS counter |
-| F6 | Show/hide preset rating |
-| F7 | Toggle always on top |
-| F8 or CTRL+L | Open Settings window |
-| F9 | Toggle clickthrough mode |
-| F10 or CTRL+Z | Toggle Spout output |
-| SHIFT+F10 or SHIFT+CTRL+Z | Toggle fixed Spout resolution |
-| F11 | Cycle effect: Off / Brighten / Darken / Solarize / Invert |
-| SHIFT+F11 | Cycle hard cut mode |
-| F12 | Toggle transparency mode |
-| CTRL+F12 | Toggle black mode |
-| ALT+ENTER | Toggle fullscreen |
-| ALT+S | Toggle multi-monitor stretch (or mirror mode if enabled) |
-| CTRL+F3 | Display current FPS setting |
-| CTRL+F9 | Toggle windowed fullscreen |
-| CTRL+SHIFT+F9 | Toggle watermark mode |
-| SCROLL LOCK | Lock/unlock preset + toggle playlist |
-
-### Presets
-
-| Key | Action |
-|-----|--------|
-| SPACE | Soft cut to next preset |
-| H | Hard cut to next preset |
-| BACKSPACE | Go back to previous preset |
-| `` ` `` or `~` | Lock/unlock current preset |
-| R | Toggle random/sequential order |
-| L | Open preset browser |
-| M | Show/hide preset-editing menu |
-| N | Show per-frame monitor |
-| S | Save new preset |
-| CTRL+S | Quicksave to /presets/Quicksave |
-| SHIFT+CTRL+S | Quicksave to /presets/Quicksave2 |
+| CTRL+SHIFT+F2 | Reset all hotkeys to defaults |
+| CTRL+L | Open Settings window (hardcoded fallback) |
+| ESC | Close menu / close app |
+| 0-9 | Numeric input (sprites / messages) |
 | Mousewheel | Scroll through presets |
-| Drag-and-drop .milk file | Load preset |
+| Drag-and-drop | Load .milk/.milk2 file |
 
-### Audio and Quality
+### Navigation
 
-| Key | Action |
-|-----|--------|
-| CTRL+D | Set audio device to default |
-| SHIFT+CTRL+D | Display current audio device |
-| CTRL+Q | Double quality factor |
-| SHIFT+CTRL+Q | Half quality factor |
-| CTRL+H | Shift hue |
-| CTRL+A | Toggle auto preset change on track change |
-| CTRL+B | Toggle track info polling |
-| CTRL+C | Toggle cover art display on track change |
+| Default Key | Action |
+|-------------|--------|
+| SPACE | Next Preset (soft cut) |
+| BACKSPACE | Previous Preset |
+| H | Hard Cut |
+| A | Random Mashup |
+| `` ` `` | Lock/Unlock Preset |
+| R | Random/Sequential |
+| L | Preset Browser |
+| S | Save Preset As... |
+| M | Toggle Menu |
 
-### Media Controls
+### Visual
 
-| Key | Action |
-|-----|--------|
-| LEFT ARROW | Previous track |
-| RIGHT ARROW or V | Next track |
-| DOWN ARROW or X | Play/pause |
-| UP ARROW or C | Stop |
-| CTRL+LEFT | Fast rewind |
-| CTRL+RIGHT | Fast forward |
-| B or Middle Mouse | Show track info |
+| Default Key | Action |
+|-------------|--------|
+| SHIFT+UP | Opacity Up |
+| SHIFT+DOWN | Opacity Down |
+| (none) | Opacity 25% / 50% / 75% / 100% |
+| W / SHIFT+W | Wave Mode +/- |
+| E / SHIFT+E | Wave Alpha -/+ |
+| J / SHIFT+J | Wave Scale -/+ |
+| I / SHIFT+I | Zoom In / Out |
+| O / SHIFT+O | Warp Amount -/+ |
+| U / SHIFT+U | Warp Scale -/+ |
+| P / SHIFT+P | Echo Alpha -/+ |
+| Q / SHIFT+Q | Echo Zoom -/+ |
+| F | Echo Orientation |
+| G / SHIFT+G | Gamma -/+ |
+| [ / ] | Push X -/+ |
+| { / } | Push Y -/+ |
+| < / > | Rotate Left / Right |
+| - / + | Brightness -/+ |
+| CTRL+H / CTRL+SHIFT+H | Hue +/- |
 
-### Messages and Sprites
+### Media
 
-| Key | Action |
-|-----|--------|
-| K | Toggle sprite/message mode |
-| SHIFT+K | Enter sprite kill mode |
-| 00-99 | Invoke sprite or message by number |
-| * | Clear digit entry, reload messages.ini |
-| DEL | Clear latest sprite/message |
-| SHIFT+DEL | Clear oldest sprite/message |
-| SHIFT+CTRL+DEL | Clear all |
-| CTRL+K | Kill all sprites |
-| CTRL+T | Kill all messages and song titles |
-| CTRL+X | Save screenshot |
+| Default Key | Action |
+|-------------|--------|
+| DOWN | Play/Pause |
+| UP | Stop |
+| LEFT | Previous Track |
+| RIGHT | Next Track |
+| CTRL+LEFT | Rewind |
+| CTRL+RIGHT | Fast Forward |
 
-### Visual Tweaking
+### Window
 
-| Key | Action |
-|-----|--------|
-| Q / q | Wave echo zoom +/- |
-| W / w | Wave mode +/- |
-| E / e | Wave alpha +/- |
-| U / u | Wave warp scale +/- |
-| I / i | Wave zoom +/- |
-| O / o | Wave warp amount +/- |
-| P / p | Video echo alpha +/- |
-| + / - | Brightness +/- |
-| G / g | Gamma +/- |
-| J / j | Wave scale +/- |
-| [ / ] | X push +/- |
-| { / } | Y push +/- |
-| < / > | Rotation +/- |
-| A | Random mini mash-up |
-| D | Cycle shader lock states |
-| F | Toggle echo orientation |
-| ! | Randomize warp shader |
-| @ | Randomize comp shader |
+| Default Key | Action |
+|-------------|--------|
+| (none) | Toggle Fullscreen |
+| (none) | Toggle Stretch/Mirror |
+| F7 | Always On Top |
+| F12 | Transparency Mode |
+| CTRL+F12 | Black Mode |
+| F3 | FPS Cycle |
+| F4 | Show Preset Info |
+| F5 | Show FPS |
+| F6 | Show Rating |
+| F9 | Shader Help |
+
+### Tools
+
+| Default Key | Action |
+|-------------|--------|
+| F8 | Open Settings |
+| CTRL+F8 | Open Spout/Displays |
+| SHIFT+CTRL+F8 | Open Song Info |
+| CTRL+F7 | Open Hotkeys |
+| (none) | Open MIDI |
+
+### Shader/Effects
+
+| Default Key | Action |
+|-------------|--------|
+| F11 | Inject Effect Cycle |
+| SHIFT+F11 | Hard Cut Mode Cycle |
+| CTRL+Q / CTRL+SHIFT+Q | Quality Down / Up |
+| F10 | Spout Toggle |
+| SHIFT+F10 | Spout Fixed Size |
+| CTRL+X | Screenshot |
+| D | Shader Lock Cycle |
+| T | Song Title Anim |
+| CTRL+K | Kill Sprites |
+| CTRL+T | Kill Text Overlays |
+| CTRL+A | Auto Preset Change |
+| SHIFT+1 | Scramble Warp |
+| SHIFT+2 | Scramble Comp |
+| CTRL+S | Quicksave Preset |
+| SCROLL LOCK | Scroll Lock |
+| SHIFT+8 | Reload Messages |
+
+### Misc
+
+| Default Key | Action |
+|-------------|--------|
+| N | Debug Info |
+| K | Sprite/Message Mode |
+
+### Script & Launch (User-Added)
+
+Use the **+** button in the Hotkeys window to add any number of Script Command or Launch App bindings. Script commands execute IPC commands (e.g., `NEXT`, `OPACITY=0.5`, `PRESET=name.milk`). Launch App entries launch or focus external programs. See the Configurable Hotkeys section for details.
 
 ## Settings Window (F8)
 
-Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with dark theme support.
+Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with tri-mode theme support (Dark / Light / Follow System). The pin icon in the top-right corner toggles always-on-top for the Settings window (on by default). Settings, Displays, Song Info, and Hotkeys windows are standalone ToolWindows that run on their own threads and remember their positions and active tabs between sessions.
 
 ### General Tab
 
@@ -171,7 +186,8 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Display Seconds**: How long track info remains visible (0.5-60 seconds)
 - **Show Now**: Force-display current track info immediately
 - **Change Preset with Song**: Auto-advance when a new track starts
-- **Show FPS / Always on Top / Borderless / Dark Theme**: Toggle checkboxes
+- **Show FPS / Always on Top / Borderless**: Toggle checkboxes
+- **Theme**: Select Dark, Light, or Follow System. Follow System auto-detects your Windows theme and switches when you change it in Windows Settings > Personalization > Colors
 - **Font +/- buttons**: Adjust HUD overlay font size
 - **Resources button**: Opens the Resource Viewer showing all textures loaded by the current preset with their load status, type, dimensions, and file paths
 
@@ -197,7 +213,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 ### System Tab
 
 - **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
-- **Global Hotkeys**: Configure system-wide hotkeys that work even when MDropDX12 is not the active window. Check **Enable** to activate global hotkeys. Select an action from the list, press a key combination in the capture field, and click **Set** to assign it. Click **Clear** to remove a hotkey. If a hotkey conflicts with another application, a notification appears and the previous binding is kept. Global hotkeys are disabled by default. ALT+S and ALT+ENTER always work as local shortcuts when the visualizer window has focus.
+- **Hotkeys...**: Opens the Hotkeys window (also available via Ctrl+F7). See the Configurable Hotkeys section below.
 - **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
 - **Game Controller**: Map game controller buttons to visualizer commands. Check **Enable** to start polling. Select a controller from the **Device** dropdown, click **Scan** to re-enumerate connected controllers. The **Button Mapping** text editor shows the JSON configuration mapping button numbers to commands. Click **Defaults** for the default DualSense mapping, **Save** to write to `controller.json`, **Load** to read it back. The **?** button shows an Xbox controller button reference. See Game Controller section below for details.
 
@@ -244,6 +260,10 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 ### Displays Tab
 
+The Displays tab is split into two sub-tabs: **Display Outputs** and **Video Input**.
+
+#### Display Outputs Sub-Tab
+
 - **Output List**: Shows all detected monitors and Spout senders with status (OFF / ON / ACTIVE)
 - **Enable**: Toggle the selected output on or off
 - **Fullscreen**: Toggle fullscreen mode for monitor mirrors
@@ -258,9 +278,18 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
-- **Video Input**: Composite a Spout sender as a background or overlay layer on the visualization. Check **Enable** to activate, select a sender from the dropdown (or Auto for the first available), choose **Background** or **Overlay** layer, adjust **Opacity**, and optionally enable **Luma Key** with threshold and softness controls for transparency keying.
 
-See the Display Outputs section below for details.
+#### Video Input Sub-Tab
+
+- **Source**: Select video input source — **None**, **Spout** (receive from an external Spout sender), **Webcam** (capture from a connected camera via Media Foundation), or **Video File** (play an MP4 or other video file)
+- **Layer**: Choose **Background** or **Overlay** compositing mode
+- **Opacity**: Controls transparency of the video layer (0-100%)
+- **Luma Key**: When enabled, dark areas of the video become transparent. Adjust **Threshold** and **Softness** controls for keying
+- **Webcam Device**: Select a connected camera (with Refresh button)
+- **Video File**: Browse for an MP4 or other video file (with Loop checkbox)
+- **Spout Sender**: Select a Spout sender name (with Refresh button)
+
+See the Display Outputs and Video Input sections below for details.
 
 ### About Tab
 
@@ -625,6 +654,47 @@ Any application that supports Spout receiving can capture the MDropDX12 output:
 
 **High GPU usage with fixed resolution**: Large fixed resolutions (e.g., 3840x2160) require more GPU work since the entire pipeline renders at that resolution. Reduce the fixed resolution or lower render quality if needed.
 
+## Video Input
+
+MDropDX12 can composite a video source onto the visualization as a background or overlay layer. This is configured on the **Displays** tab in Settings (F8).
+
+### Source Types
+
+| Source | Description |
+|--------|-------------|
+| None | Video input disabled |
+| Spout | Receive frames from an external Spout sender (e.g., OBS, Resolume) |
+| Webcam | Capture from a connected camera via Windows Media Foundation |
+| Video File | Play an MP4 or other video file |
+
+### Layer Modes
+
+- **Background**: Video is drawn onto the render target before the warp pass, so the preset's warp distortion applies to the video. The visualization renders on top.
+- **Overlay**: Video is drawn onto the backbuffer after the comp pass, so it appears on top of the visualization.
+
+### Shared Controls
+
+All source types share the same compositing controls:
+
+- **Opacity**: Controls the transparency of the video layer (0-100%)
+- **Luma Key**: When enabled, dark areas of the video become transparent based on luminance. Use **Threshold** to set the cutoff point and **Softness** to control the transition gradient.
+
+### Webcam
+
+Select a webcam from the device dropdown. Use **Refresh** to re-enumerate devices if you connect a camera after opening Settings. The webcam captures at its native resolution using Media Foundation and delivers BGRA frames to the GPU.
+
+### Video File
+
+Click **Browse** to select a video file. Most formats supported by Windows Media Foundation work (MP4, AVI, WMV, MKV with appropriate codecs). Check **Loop** to repeat the video continuously.
+
+### Spout
+
+Select a Spout sender from the dropdown or leave it on Auto to connect to the first available sender. Use **Refresh** to update the sender list. This requires an external application sending frames via Spout (e.g., OBS with the Spout filter, Resolume, or any Spout-compatible sender).
+
+### Settings Persistence
+
+Video input settings are saved to the `[SpoutInput]` section of `settings.ini`. The `Source` key stores the active source type (0=None, 1=Spout, 2=Webcam, 3=File). All sources restore automatically on restart.
+
 ## Color Effects
 
 ### Hue / Saturation / Brightness
@@ -709,7 +779,7 @@ Note that this is an MDropDX12-specific change that does not port to other MilkD
 
 ## GLSL-to-HLSL Shader Conversion
 
-MDropDX12 supports converting GLSL shader code (e.g., from Shadertoy) to HLSL for use in presets. The conversion can be done live via the Milkwave Remote Shader tab.
+MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings → About tab → Open Shader Import**, or from the Welcome window on first run.
 
 ### Shadertoy Examples
 
@@ -724,18 +794,25 @@ Some Shadertoy shaders that can be converted to MDropDX12 presets:
 | Fractal Pyramid | [tsXBzS](https://www.shadertoy.com/view/tsXBzS) | Replace `break;` with `i=64.;` |
 | CineShader Lava | [3sySRK](https://www.shadertoy.com/view/3sySRK) | Replace `break;` with `i=64;`, replace aspect correction with `uv.x *= aspect.x;`, remove flipping |
 
+### Shader Import Workflow
+
+1. **Load Import** — load a `.json` project file containing GLSL source for each pass
+2. **Convert** — runs the GLSL→HLSL converter pipeline
+3. **Apply** — compiles HLSL and activates the Shadertoy render path
+4. **Save** — exports as `.milk3` (Shadertoy preset format)
+5. **Save Import** — saves the project back to `.json` for later editing
+
+Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` format stores converted HLSL and is what the visualizer loads at runtime.
+
+The converter automatically handles: `mix`→`lerp`, `mod`→`fmod`, `atan(a,b)`→`atan2(a,b)`, matrix constructors, `texture()`→`tex2D()`, `vec`→`float`, type casts, and many other GLSL→HLSL differences. Multi-pass shaders (Buffer A, Buffer B, Common, Image) are supported.
+
 ### Known GLSL-to-HLSL Limitations
 
-Common terms that cannot be converted automatically and need manual editing:
+Some patterns may need manual correction after conversion:
 
 | Term | Fix |
 |------|-----|
-| `break` | Replace with a statement setting a condition to end the loop |
-| `myFloat3 *= myMatrix` | `myFloat3 = mul(myFloat3, transpose(myMatrix))` |
-| `float3(1)` | Explicitly set all components: `float3(1,1,1)` |
-| `atan(a,b)` | `atan2(a,b)` |
 | `float[3] arr` | `float arr[3]` |
-| `radians(a)` | Multiply by pi/180 directly: `a * (M_PI/180)` |
 | `int[3] arr = int[](1,2,3)` | `int arr[3] = {1,2,3}` |
 | `int ix = i & 1` (bitwise) | `int ix = i % 2` |
 | `int yx = y >> 1` (bitwise) | `int yx = y / 2` |
@@ -766,7 +843,7 @@ The Remote discovers MDropDX12 by matching the window title (configurable in Set
 - `COL_HUE=` / `COL_SATURATION=` / `COL_BRIGHTNESS=` — Color adjustments
 - `CAPTURE` — Screenshot
 
-Not yet handled: `VIDEOINPUT=`, `SPOUTINPUT=`
+Not yet handled: `VIDEOINPUT=`
 
 ## Script System
 
@@ -865,6 +942,163 @@ Use the **Button Mapping** text editor on the System tab to edit mappings direct
 - **Save**: Writes the editor contents to `controller.json` and reloads the config
 - **Load**: Reads `controller.json` from disk and fills the editor
 
+## Configurable Hotkeys
+
+Nearly all keyboard shortcuts in MDropDX12 are reassignable. Open the Hotkeys window via **Ctrl+F7** or Settings > System > **Hotkeys...** button.
+
+### Hotkeys Window
+
+The Hotkeys window displays all configurable bindings in a sortable ListView with columns:
+
+- **Category**: Grouping (Navigation, Visual, Media, Window, Tools, Shader, Misc, Script, Launch)
+- **Action**: What the hotkey does
+- **Shortcut**: The assigned key combination, or "(none)" if unbound
+- **Scope**: **Local** or **Global**
+
+Click any column header to sort. Click again to reverse the sort order.
+
+### Editing Hotkeys
+
+Double-click any row (or select it and click **Edit**) to open the Edit Hotkey dialog:
+
+1. Press a key combination in the **Key** capture field
+2. Check **Global (system-wide)** to make it work regardless of which window has focus
+3. Click **OK** to save, or **Clear** to remove the binding
+
+Click **Reset to Defaults** in the main window to restore all built-in assignments to factory defaults. User-added Script and Launch entries are preserved.
+
+### Conflict Detection
+
+If you assign a key combination that is already used by another binding, the conflicting binding is automatically cleared to prevent duplicate registrations.
+
+### Scope Behavior
+
+- **Local** hotkeys only work when the MDropDX12 render window has focus
+- **Global** hotkeys work system-wide regardless of which application is in the foreground, using the Windows RegisterHotKey API
+
+### Adding Script Commands
+
+Click the **+** button and select **Script Command** to add a custom IPC command binding. In the edit dialog:
+
+1. Enter a **Label** (display name for the list)
+2. Enter a **Command** — any supported IPC command, or click **Browse** to select a script file (.txt, .bat, .cmd, .ps1)
+3. Assign a key and scope
+4. Click **OK**
+
+Supported commands include:
+
+- Simple commands: `NEXT`, `PREV`, `HARDCUT`, `LOCK`, `RAND`, `MASHUP`, `FULLSCREEN`, `STRETCH`, `CAPTURE`, `BLACKOUT`
+- Parameter commands: `OPACITY=0.5`, `COL_HUE=0.3`, `COL_SATURATION=0.8`, `VAR_QUALITY=2.0`, `VAR_INTENSITY=1.5`
+- Preset loading: `PRESET=name.milk`
+- Spout control: `SPOUT_ACTIVE=1`, `SPOUT_RESOLUTION=1920x1080`
+
+There is no limit to the number of Script Command entries you can add. The command is shown in parentheses in the hotkey list. To remove an entry, select it and click **Delete**.
+
+### Adding Launch App Entries
+
+Click the **+** button and select **Launch App** to add a program launcher binding. In the edit dialog:
+
+1. Enter a **Label** (display name for the list)
+2. Click **Browse** to select an executable (e.g., `MilkwaveRemote.exe`)
+3. Assign a key and scope (typically Global for system-wide access)
+4. Click **OK**
+
+When triggered:
+
+- If the program is already running, its main window is brought to the foreground (restored from minimized if needed)
+- If not running, the program is launched via ShellExecute
+
+There is no limit to the number of Launch App entries. To remove an entry, select it and click **Delete**. Built-in hotkey bindings cannot be deleted.
+
+## MIDI Input
+
+MDropDX12 has native MIDI input support with 50 configurable mapping slots. Open the MIDI window via Settings > System > **MIDI...** button.
+
+### MIDI Setup
+
+1. Open Settings (F8) > System tab
+2. Click **MIDI...**
+3. Click **Scan** to detect connected MIDI devices
+4. Select your device from the **Device** dropdown
+5. Check **Enable** to start receiving MIDI data
+
+### Mapping Slots
+
+The MIDI window displays a ListView with 50 mapping slots (matching Milkwave Remote's 5 rows × 10 banks layout). Each slot has:
+
+| Column | Description |
+|--------|-------------|
+| # | Slot number (1-50) |
+| Active | Whether the mapping is enabled |
+| Label | User-defined name for this control |
+| Ch | MIDI channel (1-16) |
+| Val | Note number (buttons) or CC number (knobs) |
+| CC | CC number for knobs |
+| Type | Button or Knob |
+| Action | The command or parameter to control |
+
+### Learn Mode
+
+The easiest way to assign MIDI controls:
+
+1. Select a slot in the list
+2. Click **Learn**
+3. Press a button or turn a knob on your MIDI controller
+4. The channel, value, CC, and type are auto-detected and filled in
+5. Click **Learn** again (or select another slot) to stop learning
+
+### Button Actions
+
+Button mappings trigger on MIDI Note On messages (velocity > 0). Available actions:
+
+| Action | Description |
+|--------|-------------|
+| NEXT | Soft cut to next preset |
+| PREV | Go back to previous preset |
+| HARDCUT | Hard cut to next preset |
+| LOCK | Toggle preset lock |
+| RAND | Toggle random/sequential order |
+| MASHUP | Random mini mash-up |
+| FULLSCREEN | Toggle fullscreen |
+| STRETCH | Toggle multi-monitor stretch |
+| SETTINGS | Open Settings window |
+| PRESETINFO | Toggle preset info display |
+| BLACKOUT | Toggle black mode |
+| Any IPC command | e.g., `PRESET=name.milk`, `OPACITY=0.5` |
+
+### Knob Actions
+
+Knob mappings respond to MIDI Control Change (CC) messages. The MIDI value (0-127) is mapped to the parameter range. Available targets:
+
+| Knob Action | Parameter | Range |
+|-------------|-----------|-------|
+| Hue | Color shift hue | 0.0 – 1.0 |
+| Saturation | Color shift saturation | 0.0 – 1.0 |
+| Brightness | Color shift brightness | 0.0 – 1.0 |
+| Intensity | Visual intensity | 0.0 – 2.0 |
+| Shift | Visual shift | -1.0 – 1.0 |
+| Speed | Time factor | 0.0 – 5.0 |
+| FPS Factor | FPS multiplier | 0.0 – 2.0 |
+| Quality | Render quality | 0.25 – 4.0 |
+| Opacity | Window opacity | 0.0 – 1.0 |
+| Amp Left | Audio amp (left) | 0.0 – 5.0 |
+| Amp Right | Audio amp (right) | 0.0 – 5.0 |
+
+Each knob can have an **Increment** value for relative control (set to 0 for absolute mapping).
+
+### Persistence
+
+- **midi.json**: Stores all 50 mapping slot definitions (channel, value, CC, type, action, label, increment)
+- **settings.ini [MIDI]**: Stores device selection, enabled state, and buffer delay
+- **Save/Load**: Manually save or load `midi.json` from the MIDI window
+- **Defaults**: Loads mappings from `midi-default.txt` if present in the application directory
+
+## Song Info Window
+
+Press **Shift+Ctrl+F8** to open a standalone Song Info window showing the current track information (artist, title, album). This is a ToolWindow that runs on its own thread with independent always-on-top, theme support, and sticky position.
+
+The Song Info window provides the same track info source selector and display options as the General tab in Settings, allowing quick access to track info configuration without opening the full Settings window.
+
 ## GPU Protection
 
 MDropDX12 includes safeguards against GPU overload:
@@ -884,6 +1118,7 @@ MDropDX12 includes safeguards against GPU overload:
 | `messages.ini` | Custom message definitions |
 | `sprites.ini` | Sprite definitions |
 | `controller.json` | Game controller button-to-command mappings |
+| `midi.json` | MIDI controller mapping definitions (50 slots) |
 | `debug.log` | Application log (verbosity set in About tab) |
 | `resources/presets/` | Preset directory |
 | `resources/presets/Quicksave/` | Quicksave destination (CTRL+S) |

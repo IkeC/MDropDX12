@@ -23,7 +23,6 @@
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "AMDDetection.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
@@ -630,7 +629,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         Engine* p = data->plugin;
         bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
         if (bIsCheckbox) {
-          DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+          DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
             p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
           return TRUE;
         }
@@ -652,7 +651,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       }
       if (data && data->plugin) {
         Engine* p = data->plugin;
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
         return TRUE;
       }
@@ -662,7 +661,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
       return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
@@ -670,7 +669,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     break;
 
   case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -678,7 +677,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     break;
 
   case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+    if (data && data->plugin && data->plugin->IsDarkTheme()) {
       RECT rc; GetClientRect(hWnd, &rc);
       HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
       FillRect((HDC)wParam, &rc, hBr);
@@ -1113,10 +1112,10 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       Engine* p = data->plugin;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
       if (bIsCheckbox) {
-        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
       } else {
-        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+        DrawOwnerButton(pDIS, p->IsDarkTheme(),
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
       }
       return TRUE;
@@ -1126,7 +1125,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
       return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
@@ -1134,7 +1133,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -1142,7 +1141,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_CTLCOLORBTN:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
       SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
       SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
       return (LRESULT)data->plugin->m_hBrSettingsBg;
@@ -1150,7 +1149,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
     break;
 
   case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+    if (data && data->plugin && data->plugin->IsDarkTheme()) {
       RECT rc; GetClientRect(hWnd, &rc);
       HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
       FillRect((HDC)wParam, &rc, hBr);
@@ -2211,11 +2210,38 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       SetSpoutFixedSize(false, true);
     }
   }
+  else if (wcsncmp(sMessage, L"SPOUTINPUT=", 11) == 0) {
+    // Format: SPOUTINPUT=enabled|senderName  (e.g. "SPOUTINPUT=1|OBS Spout Filter")
+    std::wstring msg(sMessage + 11);
+    size_t sep = msg.find(L'|');
+    bool bEnable = (!msg.empty() && msg[0] == L'1');
+    if (sep != std::wstring::npos && sep + 1 < msg.size())
+      wcsncpy_s(m_szSpoutInputSender, msg.substr(sep + 1).c_str(), _TRUNCATE);
+    if (bEnable) {
+      int oldSrc = m_nVideoInputSource;
+      if (oldSrc == VID_SOURCE_WEBCAM || oldSrc == VID_SOURCE_FILE)
+        DestroyVideoCapture();
+      m_nVideoInputSource = VID_SOURCE_SPOUT;
+      m_bSpoutInputEnabled = true;
+      InitSpoutInput();
+    } else {
+      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
+        DestroySpoutInput();
+      m_nVideoInputSource = VID_SOURCE_NONE;
+      m_bSpoutInputEnabled = false;
+    }
+    SaveSpoutInputSettings();
+  }
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
     DebugLogW(L"[CAPTURE] Message received");
     mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
     CaptureScreenshot();
     DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
+  }
+  else {
+    // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
+    // SEND=0x.., etc.)  This unifies IPC and button board dispatch.
+    ExecuteScriptLine(sMessage);
   }
 }
 
@@ -2902,18 +2928,6 @@ void Engine::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRender
   }
 
   wcsncpy_s(m_szAudioDeviceDisplayName, MAX_PATH, sanitized.c_str(), _TRUNCATE);
-}
-
-void Engine::SetAMDFlag() {
-  if (m_AMDDetectionMode == 0) {
-    m_IsAMD = is_amd_ati();
-  }
-  else if (m_AMDDetectionMode == 1) {
-    m_IsAMD = true;
-  }
-  else {
-    m_IsAMD = false;
-  }
 }
 
 int Engine::GetPresetCount() { return m_nPresets; }

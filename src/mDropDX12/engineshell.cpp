@@ -788,8 +788,19 @@ void EngineShell::OnUserResizeWindow() {
         }
         SetVariableBackBuffer(newW, newH);
         UpdateBackBufferTracking(newW, newH);
+        // Check if device is still alive before attempting resize
+        HRESULT devReason = m_lpDX->m_device->GetDeviceRemovedReason();
+        if (devReason != S_OK) {
+          DLOG_ERROR("DX12: Device already removed (reason=0x%08X) before ResizeSwapChain — triggering recovery",
+                  (unsigned)devReason);
+          m_lpDX->m_lastErr = devReason;
+          return;
+        }
         // DX12: resize the swap chain instead of resetting the device
-        m_lpDX->ResizeSwapChain(newW, newH);
+        if (!m_lpDX->ResizeSwapChain(newW, newH)) {
+          DebugLogA("DX12: ResizeSwapChain failed — triggering recovery", LOG_ERROR);
+          return;
+        }
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
       if (!AllocateDX9Stuff()) {
@@ -845,7 +856,8 @@ int EngineShell::InitDirectX(
 
   // Read fallback texture style early (before MyReadConfig runs)
   m_nFallbackTexStyle = GetPrivateProfileIntW(L"Milkwave", L"FallbackTexStyle", 0, m_szConfigIniFile);
-  if (m_nFallbackTexStyle < 0 || m_nFallbackTexStyle > 2) m_nFallbackTexStyle = 0;
+  if (m_nFallbackTexStyle < 0 || m_nFallbackTexStyle > 5) m_nFallbackTexStyle = 0;
+  GetPrivateProfileStringW(L"FallbackPaths", L"FallbackTexFile", L"", m_szFallbackTexFile, MAX_PATH, m_szConfigIniFile);
 
   m_lpDX = new DXContext(device, commandQueue, factory, hwnd, width, height, m_szConfigIniFile, m_nFallbackTexStyle);
 
@@ -1068,8 +1080,6 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   ReadConfig();
   MyPreInitialize();
   MyReadConfig();
-  SetAMDFlag();
-
   //-----
 
   return TRUE;
@@ -1345,10 +1355,8 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
   // DXGI Present returns DXGI_ERROR_DEVICE_REMOVED/RESET in catastrophic cases,
   // which are handled inside DXContext::EndFrame() and surfaced via m_lastErr.
   if (m_lpDX->m_lastErr != S_OK) {
-    char dbg[512];
-    sprintf(dbg, "TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
+    DLOG_ERROR("TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
             (unsigned)m_lpDX->m_lastErr);
-    DebugLogA(dbg, LOG_ERROR);
     m_bDeviceRecoveryPending = true;
     return false;  // signal caller to attempt recovery
   }
@@ -1405,12 +1413,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
   // DX12 frame: open command list, record all draw calls, then execute + present.
   if (m_lpDX->BeginFrame()) {
     // Set viewport on the command list
-    D3D12_VIEWPORT vp = { 0.f, 0.f,
-        (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height,
-        0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-    m_lpDX->m_commandList->RSSetViewports(1, &vp);
-    m_lpDX->m_commandList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(m_lpDX->m_commandList.Get(), m_lpDX->m_client_width, m_lpDX->m_client_height);
 
     // Clear the back buffer
     {
@@ -1513,13 +1516,9 @@ void EngineShell::DrawAndDisplay(int redraw) {
       m_bScreenshotRequested = false;
       m_lpDX->WaitForGpu();
 
-      {
-        wchar_t dbg[512];
-        swprintf_s(dbg, L"[CaptureScreenshot] Saving to: %s (%ux%u, pitch=%u)",
+      DLOGW_INFO(L"[CaptureScreenshot] Saving to: %s (%ux%u, pitch=%u)",
                    m_screenshotPath, screenshotWidth, screenshotHeight,
                    screenshotLayout.Footprint.RowPitch);
-        DebugLogW(dbg);
-      }
 
       void* pData = nullptr;
       HRESULT hr = screenshotReadback->Map(0, nullptr, &pData);
@@ -1934,12 +1933,7 @@ bool EngineShell::CreateHelpTexture() {
   D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
   m_helpTexture.srvIndex = m_lpDX->m_nextFreeSrvSlot;
 
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Format                  = DXGI_FORMAT_B8G8R8A8_UNORM;
-  srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Texture2D.MipLevels     = 1;
-  device->CreateShaderResourceView(m_helpTexture.resource.Get(), &srvDesc, srvCpu);
+  CreateSRV2D(device, m_helpTexture.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
   m_lpDX->AllocateSrvGpu();
 
   // Create 16-entry binding block for texture binding

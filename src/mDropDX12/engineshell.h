@@ -73,6 +73,7 @@ typedef struct {
 } td_soundinfo;                             // ...range is 0 Hz to 22050 Hz, evenly spaced.
 
 class EngineShell {
+  friend class SettingsWindow;   // SettingsWindow methods access protected Engine state
 public:
   // GET METHODS
   // ------------------------------------------------------------
@@ -197,7 +198,8 @@ protected:
   int          m_allow_page_tearing_fs;   // 0 or 1
   int          m_allow_page_tearing_dm;   // 0 or 1
   bool         m_bEnableVSync = true;     // DX12 VSync toggle (default ON)
-  int          m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black
+  int          m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black, 3=Random(RandTexDir), 4=Random(TexDir), 5=Custom File
+  wchar_t      m_szFallbackTexFile[MAX_PATH] = {};
   int          m_minimize_winamp;         // 0 or 1
   int          m_desktop_show_icons;      // 0 or 1
   int          m_desktop_textlabel_boxes; // 0 or 1
@@ -231,7 +233,6 @@ protected:
   virtual void DrawOnTopSprites() {} // override in Engine for layer-1 sprite rendering
   virtual void SendToDisplayOutputs() {} // override in Engine for display mirrors + Spout
   virtual void UpdateScript() {}    // override in Engine for script playback
-  virtual void SetAMDFlag() = 0;
   // Preset list accessors for RenderPlaylist() — override in Engine
   virtual int  GetPresetCount() { return 0; }
   virtual int  GetCurrentPresetIndex() { return -1; }

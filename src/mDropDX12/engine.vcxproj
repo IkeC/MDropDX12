@@ -23,6 +23,7 @@
     <ProjectGuid>{881FB534-7396-485A-ADC2-6FBEBED7A0F4}</ProjectGuid>
     <RootNamespace>mDropDX12</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -118,7 +119,7 @@
       <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader />
@@ -133,6 +134,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -194,6 +196,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -237,7 +240,7 @@
       <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader />
@@ -252,6 +255,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -313,6 +317,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -348,7 +353,6 @@
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp" />
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp" />
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp" />
-    <ClCompile Include="AMDDetection.cpp" />
     <ClCompile Include="dx12pipeline.cpp" />
     <ClCompile Include="dxcontext.cpp" />
     <ClCompile Include="fft.cpp" />
@@ -360,13 +364,30 @@
     <ClCompile Include="engine_input.cpp" />
     <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="engine_hotkeys.cpp" />
+    <ClCompile Include="engine_hotkeys_ui.cpp" />
+    <ClCompile Include="json_utils.cpp" />
+    <ClCompile Include="button_panel.cpp" />
+    <ClCompile Include="engine_board_ui.cpp" />
+    <ClCompile Include="engine_shader_import_ui.cpp" />
+    <ClCompile Include="engine_presets_ui.cpp" />
+    <ClCompile Include="engine_sprites_ui.cpp" />
+    <ClCompile Include="engine_messages_ui.cpp" />
     <ClCompile Include="engine_spout_input.cpp" />
+    <ClCompile Include="video_capture.cpp" />
     <ClCompile Include="engine_controller.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
     <ClCompile Include="engine_script.cpp" />
     <ClCompile Include="engine_rendering.cpp" />
     <ClCompile Include="engine_settings_ui.cpp" />
+    <ClCompile Include="engine_displays_ui.cpp" />
+    <ClCompile Include="engine_video_effects_ui.cpp" />
+    <ClCompile Include="engine_vfx_profiles_ui.cpp" />
+    <ClCompile Include="engine_workspace_layout_ui.cpp" />
+    <ClCompile Include="engine_songinfo_ui.cpp" />
+    <ClCompile Include="engine_midi_ui.cpp" />
+    <ClCompile Include="midi_input.cpp" />
+    <ClCompile Include="tool_window.cpp" />
     <ClCompile Include="engine_shaders.cpp" />
     <ClCompile Include="engine_textures.cpp" />
     <ClCompile Include="engineshell.cpp" />
@@ -403,6 +424,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="audio_capture.h" />
+    <ClInclude Include="video_capture.h" />
     <ClInclude Include="..\ns-eel2\ns-eel.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-int.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />
@@ -432,7 +454,11 @@
     <ClInclude Include="mdropdx12.h" />
     <ClInclude Include="display_output.h" />
     <ClInclude Include="hotkeys.h" />
+    <ClInclude Include="json_utils.h" />
+    <ClInclude Include="button_panel.h" />
+    <ClInclude Include="midi_input.h" />
     <ClInclude Include="engine.h" />
+    <ClInclude Include="tool_window.h" />
     <ClInclude Include="engineshell.h" />
     <ClInclude Include="render_commands.h" />
     <ClInclude Include="resource.h" />

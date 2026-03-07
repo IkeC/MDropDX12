@@ -129,6 +129,20 @@ void Engine::ExecuteScriptLine(int lineIndex) {
   }
 }
 
+void Engine::ExecuteScriptLine(const wchar_t* text) {
+  if (!text || !*text) return;
+  std::wstringstream ss(text);
+  std::wstring token;
+  while (std::getline(ss, token, L'|')) {
+    size_t start = token.find_first_not_of(L" \t");
+    size_t end   = token.find_last_not_of(L" \t");
+    if (start == std::wstring::npos) continue;
+    token = token.substr(start, end - start + 1);
+    if (!token.empty())
+      ExecuteScriptCommand(token);
+  }
+}
+
 void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
   // --- Sequencing ---
   if (cmd == L"NEXT") {
@@ -307,6 +321,14 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
     keybd_event(VK_MEDIA_STOP, 0, 0, 0);
     keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
   }
+  // --- Trigger hotkey action by tag name (e.g. ACTION=OpenSongInfo) ---
+  else if (_wcsnicmp(cmd.c_str(), L"ACTION=", 7) == 0) {
+    DispatchHotkeyByTag(cmd.substr(7));
+  }
+  // --- Launch application ---
+  else if (_wcsnicmp(cmd.c_str(), L"LAUNCH=", 7) == 0) {
+    LaunchOrFocusApp(cmd.substr(7));
+  }
   // --- Milkwave-specific (ignore gracefully) ---
   else if (_wcsnicmp(cmd.c_str(), L"STYLE=", 6) == 0 ||
            _wcsnicmp(cmd.c_str(), L"BTN=", 4) == 0 ||
@@ -334,11 +356,12 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
 }
 
 void Engine::SyncScriptUI() {
-  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd))
+  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  if (!hw || !IsWindow(hw))
     return;
 
   // Update listbox selection
-  HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_LIST);
+  HWND hList = GetDlgItem(hw, IDC_MW_SCRIPT_LIST);
   if (hList) {
     if (m_script.currentLine >= 0)
       SendMessage(hList, LB_SETCURSEL, m_script.currentLine, 0);
@@ -347,7 +370,7 @@ void Engine::SyncScriptUI() {
   }
 
   // Update line label
-  HWND hLine = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_LINE);
+  HWND hLine = GetDlgItem(hw, IDC_MW_SCRIPT_LINE);
   if (hLine) {
     if (m_script.playing && m_script.currentLine >= 0) {
       wchar_t buf[64];
@@ -363,13 +386,13 @@ void Engine::SyncScriptUI() {
   }
 
   // Update BPM/Beats edit fields
-  HWND hBpm = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_BPM);
+  HWND hBpm = GetDlgItem(hw, IDC_MW_SCRIPT_BPM);
   if (hBpm) {
     wchar_t buf[32];
     swprintf_s(buf, L"%.1f", m_script.bpm);
     SetWindowTextW(hBpm, buf);
   }
-  HWND hBeats = GetDlgItem(m_hSettingsWnd, IDC_MW_SCRIPT_BEATS);
+  HWND hBeats = GetDlgItem(hw, IDC_MW_SCRIPT_BEATS);
   if (hBeats) {
     wchar_t buf[32];
     swprintf_s(buf, L"%d", m_script.beats);

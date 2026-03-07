@@ -1,5 +1,198 @@
 # MDropDX12 Changelog
 
+## v1.4 (2026-03-06)
+
+### Shadertoy Import (.milk3)
+
+- Added Shadertoy-compatible rendering pipeline with GLSL-to-HLSL converter
+- New `.milk3` JSON preset format supporting multi-pass shaders (Buffer A, Buffer B, Image, Common)
+- SM5.0 (`ps_5_0`) shader compilation for all Shadertoy presets
+- FLOAT32 ping-pong feedback buffers for temporal accumulation effects
+- sRGB gamma correction post-process for Shadertoy-accurate color output
+- Shadertoy-compatible `iMouse` input (pixel coords, left-click drag, button state via sign encoding)
+- Channel auto-detection: `iChannel0` maps to self-feedback or noise depending on shader context
+- Buffer A self-feedback detection via screen-space textureLod pattern matching
+- JSON channel import supports string names (`"self"`, `"bufferA"`, `"noiseLQ"`, `"audio"`, etc.)
+- Audio texture (512x2, R32_FLOAT) with FFT spectrum and PCM waveform rows
+- Noise textures (LQ/MQ/HQ) and 3D volume noise textures for Shadertoy compatibility
+
+### Shader Import Window
+
+- Two-panel Shader Import UI: pass listbox (left) with shader editor (right)
+- Multi-pass support: add/remove Buffer A, Buffer B, Common, and Image passes
+- Per-pass channel input combos (ch0–ch3) with auto-detection from GLSL source
+- Convert & Apply button: GLSL→HLSL conversion + live preview in one click
+- Save .milk3 button: export converted shaders as portable JSON presets
+- Automatic .milk3 name suggestion from Shadertoy project name
+- Comprehensive GLSL→HLSL converter handling matrices, structs, vector comparisons, array params, and more
+- Error display with scrollable output showing conversion and compilation diagnostics
+
+### Video Effects Window
+
+- Standalone Video Effects window with transform, color, and audio-reactive controls
+- Transform controls: scale, rotation, X/Y offset with real-time sliders
+- Color controls: brightness, contrast, saturation, hue shift
+- Audio-reactive mode: link visual parameters to bass/mid/treb audio bands
+- VFX JSON profiles: save/load effect presets as named JSON files
+- Startup preset mode selector: choose which VFX profile loads on startup
+
+### Workspace Layout Window
+
+- New Workspace Layout window for tiling tool windows across the screen
+- Two modes: corner (render in screen corner) or fullscreen on separate display
+- Corner picker (TL/TR/BL/BR) with render size slider (5–50%)
+- Display picker combo for multi-monitor fullscreen mode
+- Checkbox grid for selecting which tool windows to open and tile
+- Apply Layout button opens selected windows and arranges them in a grid
+- Reset to Defaults button restores default layout
+- Accessible from Welcome window and Settings → About tab
+
+### ToolWindow System
+
+- Extracted Settings, Displays, Song Info, and Hotkeys windows into standalone ToolWindow subclasses running on their own threads
+- Each ToolWindow has independent always-on-top pin button, font synchronization, dark theme support, and sticky window positions
+- ToolWindows remember their last active tab between sessions
+- Displays tab split into Display Outputs and Video Input sub-tabs
+- Added Presets window, Sprites window, and Messages window as standalone ToolWindows
+- Added `IsChecked()` / `SetChecked()` helper methods to ToolWindow base class for owner-draw checkbox/radio state
+- Base class auto-toggles checkbox state on click (subclasses no longer need toggle boilerplate)
+- Comprehensive ToolWindow documentation at `docs/tool_window.md`
+
+### Welcome Window
+
+- First-run Welcome window with quick-start options
+- Browse for Resources folder, Open Shader Import, Open Settings, Setup Workspace Layout buttons
+- Appears automatically when no presets are found; can be dismissed
+
+### Configurable Hotkeys
+
+- Added dedicated Hotkeys window (Ctrl+F7) with ListView showing all configurable bindings
+- Hotkey capture control with Set/Clear buttons and per-binding local/global scope toggle
+- Local hotkeys work when the render window has focus; global hotkeys work system-wide via RegisterHotKey
+- Conflict detection automatically clears duplicate bindings when assigning a new hotkey
+- Reset to Defaults button restores original key assignments
+- Default shortcuts: Ctrl+F8 (Displays), Shift+Ctrl+F8 (Song Info), Ctrl+F7 (Hotkeys)
+
+### Theme System
+
+- Replaced boolean Dark Theme checkbox with tri-mode Theme selector: Dark, Light, Follow System
+- Follow System mode reads Windows AppsUseLightTheme registry key and auto-switches when the user changes their Windows theme (via WM_SETTINGCHANGE)
+- Light mode uses standard Windows system colors for all ToolWindows
+- Dark mode unchanged (dark green theme matching MilkVision)
+- Fixed light mode rendering: ToolWindow backgrounds, Button Board panel, and owner-draw controls now render correctly in light mode
+- DWM caption, border, and text colors properly reset when switching to Light mode
+
+### Video Input
+
+- Added native webcam capture via Windows Media Foundation (no external tools needed)
+- Added video file playback (MP4, AVI, WMV, MKV) with loop option
+- Unified Spout, webcam, and video file into a single Video Input system with shared compositing controls
+- All sources share the same pixel shader pipeline (luma key, opacity, background/overlay layer)
+- Video input sources auto-restore from saved settings on startup (lazy-init on first render frame)
+
+### Native MIDI Input
+
+- Added native MIDI input system with 50 mapping slots (Button/Knob actions)
+- MIDI window accessible from Settings → System → MIDI button, runs on its own ToolWindow thread
+- Device selector with Scan button, Enable checkbox, and configurable buffer delay
+- Learn mode: select a row, click Learn, then press a MIDI button or turn a knob to auto-assign
+- Button actions: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP, FULLSCREEN, STRETCH, SETTINGS, PRESETINFO, BLACKOUT, and all IPC commands
+- Knob actions: Hue, Saturation, Brightness, Intensity, Shift, Speed, FPS Factor, Quality, Opacity, Amp Left, Amp Right
+- JSON persistence (midi.json) with Save/Load/Defaults buttons
+
+### Button Board
+
+- Added per-slot image thumbnails (Set Image / Clear Image context menu, drag-drop image files onto slots)
+- Added per-slot hotkey bindings (modifiers, key, local/global scope) persisted in INI
+- Added RunScript and LaunchApp action types for button slots
+- Added JSON layout export/import (Save Layout / Load Layout in config menu)
+- Added Reset to Defaults with Milkwave Remote-style default layout (auto-populates on first run)
+- Added "Assign Action..." cascading submenu with all built-in actions organized by category
+- Shared ActionEditDialog used by both Button Board and Hotkeys windows
+- Button Board forwards all keyboard input to render window so VJ hotkeys work while Board has focus
+- Fixed Button Board using dark colors in light mode
+
+### Dynamic Script & Launch App Hotkeys
+
+- Replaced fixed Script (10) and Launch App (4) slots with unlimited dynamic entries
+- Click "+" button to add a Script Command or Launch App binding
+- Script commands support Browse button for script files (.txt, .bat, .cmd, .ps1)
+- Launch App entries launch or focus external programs (process enumeration + EnumWindows)
+- All editing consolidated into a single modal Edit dialog
+- INI format upgraded to Version 3
+
+### Settings UI
+
+- Added Tools tab with launcher buttons for all tool windows
+- Added pin icon button (top-right of tab header) to toggle Settings window always-on-top
+- Replaced "Enable" checkbox with source selector combo (None / Spout / Webcam / Video File)
+- Added webcam device selector with refresh button
+- Added video file browser with loop checkbox
+- About tab now shows version from single source of truth (`version.h`)
+- Added Workspace Layout button on About tab
+- Preset filter by type (All / .milk / .milk2) in preset browser
+
+### Version Management
+
+- Added `version.h` as single source of truth for app version number
+- Version defines used by About tab, `engine.rc` (FileVersion/ProductVersion), and all version references
+- Updated version from 1.3 to 1.4.0
+
+### Input & Control
+
+- Controller buttons can now bind any IPC command (e.g. `OPACITY=0.5`, `COL_HUE=0.3`, `PRESET=name.milk`)
+- Added CAPTURE, SPOUT, BLACKOUT named controller commands
+
+### IPC / Remote Control
+
+- Handled SPOUTINPUT= IPC command (Spout sender name, enable/disable via text protocol)
+- Handled WM_ENABLESPOUTMIX, WM_SETSPOUTSENDER direct messages from Milkwave Remote
+- Handled WM_SET_INPUTMIX_ONTOP, WM_SET_INPUTMIX_OPACITY, WM_SET_INPUTMIX_LUMAKEY direct messages
+- Fixed WM_ENABLESPOUTMIX incorrectly toggling Spout output instead of Spout input
+
+### Bug Fixes
+
+- Fixed owner-draw checkboxes always reading as unchecked (IsDlgButtonChecked doesn't work with BS_OWNERDRAW)
+- Fixed light mode: ToolWindow WM_ERASEBKGND now explicitly paints light background instead of relying on stale class brush
+- Fixed light mode: ButtonPanel defaults to system colors when not in dark mode
+- Fixed GLSL precision declaration causing shader compile failure
+- Fixed GLSL converter: *= matVar backward scan order for square matrix multiply
+- Fixed GLSL converter: Buffer A self-feedback detection, bare return, hardcoded resolution
+- Fixed GLSL converter: matrix funcs, array params, struct ctors, vector comparisons
+- Fixed Shadertoy import: alpha output, per-pass diagnostics, Image texture V-flip
+- Fixed Shadertoy time variable shadowing for animation looping
+- Fixed Shadertoy converter: UV calculation, matrix functions, inout structs
+- Fixed Shadertoy converter: over-specified constructors, iChannel0 mapping, sRGB gamma
+- Fixed ResizeBuffers E_INVALIDARG by passing tearing flag
+- Fixed Shadertoy shader error dialog on resolution change
+- Fixed mirror opacity hang, default to 100%, and add display profiles
+- Fixed invisible controls in Messages/Sprites windows
+- Fixed Ctrl+A/C/V/X/Z not working in tool window edit boxes
+- Fixed LaunchOrFocusApp focus stealing and control ID collision
+- Fixed Spout input not rendering on startup
+- Fixed video file playback for most MP4s (stream selection, hardware transforms, proper stride handling)
+- Fixed video input invisible despite successful decode (alpha=0 in MFVideoFormat_RGB32)
+- Fixed overlay radio button not responding
+- Fixed global hotkey focus and Always Show Track Info
+- Separated track info from error notification bucket so it survives resize/preset changes
+
+### Code
+
+- New file: `version.h` (single source of truth for version number)
+- New file: `engine_workspace_layout_ui.cpp` (Workspace Layout window)
+- New file: `engine_video_effects_ui.cpp` (Video Effects window)
+- New file: `engine_vfx_profiles_ui.cpp` (VFX JSON profiles)
+- New files: `engine_hotkeys_ui.cpp`, `engine_songinfo_ui.cpp` (ToolWindow subclasses)
+- New files: `midi_input.h`, `midi_input.cpp` (winmm MIDI input wrapper)
+- New file: `engine_midi_ui.cpp` (MidiWindow ToolWindow + Engine MIDI functions)
+- New files: `video_capture.h`, `video_capture.cpp` (Media Foundation capture)
+- New files: `json_utils.cpp/h` (lightweight JSON writer/reader)
+- New file: `docs/tool_window.md` (comprehensive ToolWindow developer reference)
+- Linked Media Foundation libraries (mfplat.lib, mfreadwrite.lib, mfuuid.lib, mf.lib)
+- Static CRT linking (no VC++ Redistributable required)
+- Consolidated all OutputDebugString calls to DebugLogA/W
+- Level-gated debug macros with output destination control
+
 ## v1.3 (2026-03-02)
 
 ### Performance

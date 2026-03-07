@@ -49,7 +49,7 @@ using Microsoft::WRL::ComPtr;
 
 // Descriptor heap sizes
 #define DXC_MAX_RTV  32   // 2 back buffers + 2 VS + 6 blur + 10 title + spare
-#define DXC_MAX_SRV  1024 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
+#define DXC_MAX_SRV  1280 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
 #define DXC_MAX_SAMPLERS 16
 
 #define SNAP_WINDOWED_MODE_BLOCKSIZE  32
@@ -223,7 +223,10 @@ public:
   DX12Texture m_nullTexture;
   // Fallback texture for missing disk textures (style set in settings)
   DX12Texture m_fallbackTexture;
-  int m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black
+  int m_nFallbackTexStyle = 0;  // 0=Hue Gradient, 1=White, 2=Black, 3=Random(RandTexDir), 4=Random(TexDir), 5=Custom File
+  wchar_t m_szFallbackRandomTexDir[MAX_PATH] = {};
+  wchar_t m_szFallbackTexturesDir[MAX_PATH] = {};
+  wchar_t m_szFallbackCustomFile[MAX_PATH] = {};
   bool CreateNullTexture(int fallbackStyle = 0);
 
   // Create a 16-entry binding block for a texture (all slots = tex for simple passthrough)
@@ -243,11 +246,15 @@ public:
   D3D12_GPU_DESCRIPTOR_HANDLE GetBindingBlockGpuHandleByIndex(UINT blockStart);
 
   // Per-frame binding blocks: avoids GPU race by using separate descriptor ranges per frame.
-  // 2 frames × 2 passes (warp + comp) × 16 SRV descriptors = 64 total.
+  // 2 frames × 4 passes (warp + bufferA + bufferB + comp) × 16 SRV descriptors = 128 total.
+  static const UINT PASSES_PER_FRAME = 4; // warp, bufferA, bufferB, comp
   UINT m_perFrameBindingBase = UINT_MAX;
   bool AllocatePerFrameBindings(); // call once at init, after CreateNullTexture
-  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT compSrvSlots[16]);
+  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
+                              const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16]);
   D3D12_GPU_DESCRIPTOR_HANDLE GetWarpBindingGpuHandle();
+  D3D12_GPU_DESCRIPTOR_HANDLE GetBufferABindingGpuHandle();
+  D3D12_GPU_DESCRIPTOR_HANDLE GetBufferBBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetCompBindingGpuHandle();
 
   // Per-frame blur binding blocks: 2 frames × 6 blur passes × 16 SRV descriptors = 192 total.
@@ -296,5 +303,24 @@ protected:
 #define DXC_ERR_USER_CANCELED -11
 #define DXC_ERR_CREATEDEV_NOT_AVAIL -12
 #define DXC_ERR_CREATEDDRAW  -13
+
+// --- DX12 helpers to reduce duplication ---
+
+inline void SetViewportAndScissor(ID3D12GraphicsCommandList* cl, UINT w, UINT h) {
+  D3D12_VIEWPORT vp = { 0.0f, 0.0f, (float)w, (float)h, 0.0f, 1.0f };
+  D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h };
+  cl->RSSetViewports(1, &vp);
+  cl->RSSetScissorRects(1, &sc);
+}
+
+inline void CreateSRV2D(ID3D12Device* dev, ID3D12Resource* res,
+    DXGI_FORMAT fmt, D3D12_CPU_DESCRIPTOR_HANDLE cpu) {
+  D3D12_SHADER_RESOURCE_VIEW_DESC d = {};
+  d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  d.Format = fmt;
+  d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  d.Texture2D.MipLevels = 1;
+  dev->CreateShaderResourceView(res, &d, cpu);
+}
 
 #endif // MDROP_DXCONTEXT_H

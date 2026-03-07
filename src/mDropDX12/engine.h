@@ -46,9 +46,13 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "texmgr.h"
 #include "state.h"
 #include "dx12helpers.h"  // DX12Texture
+#include "video_capture.h" // VideoCaptureSource (needed for unique_ptr complete type)
+#include "midi_input.h"   // MidiInput, MidiRow (needed for MIDI members)
+#include "tool_window.h"  // DisplaysWindow (needed for unique_ptr complete type)
 #include <vector>
 #include <array>
 #include <map>
+#include <memory>
 #include <thread>
 #include <atomic>
 #include <string>
@@ -84,7 +88,7 @@ struct WindowTitleProfile {
     int nPollIntervalSec = 2;          // Poll interval in seconds (1-10)
 };
 
-typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
+typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_IMAGE_FEEDBACK, TEX_AUDIO, TEX_BUFFER_B, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
 typedef struct { float rad; float ang; float a; float c; } td_vertinfo; // blending: mix = max(0,min(1,a*t + c));
 typedef char* CHARPTR;
@@ -139,6 +143,7 @@ enum {
   MD2_PS_2_X = 3,
   MD2_PS_3_0 = 4,
   MD2_PS_4_0 = 5, // not supported by milkdrop
+  MD2_PS_5_0 = 6, // SM5.0 for Shadertoy (.milk3) presets
 };
 
 typedef struct {
@@ -316,6 +321,8 @@ typedef struct {
 typedef struct {
   PShaderInfo warp;
   PShaderInfo comp;
+  PShaderInfo bufferA;  // Shadertoy Buffer A (pre-comp pass)
+  PShaderInfo bufferB;  // Shadertoy Buffer B (second compute buffer)
 } PShaderSet;
 
 typedef struct {
@@ -356,7 +363,6 @@ public:
   void SpoutReleaseWraps(); // Release wrapped backbuffers and mark not ready
   void OpenMDropDX12Remote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
-  void SetAMDFlag();
   void ExecuteRenderCommand(const RenderCommand& cmd) override;
   int  GetPresetCount() override;
   int  GetCurrentPresetIndex() override;
@@ -392,6 +398,7 @@ public:
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all
+  std::atomic<bool> m_bMirrorStylesDirty{false}; // UI thread sets; render thread applies
 
   enum MirrorActivateResult { MirrorActivated, MirrorFullscreenOnly, MirrorCancelled };
   MirrorActivateResult TryActivateMirrors(HWND hRenderWnd);
@@ -405,18 +412,35 @@ public:
   void ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH);
   void SendToDisplayOutputs() override;
   void RefreshDisplaysTab();
-  void UpdateMirrorWindowStyles();  // apply click-through + opacity to all active mirrors
+  void ApplyMirrorWindowStyles();   // apply click-through + opacity to all active mirrors (render thread only)
+  bool SaveDisplayProfile(const wchar_t* filePath);
+  bool LoadDisplayProfile(const wchar_t* filePath);
   void UpdateDisplaysTabSelection(int sel);
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
 
-  // Global hotkeys
-  bool m_bGlobalHotkeysEnabled = false;    // Off by default; user enables in Settings → System
-  HotkeyBinding m_hotkeys[HK_COUNT - 1];  // HK_TOGGLE_FULLSCREEN=1, so index 0..1
+  // Configurable hotkeys (local + global)
+  HotkeyBinding m_hotkeys[NUM_HOTKEYS];
+  void ResetHotkeyDefaults();
   void LoadHotkeySettings();
   void SaveHotkeySettings();
   void RegisterGlobalHotkeys(HWND hwnd);
   void UnregisterGlobalHotkeys(HWND hwnd);
+  bool DispatchHotkeyAction(int actionId);
+  bool LookupLocalHotkey(UINT vk, UINT modifiers);
+  bool DispatchHotkeyByTag(const std::wstring& tag);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
+
+  // Dynamic F1 help text (generated from binding table)
+  wchar_t m_szHelpPage1[8192] = {};
+  wchar_t m_szHelpPage2[8192] = {};
+  void GenerateHelpText();
+
+  // Dynamic user-added hotkeys (Script Commands and Launch Apps)
+  std::vector<UserHotkey> m_userHotkeys;
+  int m_nextUserHotkeyId = USER_HOTKEY_ID_BASE;
+  int  AddUserHotkey(UserHotkeyType type);          // returns index in m_userHotkeys
+  void RemoveUserHotkey(int index);
+  void LaunchOrFocusApp(const std::wstring& path);
 
   // Idle timer (screensaver mode)
   bool m_bIdleTimerEnabled = false;
@@ -476,7 +500,7 @@ public:
   int			m_nCustMsgsSpawned;
   bool    m_bEnablePresetStartup;
   bool    m_bEnableAudioCapture = true;
-  float   m_fAudioSensitivity = 1.0f;   // 1.0 = unity gain (matches MilkDrop3); -1 = adaptive auto-normalize
+  float   m_fAudioSensitivity = -1.0f;  // -1 = adaptive auto-normalize (default); 0.5–256 = fixed gain multiplier
   bool    m_bEnablePresetStartupSavingOnClose = true;
   bool    m_bAutoLockPresetWhenNoMusic;
   bool    m_bScreenDependentRenderMode;
@@ -508,6 +532,14 @@ public:
   bool m_mouseDown;
   int m_mouseClicked;
 
+  // Shadertoy iMouse state (pixel coordinates, bottom-left origin)
+  float m_stMouseX = 0.f;      // drag position x (pixels), persists when released
+  float m_stMouseY = 0.f;      // drag position y (pixels), persists when released
+  float m_stClickX = 0.f;      // click-start position x (pixels)
+  float m_stClickY = 0.f;      // click-start position y (pixels)
+  bool  m_stMouseDown = false;  // left button currently held
+  bool  m_stMouseJustClicked = false; // true for one frame on click
+
   float fOpacity = 1.0f; // 0.0f = 100% transparent, 1.0f = 100% opaque
   bool m_RemotePresetLink = false;
   bool m_bAlwaysOnTop = false;
@@ -532,9 +564,8 @@ public:
   bool m_HideNotificationsWhenRemoteActive = false;
 
   int m_MinPSVersionConfig = 2;
-  int m_MaxPSVersionConfig = 4;
+  int m_MaxPSVersionConfig = 6;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
-  bool m_IsAMD = false;
 
   // GPU Protection Settings
   int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
@@ -582,9 +613,9 @@ public:
 #define SHADER_OTHER 3
   bool LoadShaderFromMemory(const char* szShaderText, char* szFn, char* szProfile,
     LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
-    LPD3DXBUFFER* ppBytecodeOut = nullptr);
+    LPD3DXBUFFER* ppBytecodeOut = nullptr, const char* szDiagName = nullptr);
   bool RecompileVShader(const char* szShadersText, VShaderInfo* si, int shaderType, bool bHardErrors, bool bCompileOnly);
-  bool RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly);
+  bool RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly, const char* szDiagName = nullptr);
   bool EvictSomeTexture();
   typedef std::vector<TexInfo> TexInfoList;
   TexInfoList     m_textures;
@@ -606,6 +637,7 @@ public:
   bool    m_ShaderPrecompileOnStartup = true;
   bool    m_CheckDirectXOnStartup = true;
   int     m_LogLevel = 1; // 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose
+  int     m_LogOutput = 3; // LOG_OUTPUT_BOTH (FILE|ODS), see utility.h
   bool    m_ShowLockSymbol = true;
   float   m_fAnimTime;
   float   m_fStartTime;
@@ -624,6 +656,7 @@ public:
   std::atomic<uint64_t> m_nLoadGeneration{0}; // incremented each load; bg thread checks before signaling
   float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
   float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
+  bool    m_bLoadingShadertoyMode = false;    // true when async load is for a .milk3 Shadertoy preset
   int     m_nPresetsLoadedTotal; //important for texture eviction age-tracking...
   CState	m_state_DO_NOT_USE[3];	// do not use; use pState and pOldState instead.
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS
@@ -653,7 +686,7 @@ public:
 
   int			m_nPresets;			// the # of entries in the file listing.  Includes directories and then files, sorted alphabetically.
   int			m_nDirs;			// the # of presets that are actually directories.  Always between 0 and m_nPresets.
-  int			m_nPresetFilter = 0;	// 0=all (.milk+.milk2), 1=.milk only, 2=.milk2 only
+  int			m_nPresetFilter = 0;	// 0=all, 1=.milk only, 2=.milk2 only, 3=.milk3 only
   int			m_nPresetListCurPos;// Index of the currently-HIGHLIGHTED preset (the user must press Enter on it to select it).
   int			m_nCurrentPreset;	// Index of the currently-RUNNING preset.
   //   Note that this is NOT the same as the currently-highlighted preset! (that's m_nPresetListCurPos)
@@ -723,6 +756,7 @@ public:
   void StartScript();
   void StopScript();
   void ExecuteScriptLine(int lineIndex);
+  void ExecuteScriptLine(const wchar_t* text); // pipe-split + execute
   void ExecuteScriptCommand(const std::wstring& cmd);
   void SyncScriptUI();
 
@@ -806,13 +840,58 @@ public:
   DX12Texture m_injectEffectTex;                     // back-buffer-sized copy for F11 inject post-process
   ComPtr<ID3D12PipelineState> m_pInjectEffectPSO;    // inject effect pixel shader PSO
   void RenderInjectEffect();                         // F11 inject effect post-process pass
+  DX12Texture m_dx12Feedback[2];                      // ping-pong feedback buffers for Buffer A (FLOAT32)
+  DX12Texture m_dx12ImageFeedback[2];                 // ping-pong feedback buffers for Image pass (FLOAT32)
+  int m_nFeedbackIdx = 0;                            // read index (write = 1 - read), shared by both pairs
+  bool m_bCompUsesFeedback = false;                  // true when comp shader uses sampler_feedback
+  bool m_bCompUsesImageFeedback = false;             // true when comp shader uses sampler_image
+
+  // Audio FFT/waveform texture for Shadertoy shaders (512x2 R32_FLOAT)
+  // Row 0 = FFT spectrum (512 bins, 0-11kHz), Row 1 = PCM waveform (512 samples)
+  DX12Texture m_dx12AudioTex;
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_audioUploadBuffer;
+  void CreateAudioTexture();
+  void UpdateAudioTexture();   // per-frame: upload latest FFT/waveform to GPU
+
+  // Custom channel textures from Shader Import (user-selected texture files)
+  DX12Texture m_dx12ChannelTex[4];           // loaded textures for sampler_chtex0..3
+  std::wstring m_szChannelTexPath[4];        // file paths (set by Import UI)
+  bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
+  bool m_bHasBufferB = false;                        // true when preset has a Buffer B shader
+  bool m_bShadertoyMode = false;                     // true when a .milk3 Shadertoy preset is active
+  int  m_nShadertoyStartFrame = 0;                   // frame at which Shadertoy mode was activated (for iFrame=0)
+  ComPtr<ID3D12PipelineState> m_dx12BufferAPSO;      // Buffer A pixel shader PSO
+  ComPtr<ID3D12PipelineState> m_dx12BufferBPSO;      // Buffer B pixel shader PSO
+  DX12Texture m_dx12FeedbackB[2];                    // ping-pong feedback buffers for Buffer B (FLOAT32)
+  std::atomic<int> m_nRecompileResult{0};            // 0=idle, 1=pending, 2=done-ok, 3=done-fail
+  void CopyBackbufferToFeedback();                   // capture comp output for next frame's feedback (single-pass)
+  void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
   void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()
 
-  // ── Spout Video Input ──
+  // ── Video Input (Spout / Webcam / Video File) ──
+  enum VideoInputSource {
+      VID_SOURCE_NONE   = 0,
+      VID_SOURCE_SPOUT  = 1,
+      VID_SOURCE_WEBCAM = 2,
+      VID_SOURCE_FILE   = 3
+  };
+  int     m_nVideoInputSource = VID_SOURCE_NONE; // active source type
+
+  // Webcam / Video File capture (Media Foundation)
+  std::unique_ptr<class VideoCaptureSource> m_videoCapture;
+  wchar_t m_szWebcamDevice[256] = {};   // friendly name of selected webcam
+  wchar_t m_szVideoFile[MAX_PATH] = {}; // path to video file
+  bool    m_bVideoLoop = true;          // loop video file playback
+
+  void    InitVideoCapture();
+  void    DestroyVideoCapture();
+  void    UpdateVideoCaptureTexture();   // per-frame GPU upload
+
+  // Spout receiver (source type 1)
   struct SpoutInputState {
       spoutDX12 receiver;
       ComPtr<ID3D12Resource> pReceivedTexture;
@@ -823,7 +902,8 @@ public:
   };
   std::unique_ptr<SpoutInputState> m_spoutInput;
 
-  bool    m_bSpoutInputEnabled = false;
+  // Shared video input settings (apply to all sources)
+  bool    m_bSpoutInputEnabled = false;  // kept for backward compat (maps to m_nVideoInputSource != 0)
   bool    m_bSpoutInputOnTop = false;       // false=background, true=overlay
   float   m_fSpoutInputOpacity = 1.0f;
   bool    m_bSpoutInputLumaKey = false;
@@ -836,10 +916,80 @@ public:
   void DestroySpoutInput();
   void UpdateSpoutInputTexture();
   void CompositeSpoutInput(bool isBackground);
+  void CompositeVideoInput(bool isBackground, DX12Texture& tex, UINT srcW, UINT srcH);
   void CompileSpoutInputPSO();
   void EnumerateSpoutSenders(std::vector<std::string>& outNames);
   void SaveSpoutInputSettings();
   void LoadSpoutInputSettings();
+
+  // ── Video Effects ──
+  struct AudioLink {
+      int   source    = 0;    // 0=none, 1=bass, 2=mid, 3=treb, 4=vol
+      float intensity = 0.5f; // 0.0–2.0
+  };
+  struct VideoEffectParams {
+      // Transform
+      float posX = 0, posY = 0;       // -1 to 1
+      float scale = 1.0f;             // 0.1 to 5.0
+      float rotation = 0;             // 0–360 degrees
+      bool  mirrorH = false, mirrorV = false;
+      // Color
+      float tintR = 1, tintG = 1, tintB = 1; // 0–2
+      float brightness = 0;           // -1 to 1
+      float contrast = 1.0f;          // 0–3
+      float saturation = 1.0f;        // 0–3
+      float hueShift = 0;             // 0–360
+      bool  invert = false;
+      // Effects
+      float pixelation = 0;           // 0 (off) to 1 (max)
+      float chromatic = 0;            // 0 (off) to 0.05
+      bool  edgeDetect = false;
+      // Blend: 0=Alpha, 1=Additive, 2=Multiply, 3=Screen, 4=Overlay, 5=Difference
+      int   blendMode = 0;
+      // Audio-reactive links
+      AudioLink arPosX, arPosY, arScale, arRotation;
+      AudioLink arBrightness, arSaturation, arChromatic;
+
+      bool IsDefault() const {
+          return posX == 0 && posY == 0 && scale == 1.0f && rotation == 0
+              && !mirrorH && !mirrorV
+              && tintR == 1 && tintG == 1 && tintB == 1
+              && brightness == 0 && contrast == 1.0f && saturation == 1.0f
+              && hueShift == 0 && !invert
+              && pixelation == 0 && chromatic == 0 && !edgeDetect
+              && blendMode == 0
+              && arPosX.source == 0 && arPosY.source == 0
+              && arScale.source == 0 && arRotation.source == 0
+              && arBrightness.source == 0 && arSaturation.source == 0
+              && arChromatic.source == 0;
+      }
+  };
+  VideoEffectParams m_videoFX;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Alpha;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Additive;
+  ComPtr<ID3D12PipelineState> m_pVideoFX_PSO_Solid;   // for shader-based blend modes 2-5
+  DX12Texture m_dx12VideoFXDest;                       // RT copy for shader-based blends
+  void CompileVideoFXPSOs();
+  void CompositeVideoInputFX(bool isBackground, DX12Texture& tex, UINT srcW, UINT srcH);
+
+  // Video Effects Window
+  class VideoEffectsWindow* m_pVideoEffectsWindow = nullptr;
+  void OpenVideoEffectsWindow();
+  void CloseVideoEffectsWindow();
+
+  // Video FX Profiles
+  wchar_t m_szCurrentVFXProfile[MAX_PATH] = {};  // currently loaded profile (empty = none)
+  bool    m_bEnableVFXStartup = false;
+  wchar_t m_szVFXStartup[MAX_PATH] = {};
+  bool    m_bEnableVFXStartupSavingOnClose = true;
+  void    SaveVideoFXProfile(const wchar_t* path);
+  bool    LoadVideoFXProfile(const wchar_t* path);
+  void    GetVideoFXProfileDir(wchar_t* out, size_t len);
+
+  // VFX Profile Picker Window
+  class VFXProfileWindow* m_pVFXProfileWindow = nullptr;
+  void OpenVFXProfileWindow();
+  void CloseVFXProfileWindow();
 
   // ── Game Controller ──
   bool    m_bControllerEnabled = false;
@@ -859,6 +1009,26 @@ public:
   std::string GetDefaultControllerJSON();
   void ParseControllerJSON(const std::string& jsonText);
   void ShowControllerHelpPopup(HWND hParent);
+
+  // ── MIDI ──
+  bool    m_bMidiEnabled = false;
+  int     m_nMidiDeviceID = -1;        // winmm MIDI input device ID
+  wchar_t m_szMidiDeviceName[256] = {};
+  int     m_nMidiBufferDelay = 30;     // CC debounce delay (ms)
+  std::vector<MidiRow> m_midiRows;     // 50 mapping slots
+  MidiInput m_midiInput;
+
+  void LoadMidiJSON();
+  void SaveMidiJSON();
+  void LoadMidiSettings();
+  void SaveMidiSettings();
+  void ParseMidiJSON(const std::string& json);
+  std::string SerializeMidiJSON() const;
+  void ExecuteMidiButton(const MidiRow& row);
+  void ExecuteMidiKnob(const MidiRow& row, int midiValue);
+  void LoadMidiDefaultActions(std::vector<std::string>& out);
+  void OpenMidiDevice();
+  void CloseMidiDevice();
 
   int               m_nTitleTexSizeX, m_nTitleTexSizeY;
   UINT              m_adapterId;
@@ -892,7 +1062,6 @@ public:
   texmgr      m_texmgr;		// for user sprites
   
   bool m_blackmode = false;
-  int m_AMDDetectionMode = 0; // 0 = Auto detect, 1 = Force AMD, 2 = Force non-AMD
 
   IDirect3DTexture9* m_tracer_tex;
 
@@ -936,6 +1105,7 @@ public:
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
   bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
   void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
+  void        LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
   bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick
   void        FindValidPresetDir();
@@ -989,34 +1159,70 @@ public:
   void        AdjustSetting(int id, int direction);
   void        SaveSettingToINI(int id);
   void        OpenFolderPickerForPresetDir();
-  // Settings window (Win32 dialog on dedicated thread)
-  HWND        m_hSettingsWnd = NULL;
-  HWND        m_hSettingsTab = NULL;       // Tab control
-  int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[SETTINGS_NUM_PAGES]; // HWNDs per tab
-  HFONT       m_hSettingsFont = NULL;
-  HFONT       m_hSettingsFontBold = NULL;
-  int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
-  int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
-  int         m_nSettingsWndW = 620;
-  int         m_nSettingsWndH = 850;
-  std::thread m_settingsThread;
-  std::atomic<bool> m_bSettingsThreadRunning{false};
+  // Settings window (ToolWindow subclass, own thread)
+  std::unique_ptr<SettingsWindow> m_settingsWindow;
+  int         m_nSettingsFontSize = -16;     // Shared font size for all tool windows (negative = pixel height)
   void        OpenSettingsWindow();
   void        CloseSettingsWindow();
-  void        CreateSettingsWindowOnThread();
-  void        BuildSettingsControls();
-  void        ShowSettingsPage(int page);
-  void        LayoutSettingsControls();
-  void        EnsureSettingsVisible();
-  void        ResetSettingsWindow();
-  void        RebuildSettingsFonts();
-  int         GetSettingsLineHeight();
-  void        NavigatePresetDirUp(HWND hSettingsWnd);
-  void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
-  static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-  // Remote tab
-  void        RefreshIPCList(HWND hSettingsWnd);
+
+  // Spout / Displays window (ToolWindow subclass, own thread)
+  std::unique_ptr<DisplaysWindow> m_displaysWindow;
+  void OpenDisplaysWindow();
+  void CloseDisplaysWindow();
+
+  // Song Info window (ToolWindow subclass, own thread)
+  std::unique_ptr<SongInfoWindow> m_songInfoWindow;
+  void OpenSongInfoWindow();
+  void CloseSongInfoWindow();
+
+  // Hotkeys window (ToolWindow subclass, own thread)
+  std::unique_ptr<HotkeysWindow> m_hotkeysWindow;
+  void OpenHotkeysWindow();
+  void CloseHotkeysWindow();
+
+  // MIDI window (ToolWindow subclass, own thread)
+  std::unique_ptr<MidiWindow> m_midiWindow;
+  void OpenMidiWindow();
+  void CloseMidiWindow();
+
+  // Presets window (ToolWindow subclass, own thread)
+  std::unique_ptr<PresetsWindow> m_presetsWindow;
+  void OpenPresetsWindow();
+  void ClosePresetsWindow();
+
+  // Sprites window (ToolWindow subclass, own thread)
+  std::unique_ptr<SpritesWindow> m_spritesWindow;
+  void OpenSpritesWindow();
+  void CloseSpritesWindow();
+
+  // Messages window (ToolWindow subclass, own thread)
+  std::unique_ptr<MessagesWindow> m_messagesWindow;
+  void OpenMessagesWindow();
+  void CloseMessagesWindow();
+
+  // Button Board window (ToolWindow subclass, own thread)
+  std::unique_ptr<ButtonBoardWindow> m_boardWindow;
+  void OpenBoardWindow();
+  void CloseBoardWindow();
+
+  // Shader Import window (ToolWindow subclass, own thread)
+  std::unique_ptr<ShaderImportWindow> m_shaderImportWindow;
+  void OpenShaderImportWindow();
+  void CloseShaderImportWindow();
+
+  // Welcome window (no-presets prompt)
+  std::unique_ptr<WelcomeWindow> m_welcomeWindow;
+  void OpenWelcomeWindow();
+  void CloseWelcomeWindow();
+
+  // Workspace Layout window
+  std::unique_ptr<WorkspaceLayoutWindow> m_workspaceLayoutWindow;
+  void OpenWorkspaceLayoutWindow();
+  void CloseWorkspaceLayoutWindow();
+
+  // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
+  void BroadcastFontSync(HWND hSender);
+
   // Messages tab
   bool        ShowMsgOverridesDialog(HWND hParent);
   void        PopulateMsgListBox(HWND hList);
@@ -1054,8 +1260,10 @@ public:
   struct PendingSprite { int nSpriteNum; int nSlot; };
   std::vector<PendingSprite> m_pendingSpriteLoads;
 
-  // Settings window dark theme
-  bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
+  // Settings window theme
+  enum ThemeMode { THEME_DARK = 0, THEME_LIGHT = 1, THEME_SYSTEM = 2 };
+  ThemeMode   m_nThemeMode = THEME_DARK;
+  bool        IsDarkTheme() const;  // resolves THEME_SYSTEM → actual dark/light
   COLORREF    m_colSettingsBg       = RGB(30, 30, 30);       // Main window background (matches MilkVision)
   COLORREF    m_colSettingsCtrlBg   = RGB(45, 45, 45);       // Edit/combo/list background
   COLORREF    m_colSettingsText     = RGB(0, 220, 0);        // Text color (green, matches MilkVision)
@@ -1068,7 +1276,6 @@ public:
   HBRUSH      m_hBrSettingsBg      = NULL;
   HBRUSH      m_hBrSettingsCtrlBg  = NULL;
   void        LoadSettingsThemeFromINI();
-  void        ApplySettingsDarkTheme();
   void        CleanupSettingsThemeBrushes();
 
   // User "safe" defaults (persisted to INI [UserDefaults] section)
@@ -1087,17 +1294,15 @@ public:
   float m_udGamma = 2.0f;
   void  SaveUserDefaults();
   void  LoadUserDefaults();
-  void  ResetToFactory(HWND hWnd);
-  void  ResetToUserDefaults(HWND hWnd);
-  void  UpdateVisualUI(HWND hWnd);
-  void  UpdateColorsUI(HWND hWnd);
+  void  SaveFallbackPaths();
+  void  LoadFallbackPaths();
 
   // Fallback search paths (Files tab)
   std::vector<std::wstring> m_fallbackPaths;
   wchar_t m_szRandomTexDir[MAX_PATH] = {};    // Dedicated random textures directory
   wchar_t m_szContentBasePath[MAX_PATH] = {};  // Base path for textures, sprites, etc.
-  void  SaveFallbackPaths();
-  void  LoadFallbackPaths();
+  // (ResetToFactory, ResetToUserDefaults, UpdateVisualUI, UpdateColorsUI,
+  //  RefreshIPCList, NavigatePresetDirUp/Into moved to SettingsWindow)
 
   // Message autoplay (Messages tab)
   bool    m_bMsgAutoplay = false;
@@ -1149,9 +1354,11 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
-  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]);
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
+  bool        AddNoiseTex_ST(const wchar_t* szTexName, int size);
+  bool        AddNoiseVol_ST(const wchar_t* szTexName, int size);
 
 
   //====[ 3. virtual functions: ]===========================================================================

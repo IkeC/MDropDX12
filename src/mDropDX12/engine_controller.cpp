@@ -21,8 +21,12 @@ std::string Engine::GetDefaultControllerJSON()
     return
         "// Button-to-command mapping for game controllers\r\n"
         "// Commands: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP,\r\n"
-        "//           FULLSCREEN, STRETCH, MIRROR, RESET,\r\n"
-        "//           PRESETINFO, SETTINGS, SEND=<vk>\r\n"
+        "//           FULLSCREEN, STRETCH, MIRROR, RESETWINDOW,\r\n"
+        "//           PRESETINFO, SETTINGS, CAPTURE, SPOUT,\r\n"
+        "//           BLACKOUT, SEND=<vk>\r\n"
+        "// Any IPC command also works as a value, e.g.:\r\n"
+        "//   OPACITY=0.5, COL_HUE=0.3, SPOUT_ACTIVE=1,\r\n"
+        "//   PRESET=name.milk, SPOUTINPUT=1|SenderName\r\n"
         "// Example values for a DualSense controller:\r\n"
         "{\r\n"
         "  \"1\": \"NEXT\",\r\n"
@@ -246,18 +250,36 @@ void Engine::PollController()
 }
 
 // ---------------------------------------------------------------------------
-// ExecuteControllerCommand — dispatch a command string to an action
+// ExecuteControllerCommand — dispatch a command string to an action.
+// Supports pipe-delimited chaining: "CLEARPARAMS|SIZE=30|Boom|SIZE=60|BOOM"
 // ---------------------------------------------------------------------------
 void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
 {
     if (cmdRaw.empty()) return;
 
-    // Trim leading/trailing whitespace and convert to uppercase
-    std::string cmd = cmdRaw;
-    size_t start = cmd.find_first_not_of(" \t\r\n");
-    size_t end = cmd.find_last_not_of(" \t\r\n");
+    // Split on '|' and dispatch each sub-command
+    if (cmdRaw.find('|') != std::string::npos) {
+        std::string remaining = cmdRaw;
+        size_t pos;
+        while ((pos = remaining.find('|')) != std::string::npos) {
+            std::string part = remaining.substr(0, pos);
+            remaining = remaining.substr(pos + 1);
+            ExecuteControllerCommand(part);
+        }
+        if (!remaining.empty())
+            ExecuteControllerCommand(remaining);
+        return;
+    }
+
+    // Trim leading/trailing whitespace
+    std::string trimmed = cmdRaw;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    size_t end = trimmed.find_last_not_of(" \t\r\n");
     if (start == std::string::npos) return;
-    cmd = cmd.substr(start, end - start + 1);
+    trimmed = trimmed.substr(start, end - start + 1);
+
+    // Uppercase copy for keyword matching
+    std::string cmd = trimmed;
     for (auto& c : cmd) c = (char)toupper((unsigned char)c);
 
     HWND hwnd = GetPluginWindow();
@@ -306,8 +328,18 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
     else if (cmd == "MIRROR") {
         if (hwnd) PostMessage(hwnd, WM_MW_TOGGLE_MIRROR_MODE, 0, 0);
     }
-    else if (cmd == "RESET") {
+    else if (cmd == "RESETWINDOW") {
         if (hwnd) PostMessage(hwnd, WM_MW_RESET_WINDOW, 0, 0);
+    }
+    else if (cmd == "CAPTURE") {
+        EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
+    }
+    else if (cmd == "SPOUT") {
+        EnqueueRenderCmd(RenderCmd::ToggleSpout);
+    }
+    else if (cmd == "BLACKOUT") {
+        m_blackmode = !m_blackmode;
+        AddNotification(m_blackmode ? L"Black Mode enabled" : L"Black Mode disabled");
     }
     else if (cmd.substr(0, 5) == "SEND=") {
         std::string val = cmd.substr(5);
@@ -320,6 +352,13 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
         } catch (...) { return; }
         if (vk > 0 && hwnd)
             PostMessage(hwnd, WM_KEYDOWN, (WPARAM)vk, 0);
+    }
+    else {
+        // Delegate to ExecuteScriptCommand which handles CLEARPARAMS, SIZE=,
+        // FONT=, COLOR=, MSG=, PRESET=, text-as-message display, and more.
+        // Use original case (trimmed) so display text preserves capitalization.
+        std::wstring wcmd(trimmed.begin(), trimmed.end());
+        ExecuteScriptCommand(wcmd);
     }
 }
 
@@ -515,6 +554,38 @@ static LRESULT CALLBACK ControllerHelpWndProc(HWND hWnd, UINT uMsg, WPARAM wPara
 
         y += boxH + 12;
 
+        // Available Commands section
+        SelectObject(hdc, hFontHeader);
+        SetTextColor(hdc, clrHeader);
+        RECT rcCmdTitle = { pad, y, rcClient.right - pad, y + fsHeader + 4 };
+        DrawTextW(hdc, L"Available Commands", -1, &rcCmdTitle, DT_LEFT | DT_SINGLELINE);
+        y += fsHeader + 6;
+
+        SelectObject(hdc, hFontSmall);
+        SetTextColor(hdc, clrText);
+
+        const wchar_t* cmdLines[] = {
+            L"NEXT, PREV, HARDCUT \u2014 Preset navigation",
+            L"LOCK, RAND \u2014 Preset lock / random toggle",
+            L"MASHUP \u2014 Mashup blend mode",
+            L"FULLSCREEN, STRETCH, MIRROR, RESETWINDOW \u2014 Window modes",
+            L"RESET \u2014 Reset script timer (Milkwave compatible)",
+            L"PRESETINFO, SETTINGS \u2014 UI toggles",
+            L"CAPTURE, SPOUT, BLACKOUT \u2014 Screenshot / Spout / black mode",
+            L"SEND=<vk> \u2014 Send arbitrary virtual keypress",
+        };
+        for (auto line : cmdLines) {
+            RECT rcLine = { pad + 8, y, rcClient.right - pad, y + warnLineH };
+            DrawTextW(hdc, line, -1, &rcLine, DT_LEFT | DT_SINGLELINE);
+            y += warnLineH;
+        }
+        y += 4;
+
+        SetTextColor(hdc, clrAccent);
+        RECT rcIpc = { pad + 8, y, rcClient.right - pad, y + warnLineH };
+        DrawTextW(hdc, L"Any IPC command also works (e.g. OPACITY=0.5, COL_HUE=0.3)", -1, &rcIpc, DT_LEFT | DT_SINGLELINE);
+        y += warnLineH + 8;
+
         // Footer tip
         SelectObject(hdc, hFontSmall);
         SetTextColor(hdc, clrDimText);
@@ -564,14 +635,14 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
     if (hExisting) { DestroyWindow(hExisting); }
 
     ControllerHelpData* data = new ControllerHelpData();
-    data->darkTheme = m_bSettingsDarkTheme;
+    data->darkTheme = IsDarkTheme();
     data->fontSize = abs(m_nSettingsFontSize);
     if (data->fontSize < 12) data->fontSize = 16;
 
     // Scale window size relative to font size
     int fs = data->fontSize;
-    int winW = MulDiv(520, fs, 16);
-    int winH = MulDiv(560, fs, 16);
+    int winW = MulDiv(560, fs, 16);
+    int winH = MulDiv(820, fs, 16);
 
     // Position near parent window
     RECT rcParent = {};
@@ -598,9 +669,9 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
 
     if (hPopup) {
         // Apply dark mode title bar
-        BOOL bDark = m_bSettingsDarkTheme ? TRUE : FALSE;
+        BOOL bDark = IsDarkTheme() ? TRUE : FALSE;
         DwmSetWindowAttribute(hPopup, 20, &bDark, sizeof(bDark));
-        if (m_bSettingsDarkTheme) {
+        if (IsDarkTheme()) {
             DwmSetWindowAttribute(hPopup, 35, &m_colSettingsBg, sizeof(m_colSettingsBg));
             DwmSetWindowAttribute(hPopup, 34, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
             DwmSetWindowAttribute(hPopup, 36, &m_colSettingsText, sizeof(m_colSettingsText));

@@ -35,6 +35,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 #include "engine.h"
+#include "video_capture.h"
 #include "resource.h"
 #include "support.h"
 //#include "evallib\eval.h"		// for math. expr. eval - thanks Francis! (in SourceOffSite, it's the 'vis_avs\evallib' project.)
@@ -1686,12 +1687,10 @@ void mdrop::Engine::DX12_BlurPasses()
   // Diagnostic: log blur pass info once per preset load
   bool bLogDiag = !m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f;
   if (bLogDiag) {
-    char dbg[256];
-    sprintf(dbg, "DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
+    DLOG_VERBOSE("DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
             m_nHighestBlurTexUsedThisFrame, passes,
             m_dx12BlurPSO[0] ? "OK" : "NULL", m_dx12BlurPSO[1] ? "OK" : "NULL",
             m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   if (passes == 0)
@@ -1752,10 +1751,7 @@ void mdrop::Engine::DX12_BlurPasses()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(dstTex);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)dstTex.width, (float)dstTex.height, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)dstTex.width, (LONG)dstTex.height };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, dstTex.width, dstTex.height);
 
     // Set blur PSO: even passes = horizontal (blur1), odd = vertical (blur2)
     cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
@@ -1776,8 +1772,7 @@ void mdrop::Engine::DX12_BlurPasses()
     float fbias_now = fbias[i / 2];
 
     if (bLogDiag) {
-      char dbg[512];
-      sprintf(dbg, "DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
+      DLOG_VERBOSE("DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
               "CT=%p h[0]=%p h[1]=%p h[2]=%p h[3]=%p h[5]=%p h[6]=%p "
               "srcTexSize=(%.1f,%.1f,%.6f,%.6f) fscale=%.3f fbias=%.3f shadowSz=%u",
               i, srcTex.width, srcTex.height, srcTex.srvIndex,
@@ -1786,7 +1781,6 @@ void mdrop::Engine::DX12_BlurPasses()
               srctexsize.x, srctexsize.y, srctexsize.z, srctexsize.w,
               fscale_now, fbias_now,
               pCT ? static_cast<DX12ConstantTable*>(pCT)->GetShadowSize() : 0);
-      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     if (i % 2 == 0) {
@@ -1850,6 +1844,313 @@ void mdrop::Engine::DX12_BlurPasses()
 // Called from RenderFrame after CPU-side computation (per-frame equations,
 // per-vertex warp) has filled m_verts[] with final UVs.
 // ---------------------------------------------------------------------------
+// ── Shadertoy render path: Buffer A → Image, no warp/blur/shapes ──
+void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
+{
+  int fbRead = m_nFeedbackIdx;
+  int fbWrite = 1 - m_nFeedbackIdx;
+
+  // Clear feedback buffers on the first 2 frames of a Shadertoy preset.
+  // This ensures no garbage VRAM data leaks into temporal accumulation.
+  // Many shaders also self-clear via "if (iFrame < 2) fragColor = 0;" but
+  // we do it here as a safety net for shaders that don't.
+  int stFrame = GetFrame() - m_nShadertoyStartFrame;
+
+  // Update audio texture (FFT + waveform) for this frame
+  UpdateAudioTexture();
+
+  // Truncate binding diagnostics file on first Shadertoy frame (Verbose only)
+  if (DLOG_DIAG_ENABLED() && stFrame == 0) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"w");
+    if (fp) fclose(fp);
+  }
+
+  // One-time diagnostics on first Shadertoy frame
+  if (stFrame == 0) {
+    DLOG_INFO("Shadertoy: fb[0]=%s (%ux%u fmt=%u) fb[1]=%s (%ux%u fmt=%u)",
+      m_dx12Feedback[0].IsValid() ? "OK" : "INVALID",
+      m_dx12Feedback[0].width, m_dx12Feedback[0].height, (UINT)m_dx12Feedback[0].format,
+      m_dx12Feedback[1].IsValid() ? "OK" : "INVALID",
+      m_dx12Feedback[1].width, m_dx12Feedback[1].height, (UINT)m_dx12Feedback[1].format);
+    DLOG_INFO("Shadertoy: bufferA_PSO=%s comp_PSO=%s hasBufferA=%d compUsesFeedback=%d compUsesImageFeedback=%d",
+      m_dx12BufferAPSO ? "OK" : "NULL", m_dx12CompPSO ? "OK" : "NULL",
+      (int)m_bHasBufferA, (int)m_bCompUsesFeedback, (int)m_bCompUsesImageFeedback);
+    DLOG_INFO("Shadertoy: texSize=%dx%d fbRead=%d fbWrite=%d",
+      m_nTexSizeX, m_nTexSizeY, fbRead, fbWrite);
+
+    // HUD notification
+    wchar_t note[256];
+    swprintf(note, 256, L"Shadertoy: fb=%s bufA_PSO=%s comp_PSO=%s (%dx%d)",
+      m_dx12Feedback[0].IsValid() ? L"OK" : L"FAIL",
+      m_dx12BufferAPSO ? L"OK" : L"NULL",
+      m_dx12CompPSO ? L"OK" : L"NULL",
+      m_nTexSizeX, m_nTexSizeY);
+    AddNotification(note, 5.0f);
+  }
+
+  if (stFrame < 2) {
+    float black[] = { 0.f, 0.f, 0.f, 0.f };
+    for (int i = 0; i < 2; i++) {
+      if (m_dx12Feedback[i].IsValid()) {
+        m_lpDX->TransitionResource(m_dx12Feedback[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
+        cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12Feedback[i]), black, 0, nullptr);
+        m_lpDX->TransitionResource(m_dx12Feedback[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      }
+      if (m_dx12FeedbackB[i].IsValid()) {
+        m_lpDX->TransitionResource(m_dx12FeedbackB[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
+        cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12FeedbackB[i]), black, 0, nullptr);
+        m_lpDX->TransitionResource(m_dx12FeedbackB[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      }
+      if (m_dx12ImageFeedback[i].IsValid()) {
+        m_lpDX->TransitionResource(m_dx12ImageFeedback[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
+        cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12ImageFeedback[i]), black, 0, nullptr);
+        m_lpDX->TransitionResource(m_dx12ImageFeedback[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      }
+    }
+  }
+
+  // Set up descriptor heaps and root signature (shared by all passes)
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+
+  // Build binding slots for Buffer A, Buffer B, and comp/Image passes
+  UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
+  memset(warpSlots, 0xFF, sizeof(warpSlots));  // warp unused in Shadertoy mode
+  memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));
+
+  {
+    // Image feedback read texture (previous Image output, if Image self-feedback is used)
+    const DX12Texture* imgFbRead = m_bCompUsesImageFeedback ? &m_dx12ImageFeedback[fbRead] : nullptr;
+
+    if (m_bHasBufferA) {
+      // Buffer A reads FeedbackA[fbRead] (own previous output) + FeedbackB[fbRead]
+      BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots,
+                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
+    } else {
+      memset(bufferASlots, 0xFF, sizeof(bufferASlots));
+    }
+
+    if (m_bHasBufferB) {
+      // Buffer B reads FeedbackA[fbWrite] (current frame's Buffer A output, rendered before B)
+      // + FeedbackB[fbRead] (own previous output, for self-feedback)
+      // This matches Shadertoy.com's sequential execution: A→B→Image within each frame.
+      BuildBindingSlots(&m_shaders.bufferB.params, m_dx12VS[1], bufferBSlots,
+                        &m_dx12Feedback[fbWrite], imgFbRead, &m_dx12FeedbackB[fbRead]);
+    }
+
+    if (m_bHasBufferA || m_bHasBufferB) {
+      // Image/comp reads FeedbackA[fbWrite] + FeedbackB[fbWrite] (current frame outputs)
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots,
+                        &m_dx12Feedback[fbWrite], imgFbRead, &m_dx12FeedbackB[fbWrite]);
+    } else {
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots,
+                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
+    }
+  }
+  m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
+
+  // ── Buffer A pass: render to feedback[fbWrite] ──
+  if (m_bHasBufferA && m_dx12BufferAPSO && m_dx12Feedback[fbWrite].IsValid()) {
+    DX12Texture& fbWriteTex = m_dx12Feedback[fbWrite];
+
+    m_lpDX->TransitionResource(fbWriteTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_CPU_DESCRIPTOR_HANDLE fbRtv = m_lpDX->GetRtvCpuHandle(fbWriteTex);
+    cmdList->OMSetRenderTargets(1, &fbRtv, FALSE, nullptr);
+
+    SetViewportAndScissor(cmdList, fbWriteTex.width, fbWriteTex.height);
+    cmdList->SetPipelineState(m_dx12BufferAPSO.Get());
+
+    // Apply Buffer A shader params and upload constant buffer
+    PShaderInfo* bufASI = &m_shaders.bufferA;
+    if (bufASI->CT) {
+      ApplyShaderParams(&bufASI->params, bufASI->CT, m_pState);
+      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(bufASI->CT);
+      if (ct->GetShadowSize() > 0) {
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+    }
+
+    // Bind Buffer A descriptor table (feedback[read] for self-referencing)
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBufferABindingGpuHandle());
+
+    // Fullscreen quad
+    MYVERTEX bufAQuad[4];
+    ZeroMemory(bufAQuad, sizeof(bufAQuad));
+    bufAQuad[0].x = -1.f; bufAQuad[0].y =  1.f; bufAQuad[0].z = 0.f; bufAQuad[0].Diffuse = 0xFFFFFFFF;
+    bufAQuad[0].tu = 0.f; bufAQuad[0].tv = 0.f; bufAQuad[0].tu_orig = 0.f; bufAQuad[0].tv_orig = 0.f; bufAQuad[0].rad = 1.f; bufAQuad[0].ang = 3.14159f;
+    bufAQuad[1].x =  1.f; bufAQuad[1].y =  1.f; bufAQuad[1].z = 0.f; bufAQuad[1].Diffuse = 0xFFFFFFFF;
+    bufAQuad[1].tu = 1.f; bufAQuad[1].tv = 0.f; bufAQuad[1].tu_orig = 1.f; bufAQuad[1].tv_orig = 0.f; bufAQuad[1].rad = 1.f; bufAQuad[1].ang = 0.f;
+    bufAQuad[2].x = -1.f; bufAQuad[2].y = -1.f; bufAQuad[2].z = 0.f; bufAQuad[2].Diffuse = 0xFFFFFFFF;
+    bufAQuad[2].tu = 0.f; bufAQuad[2].tv = 1.f; bufAQuad[2].tu_orig = 0.f; bufAQuad[2].tv_orig = 1.f; bufAQuad[2].rad = 1.f; bufAQuad[2].ang = 3.14159f;
+    bufAQuad[3].x =  1.f; bufAQuad[3].y = -1.f; bufAQuad[3].z = 0.f; bufAQuad[3].Diffuse = 0xFFFFFFFF;
+    bufAQuad[3].tu = 1.f; bufAQuad[3].tv = 1.f; bufAQuad[3].tu_orig = 1.f; bufAQuad[3].tv_orig = 1.f; bufAQuad[3].rad = 1.f; bufAQuad[3].ang = 0.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, bufAQuad, 4, sizeof(MYVERTEX));
+
+    // Transition feedback[write] to SRV so Image pass can read it
+    m_lpDX->TransitionResource(fbWriteTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
+
+  // ── Buffer B pass: render to feedbackB[fbWrite] ──
+  if (m_bHasBufferB && m_dx12BufferBPSO && m_dx12FeedbackB[fbWrite].IsValid()) {
+    DX12Texture& fbBWriteTex = m_dx12FeedbackB[fbWrite];
+
+    m_lpDX->TransitionResource(fbBWriteTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_CPU_DESCRIPTOR_HANDLE fbBRtv = m_lpDX->GetRtvCpuHandle(fbBWriteTex);
+    cmdList->OMSetRenderTargets(1, &fbBRtv, FALSE, nullptr);
+
+    SetViewportAndScissor(cmdList, fbBWriteTex.width, fbBWriteTex.height);
+    cmdList->SetPipelineState(m_dx12BufferBPSO.Get());
+
+    // Apply Buffer B shader params and upload constant buffer
+    PShaderInfo* bufBSI = &m_shaders.bufferB;
+    if (bufBSI->CT) {
+      ApplyShaderParams(&bufBSI->params, bufBSI->CT, m_pState);
+      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(bufBSI->CT);
+      if (ct->GetShadowSize() > 0) {
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+    }
+
+    // Bind Buffer B descriptor table
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBufferBBindingGpuHandle());
+
+    // Fullscreen quad (same UVs as Buffer A — DX convention, no Y-flip)
+    MYVERTEX bufBQuad[4];
+    ZeroMemory(bufBQuad, sizeof(bufBQuad));
+    bufBQuad[0].x = -1.f; bufBQuad[0].y =  1.f; bufBQuad[0].z = 0.f; bufBQuad[0].Diffuse = 0xFFFFFFFF;
+    bufBQuad[0].tu = 0.f; bufBQuad[0].tv = 0.f; bufBQuad[0].tu_orig = 0.f; bufBQuad[0].tv_orig = 0.f; bufBQuad[0].rad = 1.f; bufBQuad[0].ang = 3.14159f;
+    bufBQuad[1].x =  1.f; bufBQuad[1].y =  1.f; bufBQuad[1].z = 0.f; bufBQuad[1].Diffuse = 0xFFFFFFFF;
+    bufBQuad[1].tu = 1.f; bufBQuad[1].tv = 0.f; bufBQuad[1].tu_orig = 1.f; bufBQuad[1].tv_orig = 0.f; bufBQuad[1].rad = 1.f; bufBQuad[1].ang = 0.f;
+    bufBQuad[2].x = -1.f; bufBQuad[2].y = -1.f; bufBQuad[2].z = 0.f; bufBQuad[2].Diffuse = 0xFFFFFFFF;
+    bufBQuad[2].tu = 0.f; bufBQuad[2].tv = 1.f; bufBQuad[2].tu_orig = 0.f; bufBQuad[2].tv_orig = 1.f; bufBQuad[2].rad = 1.f; bufBQuad[2].ang = 3.14159f;
+    bufBQuad[3].x =  1.f; bufBQuad[3].y = -1.f; bufBQuad[3].z = 0.f; bufBQuad[3].Diffuse = 0xFFFFFFFF;
+    bufBQuad[3].tu = 1.f; bufBQuad[3].tv = 1.f; bufBQuad[3].tu_orig = 1.f; bufBQuad[3].tv_orig = 1.f; bufBQuad[3].rad = 1.f; bufBQuad[3].ang = 0.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, bufBQuad, 4, sizeof(MYVERTEX));
+
+    // Transition feedbackB[write] to SRV so Image pass can read it
+    m_lpDX->TransitionResource(fbBWriteTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
+
+  // ── Image/Comp pass ──
+  // When Image self-feedback is active, render to m_dx12ImageFeedback[fbWrite] (FLOAT32),
+  // then blit to backbuffer. Otherwise render directly to backbuffer.
+  {
+    m_lpDX->TransitionResource(m_dx12VS[1], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    bool bImageToFeedback = m_bCompUsesImageFeedback && m_dx12ImageFeedback[fbWrite].IsValid();
+
+    if (bImageToFeedback) {
+      // Render Image pass to FLOAT32 feedback buffer (preserves HDR precision for self-feedback)
+      DX12Texture& imgFbWrite = m_dx12ImageFeedback[fbWrite];
+      m_lpDX->TransitionResource(imgFbWrite, D3D12_RESOURCE_STATE_RENDER_TARGET);
+      D3D12_CPU_DESCRIPTOR_HANDLE imgRtv = m_lpDX->GetRtvCpuHandle(imgFbWrite);
+      cmdList->OMSetRenderTargets(1, &imgRtv, FALSE, nullptr);
+      SetViewportAndScissor(cmdList, imgFbWrite.width, imgFbWrite.height);
+    } else {
+      // Render directly to backbuffer (UNORM)
+      D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+      bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+      cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+      SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
+    }
+
+    if (m_dx12CompPSO) {
+      cmdList->SetPipelineState(m_dx12CompPSO.Get());
+    } else {
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+    }
+
+    // Apply comp/Image shader params and upload constant buffer
+    PShaderInfo* compSI = &m_shaders.comp;
+    if (compSI->CT) {
+      ApplyShaderParams(&compSI->params, compSI->CT, m_pState);
+      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(compSI->CT);
+      if (ct->GetShadowSize() > 0) {
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+    } else {
+      BYTE zeros[256] = {};
+      D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+      if (cbAddr)
+        cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+    }
+
+    // Bind comp descriptor table (feedback[write] = Buffer A's output as iChannel0)
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
+
+    // Fullscreen quad — UVs flipped vertically (tv=1 at top, tv=0 at bottom) so that
+    // the Image shader's fragCoord matches Shadertoy convention (y=0 at bottom, y=H at top)
+    // while Buffer A's DX-convention feedback loop remains self-consistent.
+    MYVERTEX quad[4];
+    ZeroMemory(quad, sizeof(quad));
+    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = 0xFFFFFFFF;
+    quad[0].tu = 0.f; quad[0].tv = 1.f; quad[0].tu_orig = 0.f; quad[0].tv_orig = 1.f; quad[0].rad = 1.f; quad[0].ang = 3.14159f;
+    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = 0xFFFFFFFF;
+    quad[1].tu = 1.f; quad[1].tv = 1.f; quad[1].tu_orig = 1.f; quad[1].tv_orig = 1.f; quad[1].rad = 1.f; quad[1].ang = 0.f;
+    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = 0xFFFFFFFF;
+    quad[2].tu = 0.f; quad[2].tv = 0.f; quad[2].tu_orig = 0.f; quad[2].tv_orig = 0.f; quad[2].rad = 1.f; quad[2].ang = 3.14159f;
+    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = 0xFFFFFFFF;
+    quad[3].tu = 1.f; quad[3].tv = 0.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 0.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
+
+    // ── Blit Image feedback to backbuffer ──
+    // When Image was rendered to FLOAT32 feedback buffer, copy it to the UNORM backbuffer
+    // using a textured quad draw (can't CopyResource across different formats).
+    if (bImageToFeedback) {
+      DX12Texture& imgFbWrite = m_dx12ImageFeedback[fbWrite];
+      m_lpDX->TransitionResource(imgFbWrite, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+      // Switch render target to backbuffer
+      D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+      bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+      cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+      SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
+
+      // Use simple textured quad PSO (passthrough — no shader effects)
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+
+      // Bind Image feedback texture as t0
+      cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(imgFbWrite));
+
+      // Zero CBV (no shader params needed for simple blit)
+      BYTE zeros[256] = {};
+      D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+      if (cbAddr)
+        cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+
+      // Fullscreen quad with standard UVs (no flip — feedback buffer is already in DX convention)
+      MYVERTEX blitQ[4];
+      ZeroMemory(blitQ, sizeof(blitQ));
+      blitQ[0].x = -1.f; blitQ[0].y =  1.f; blitQ[0].z = 0.f; blitQ[0].Diffuse = 0xFFFFFFFF;
+      blitQ[0].tu = 0.f; blitQ[0].tv = 0.f;
+      blitQ[1].x =  1.f; blitQ[1].y =  1.f; blitQ[1].z = 0.f; blitQ[1].Diffuse = 0xFFFFFFFF;
+      blitQ[1].tu = 1.f; blitQ[1].tv = 0.f;
+      blitQ[2].x = -1.f; blitQ[2].y = -1.f; blitQ[2].z = 0.f; blitQ[2].Diffuse = 0xFFFFFFFF;
+      blitQ[2].tu = 0.f; blitQ[2].tv = 1.f;
+      blitQ[3].x =  1.f; blitQ[3].y = -1.f; blitQ[3].z = 0.f; blitQ[3].Diffuse = 0xFFFFFFFF;
+      blitQ[3].tu = 1.f; blitQ[3].tv = 1.f;
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, blitQ, 4, sizeof(MYVERTEX));
+    }
+  }
+
+  // Mark diagnostics as logged
+  if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f)
+    m_bPresetDiagLogged = true;
+}
+
 void mdrop::Engine::DX12_RenderWarpAndComposite()
 {
   if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
@@ -1881,22 +2182,57 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
-  // ── Spout Video Input: BACKGROUND layer ──
+  // ── Shadertoy pipeline: skip warp/blur/shapes entirely ──
+  if (m_bShadertoyMode) {
+    RenderFrameShadertoy(cmdList);
+    return;
+  }
+
+  // ── Video Input: BACKGROUND layer ──
   // Draw onto VS[0] before warp so video feeds through the preset's warp distortion
-  if (m_bSpoutInputEnabled && !m_bSpoutInputOnTop) {
-    UpdateSpoutInputTexture();
-    if (m_spoutInput && m_spoutInput->bConnected) {
+  if (m_nVideoInputSource != VID_SOURCE_NONE && !m_bSpoutInputOnTop) {
+    bool hasFrame = false;
+    DX12Texture* pTex = nullptr;
+    UINT srcW = 0, srcH = 0;
+
+    if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
+      UpdateSpoutInputTexture();
+      if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
+        pTex = &m_spoutInput->dx12InputTex;
+        srcW = m_spoutInput->nSenderWidth;
+        srcH = m_spoutInput->nSenderHeight;
+        hasFrame = true;
+      }
+    } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
+      // Lazy-init: create capture source on first render (startup from saved settings)
+      if (!m_videoCapture)
+        InitVideoCapture();
+      if (m_videoCapture && m_videoCapture->IsConnected()) {
+        UpdateVideoCaptureTexture();
+        if (m_videoCapture->m_dx12Tex.IsValid()) {
+          pTex = &m_videoCapture->m_dx12Tex;
+          srcW = m_videoCapture->GetWidth();
+          srcH = m_videoCapture->GetHeight();
+          hasFrame = true;
+        }
+      }
+    }
+
+    if (hasFrame && pTex) {
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
       D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
       cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-      D3D12_VIEWPORT vpBg = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-      D3D12_RECT scBg = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-      cmdList->RSSetViewports(1, &vpBg);
-      cmdList->RSSetScissorRects(1, &scBg);
-      CompositeSpoutInput(true);
+      SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
+      CompositeVideoInputFX(true, *pTex, srcW, srcH);
+      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
+        m_lpDX->TransitionResource(*pTex, D3D12_RESOURCE_STATE_COPY_DEST);
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
   }
+
+  // Feedback ping-pong indices (used by warp bindings, Buffer A pass, and comp pass)
+  int fbRead = m_nFeedbackIdx;
+  int fbWrite = 1 - m_nFeedbackIdx;
 
   // ── Warp pass: draw mesh from VS0 into VS1 ──
   {
@@ -1906,10 +2242,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
     // Set descriptor heaps, root sig, PSO
     ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
@@ -1925,49 +2258,52 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // input (previous frame), while m_lpVS[1] is the warp+shapes output.
     // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
     // warp+shapes output = VS[1].
-    UINT warpSlots[16], compSlots[16];
+
+    UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
+    memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));  // Buffer B unused in non-Shadertoy mode
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
-    BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots);
-    m_lpDX->UpdatePerFrameBindings(warpSlots, compSlots);
+
+    // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
+    if (m_bHasBufferA) {
+      BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots, &m_dx12Feedback[fbRead]);
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbWrite]);
+    } else {
+      memset(bufferASlots, 0xFF, sizeof(bufferASlots));  // all UINT_MAX (unused)
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbRead]);
+    }
+    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
 
     // Diagnostic: log binding slots once per preset load
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
       // Log comp shader's m_texcode and resulting binding slots
       {
-        char dbg[512];
         CShaderParams* cp = &m_shaders.comp.params;
-        sprintf(dbg, "DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+        DLOG_VERBOSE("DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
                 cp->m_texcode[0], cp->m_texcode[1], cp->m_texcode[2], cp->m_texcode[3],
                 cp->m_texcode[4], cp->m_texcode[5], cp->m_texcode[6], cp->m_texcode[7],
                 cp->m_texcode[8], cp->m_texcode[9], cp->m_texcode[10], cp->m_texcode[11],
                 cp->m_texcode[12], cp->m_texcode[13], cp->m_texcode[14], cp->m_texcode[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+        DLOG_VERBOSE("DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 compSlots[0], compSlots[1], compSlots[2], compSlots[3],
                 compSlots[4], compSlots[5], compSlots[6], compSlots[7],
                 compSlots[8], compSlots[9], compSlots[10], compSlots[11],
                 compSlots[12], compSlots[13], compSlots[14], compSlots[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
+        DLOG_VERBOSE("DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
                 m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex, m_dx12Blur[5].srvIndex, m_dx12VS[1].srvIndex);
-        DebugLogA(dbg, LOG_VERBOSE);
       }
       // Log warp shader's m_texcode
       {
-        char dbg[512];
         CShaderParams* wp = &m_shaders.warp.params;
-        sprintf(dbg, "DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+        DLOG_VERBOSE("DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
                 wp->m_texcode[0], wp->m_texcode[1], wp->m_texcode[2], wp->m_texcode[3],
                 wp->m_texcode[4], wp->m_texcode[5], wp->m_texcode[6], wp->m_texcode[7],
                 wp->m_texcode[8], wp->m_texcode[9], wp->m_texcode[10], wp->m_texcode[11],
                 wp->m_texcode[12], wp->m_texcode[13], wp->m_texcode[14], wp->m_texcode[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+        DLOG_VERBOSE("DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 warpSlots[0], warpSlots[1], warpSlots[2], warpSlots[3],
                 warpSlots[4], warpSlots[5], warpSlots[6], warpSlots[7],
                 warpSlots[8], warpSlots[9], warpSlots[10], warpSlots[11],
                 warpSlots[12], warpSlots[13], warpSlots[14], warpSlots[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
       }
     }
 
@@ -1982,12 +2318,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
     // Diagnostic: log warp pass state once per preset load
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
-      char dbg[256];
-      sprintf(dbg, "DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
+      DLOG_VERBOSE("DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
               m_dx12WarpPSO ? "PRESET" : "FALLBACK",
               (m_shaders.warp.CT != nullptr) ? "yes" : "no",
               (float)(*m_pState->var_pf_decay));
-      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     // Bind warp shader constant buffer
@@ -2067,10 +2401,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
     DX12_DrawCustomShapes();
     DX12_DrawCustomWaves();
@@ -2094,20 +2425,78 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
-  // ── Composite pass: draw VS1 to backbuffer ──
+  // ── Buffer A pass: render to feedback[fbWrite] (Shadertoy temporal reprojection) ──
+  if (m_bHasBufferA && m_dx12BufferAPSO && m_dx12Feedback[fbWrite].IsValid()) {
+    DX12Texture& fbWriteTex = m_dx12Feedback[fbWrite];
+
+    m_lpDX->TransitionResource(fbWriteTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_CPU_DESCRIPTOR_HANDLE fbRtv = m_lpDX->GetRtvCpuHandle(fbWriteTex);
+    cmdList->OMSetRenderTargets(1, &fbRtv, FALSE, nullptr);
+
+    SetViewportAndScissor(cmdList, fbWriteTex.width, fbWriteTex.height);
+
+    cmdList->SetPipelineState(m_dx12BufferAPSO.Get());
+
+    // Apply Buffer A shader params and upload constant buffer
+    PShaderInfo* bufASI = &m_shaders.bufferA;
+    if (bufASI->CT) {
+      ApplyShaderParams(&bufASI->params, bufASI->CT, m_pState);
+      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(bufASI->CT);
+      if (ct->GetShadowSize() > 0) {
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+    }
+
+    // Bind Buffer A descriptor table (feedback[read] for self-referencing)
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBufferABindingGpuHandle());
+
+    // Fullscreen quad (same MYVERTEX layout as comp)
+    MYVERTEX bufAQuad[4];
+    ZeroMemory(bufAQuad, sizeof(bufAQuad));
+    bufAQuad[0].x = -1.f; bufAQuad[0].y =  1.f; bufAQuad[0].z = 0.f; bufAQuad[0].Diffuse = 0xFFFFFFFF;
+    bufAQuad[0].tu = 0.f; bufAQuad[0].tv = 0.f; bufAQuad[0].tu_orig = 0.f; bufAQuad[0].tv_orig = 0.f; bufAQuad[0].rad = 1.f; bufAQuad[0].ang = 3.14159f;
+    bufAQuad[1].x =  1.f; bufAQuad[1].y =  1.f; bufAQuad[1].z = 0.f; bufAQuad[1].Diffuse = 0xFFFFFFFF;
+    bufAQuad[1].tu = 1.f; bufAQuad[1].tv = 0.f; bufAQuad[1].tu_orig = 1.f; bufAQuad[1].tv_orig = 0.f; bufAQuad[1].rad = 1.f; bufAQuad[1].ang = 0.f;
+    bufAQuad[2].x = -1.f; bufAQuad[2].y = -1.f; bufAQuad[2].z = 0.f; bufAQuad[2].Diffuse = 0xFFFFFFFF;
+    bufAQuad[2].tu = 0.f; bufAQuad[2].tv = 1.f; bufAQuad[2].tu_orig = 0.f; bufAQuad[2].tv_orig = 1.f; bufAQuad[2].rad = 1.f; bufAQuad[2].ang = 3.14159f;
+    bufAQuad[3].x =  1.f; bufAQuad[3].y = -1.f; bufAQuad[3].z = 0.f; bufAQuad[3].Diffuse = 0xFFFFFFFF;
+    bufAQuad[3].tu = 1.f; bufAQuad[3].tv = 1.f; bufAQuad[3].tu_orig = 1.f; bufAQuad[3].tv_orig = 1.f; bufAQuad[3].rad = 1.f; bufAQuad[3].ang = 0.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, bufAQuad, 4, sizeof(MYVERTEX));
+
+    // Transition feedback[write] back to SRV so comp/Image can read it
+    m_lpDX->TransitionResource(fbWriteTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
+
+  // ── Composite pass: draw VS1 ──
+  // When single-pass feedback is active, render to the FLOAT feedback buffer first
+  // (preserves camera data outside [0,1]), then blit to the UNORM backbuffer for display.
+  bool bCompToFeedback = m_bCompUsesFeedback && !m_bHasBufferA
+                         && m_dx12Feedback[fbWrite].IsValid();
+
   {
     m_lpDX->TransitionResource(m_dx12VS[1], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    // Restore backbuffer as render target
-    D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-    bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
-    cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+    if (bCompToFeedback) {
+      // Render comp to FLOAT feedback[write] instead of backbuffer
+      m_lpDX->TransitionResource(m_dx12Feedback[fbWrite], D3D12_RESOURCE_STATE_RENDER_TARGET);
+      D3D12_CPU_DESCRIPTOR_HANDLE fbRtv = m_lpDX->GetRtvCpuHandle(m_dx12Feedback[fbWrite]);
+      cmdList->OMSetRenderTargets(1, &fbRtv, FALSE, nullptr);
+    } else {
+      // Normal path: render directly to backbuffer
+      D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+      bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+      cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+    }
 
-    D3D12_VIEWPORT vp = { 0, 0,
-        (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    // When rendering to feedback, use VS resolution (matches texsize in the shader).
+    // When rendering to backbuffer, use client/backbuffer resolution.
+    if (bCompToFeedback)
+      SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
+    else
+      SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
 
     // Use preset comp PSO if available, else Phase 4 passthrough.
     // The comp quad uses MYVERTEX data, so PSO_TEXTURED_MYVERTEX is correct.
@@ -2155,11 +2544,53 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
   }
 
-  // ── Spout Video Input: OVERLAY layer ──
+  // ── Feedback blit: copy FLOAT feedback[write] → UNORM backbuffer for display ──
+  if (bCompToFeedback) {
+    m_lpDX->TransitionResource(m_dx12Feedback[fbWrite], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // Set backbuffer as render target
+    D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+    cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+    SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
+
+    // Simple passthrough PSO + bind feedback texture
+    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+    BYTE zeros[256] = {};
+    D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+    if (cbAddr)
+      cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(m_dx12Feedback[fbWrite]));
+
+    // Blit fullscreen quad
+    MYVERTEX blit[4];
+    ZeroMemory(blit, sizeof(blit));
+    blit[0].x = -1.f; blit[0].y =  1.f; blit[0].z = 0.f; blit[0].Diffuse = 0xFFFFFFFF; blit[0].tu = 0.f; blit[0].tv = 0.f;
+    blit[1].x =  1.f; blit[1].y =  1.f; blit[1].z = 0.f; blit[1].Diffuse = 0xFFFFFFFF; blit[1].tu = 1.f; blit[1].tv = 0.f;
+    blit[2].x = -1.f; blit[2].y = -1.f; blit[2].z = 0.f; blit[2].Diffuse = 0xFFFFFFFF; blit[2].tu = 0.f; blit[2].tv = 1.f;
+    blit[3].x =  1.f; blit[3].y = -1.f; blit[3].z = 0.f; blit[3].Diffuse = 0xFFFFFFFF; blit[3].tu = 1.f; blit[3].tv = 1.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, blit, 4, sizeof(MYVERTEX));
+  }
+
+  // ── Video Input: OVERLAY layer ──
   // Draw onto backbuffer after comp pass (video on top of preset)
-  if (m_bSpoutInputEnabled && m_bSpoutInputOnTop) {
-    UpdateSpoutInputTexture();
-    CompositeSpoutInput(false);
+  if (m_nVideoInputSource != VID_SOURCE_NONE && m_bSpoutInputOnTop) {
+    if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
+      UpdateSpoutInputTexture();
+      if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
+        CompositeVideoInputFX(false, m_spoutInput->dx12InputTex, m_spoutInput->nSenderWidth, m_spoutInput->nSenderHeight);
+        m_lpDX->TransitionResource(m_spoutInput->dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
+      }
+    } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
+      if (!m_videoCapture)
+        InitVideoCapture();
+      if (m_videoCapture && m_videoCapture->IsConnected()) {
+        UpdateVideoCaptureTexture();
+        if (m_videoCapture->m_dx12Tex.IsValid()) {
+          CompositeVideoInputFX(false, m_videoCapture->m_dx12Tex, m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
+        }
+      }
+    }
   }
 
   // ── Draw behind-text sprites (layer 0) on the backbuffer ──
@@ -3141,11 +3572,9 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
         totalInstances += m_pOldState->m_shape[i].instances;
     }
     if (totalInstances > m_nHeavyPresetMaxInstances) {
-      char dbg[512];
-      sprintf(dbg, "GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
+      DLOG_INFO("GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
               totalInstances, m_nHeavyPresetMaxInstances,
               wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-      DebugLogA(dbg);
       return;
     }
   }
@@ -3186,11 +3615,9 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
         if (effectiveMaxInstances > 0 && instances > effectiveMaxInstances) {
           // Log once per preset (within first half-second)
           if (GetTime() - m_fPresetStartTime < 0.5f) {
-            char dbg[512];
-            sprintf(dbg, "GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
+            DLOG_INFO("GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
                     i, instances, effectiveMaxInstances, m_nTexSizeX, m_nTexSizeY,
                     wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-            DebugLogA(dbg);
           }
           instances = effectiveMaxInstances;
         }
@@ -3333,10 +3760,8 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
 
   // Diagnostic: log shape draw stats once per preset load
   if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
-    char dbg[512];
-    sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
+    DLOG_VERBOSE("DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
             diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 }
 
@@ -6205,10 +6630,7 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
         D3D12_CPU_DESCRIPTOR_HANDLE vs1Rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
         cmdList->OMSetRenderTargets(1, &vs1Rtv, FALSE, nullptr);
 
-        D3D12_VIEWPORT burnVp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-        D3D12_RECT burnScissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-        cmdList->RSSetViewports(1, &burnVp);
-        cmdList->RSSetScissorRects(1, &burnScissor);
+        SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
         SPRITEVERTEX burnVerts[6] = { triVerts[0], triVerts[1], triVerts[2],
                                       triVerts[3], triVerts[4], triVerts[5] };
@@ -6219,11 +6641,7 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
         bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
         cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
 
-        D3D12_VIEWPORT bbVp = { 0, 0,
-            (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height, 0.f, 1.f };
-        D3D12_RECT bbScissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-        cmdList->RSSetViewports(1, &bbVp);
-        cmdList->RSSetScissorRects(1, &bbScissor);
+        SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
       }
 
       if (bKillSprite) {
@@ -6280,12 +6698,38 @@ void mdrop::Engine::RestoreShaderParams() {
 
 }
 
-void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]) {
+void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex, const DX12Texture* imageFeedbackTex, const DX12Texture* bufferBTex) {
   for (int i = 0; i < 16; i++) {
     outSlots[i] = UINT_MAX;
     switch (params->m_texcode[i]) {
     case TEX_VS:
       outSlots[i] = vsTex.srvIndex;
+      break;
+    case TEX_FEEDBACK:
+      if (feedbackTex && feedbackTex->IsValid())
+        outSlots[i] = feedbackTex->srvIndex;
+      else if (m_dx12Feedback[0].IsValid())
+        outSlots[i] = m_dx12Feedback[0].srvIndex;  // default: read buffer
+      else
+        outSlots[i] = vsTex.srvIndex;  // fallback to VS if feedback not ready
+      break;
+    case TEX_IMAGE_FEEDBACK:
+      if (imageFeedbackTex && imageFeedbackTex->IsValid())
+        outSlots[i] = imageFeedbackTex->srvIndex;
+      else if (m_dx12ImageFeedback[0].IsValid())
+        outSlots[i] = m_dx12ImageFeedback[0].srvIndex;
+      else
+        outSlots[i] = vsTex.srvIndex;  // fallback
+      break;
+    case TEX_BUFFER_B:
+      if (bufferBTex && bufferBTex->IsValid())
+        outSlots[i] = bufferBTex->srvIndex;
+      else if (m_dx12FeedbackB[0].IsValid())
+        outSlots[i] = m_dx12FeedbackB[0].srvIndex;
+      break;
+    case TEX_AUDIO:
+      if (m_dx12AudioTex.IsValid())
+        outSlots[i] = m_dx12AudioTex.srvIndex;
       break;
 #if (NUM_BLUR_TEX >= 2)
     case TEX_BLUR1:
@@ -6312,6 +6756,28 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
       break;
     default:
       break;
+    }
+  }
+  // Diagnostic dump for Shadertoy binding verification (Verbose only)
+  if (DLOG_DIAG_ENABLED() && m_bShadertoyMode && !m_bPresetDiagLogged) {
+    wchar_t diagPath[MAX_PATH];
+    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
+    FILE* fp = nullptr;
+    _wfopen_s(&fp, diagPath, L"a");
+    if (fp) {
+      fprintf(fp, "Binding: fb=%s(%u) bufB=%s(%u)\n",
+              feedbackTex && feedbackTex->IsValid() ? "OK" : "no",
+              feedbackTex ? feedbackTex->srvIndex : UINT_MAX,
+              bufferBTex && bufferBTex->IsValid() ? "OK" : "no",
+              bufferBTex ? bufferBTex->srvIndex : UINT_MAX);
+      for (int i = 0; i < 16; i++) {
+        if (params->m_texcode[i] != 0 || outSlots[i] != UINT_MAX) {
+          fprintf(fp, "  slot[%d]: texcode=%d srv=%u binding_srv=%u\n", i, params->m_texcode[i], outSlots[i],
+                  params->m_texture_bindings[i].dx12SrvIndex);
+        }
+      }
+      fprintf(fp, "---\n");
+      fclose(fp);
     }
   }
 }
@@ -6378,7 +6844,12 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   D3DXHANDLE* h = p->const_handles;
   if (h[0]) pCT->SetVector(lpDevice, h[0], &D3DXVECTOR4(aspect_x, aspect_y, 1.0f / aspect_x, 1.0f / aspect_y));
   if (h[1]) pCT->SetVector(lpDevice, h[1], &D3DXVECTOR4(0, 0, 0, 0));
-  if (h[2]) pCT->SetVector(lpDevice, h[2], &D3DXVECTOR4(time_since_preset_start_wrapped, GetFps(), (float)GetFrame(), progress));
+  {
+    // In Shadertoy mode, iFrame must start at 0 when the preset loads (not global frame count).
+    // Many Shadertoy shaders use "if (iFrame < 2) { reset; }" to initialize the feedback buffer.
+    float frameVal = m_bShadertoyMode ? (float)(GetFrame() - m_nShadertoyStartFrame) : (float)GetFrame();
+    if (h[2]) pCT->SetVector(lpDevice, h[2], &D3DXVECTOR4(time_since_preset_start_wrapped, GetFps(), frameVal, progress));
+  }
   if (h[3]) pCT->SetVector(lpDevice, h[3], &D3DXVECTOR4(mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2], 0.3333f * (mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2])));
   if (h[4]) pCT->SetVector(lpDevice, h[4], &D3DXVECTOR4(mysound.avg_rel[0], mysound.avg_rel[1], mysound.avg_rel[2], 0.3333f * (mysound.avg_rel[0], mysound.avg_rel[1], mysound.avg_rel[2])));
   if (h[5]) pCT->SetVector(lpDevice, h[5], &D3DXVECTOR4(blur_max[0] - blur_min[0], blur_min[0], blur_max[1] - blur_min[1], blur_min[1]));
@@ -6408,10 +6879,20 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (h[13]) pCT->SetVector(lpDevice, h[13], &D3DXVECTOR4(blur_min[1], blur_max[1], blur_min[2], blur_max[2]));
   
   // BMV/MDropDX12
-  if (h[14]) pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_mouseX, 
-    m_mouseY != -1 ? -m_mouseY + 1 : -1, 
-    m_mouseDown ? 1.0f : 0.0f,
-    m_mouseClicked > 0 ? m_lastMouseY : -m_lastMouseY));
+  if (h[14]) {
+    if (m_bShadertoyMode) {
+      // Shadertoy iMouse: pixel coords, z/w encode click position with sign for button state
+      bool neverClicked = (m_stClickX == 0.f && m_stClickY == 0.f);
+      float z = neverClicked ? 0.f : (m_stMouseDown ?  m_stClickX : -m_stClickX);
+      float w = neverClicked ? 0.f : (m_stMouseJustClicked ? m_stClickY : -m_stClickY);
+      pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_stMouseX, m_stMouseY, z, w));
+    } else {
+      pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_mouseX,
+        m_mouseY != -1 ? -m_mouseY + 1 : -1,
+        m_mouseDown ? 1.0f : 0.0f,
+        m_mouseClicked > 0 ? m_lastMouseY : -m_lastMouseY));
+    }
+  }
   if (h[15]) pCT->SetVector(lpDevice, h[15], &D3DXVECTOR4(mysound.smooth[0], mysound.smooth[1], mysound.smooth[2], 0.3333f * (mysound.smooth[0], mysound.smooth[1], mysound.smooth[2])));
   if (h[16]) pCT->SetVector(lpDevice, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
   if (h[17]) pCT->SetVector(lpDevice, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));

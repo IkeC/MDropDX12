@@ -86,6 +86,7 @@ HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, 
 HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true);
 HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup = false, bool visible = true);
 HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true);
+HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h, int rangeMin, int rangeMax, int pos, bool visible = true);
 void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
 void DrawOwnerRadio(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
 void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised);
@@ -259,9 +260,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPRITES_MESSAGES     2130  // ComboBox: Messages/Sprites mode (General tab)
 #define IDC_MW_LOGLEVEL_OFF         2131  // Radio: Log Level Off
 #define IDC_MW_LOGLEVEL_ERROR       2132  // Radio: Log Level Error
-#define IDC_MW_LOGLEVEL_WARN        2140  // Radio: Log Level Warn
-#define IDC_MW_LOGLEVEL_INFO        2141  // Radio: Log Level Info
-#define IDC_MW_LOGLEVEL_VERBOSE     2142  // Radio: Log Level Verbose
+#define IDC_MW_LOGLEVEL_WARN        2144  // Radio: Log Level Warn
+#define IDC_MW_LOGLEVEL_INFO        2145  // Radio: Log Level Info
+#define IDC_MW_LOGLEVEL_VERBOSE     2146  // Radio: Log Level Verbose
 #define IDC_MW_MSG_SHOW_MESSAGES   2133  // Checkbox: Enable Messages (Messages tab)
 #define IDC_MW_MSG_SHOW_SPRITES    2134  // Checkbox: Enable Sprites (Messages tab)
 #define IDC_MW_CONTENT_BASE_LABEL  2135  // Label: Content Base Path (Files tab)
@@ -270,6 +271,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CONTENT_BASE_CLEAR  2138  // Button: Clear Content Base Path
 #define IDC_MW_FALLBACK_TEX_LABEL  2139  // Label: Fallback Texture Style (Files tab)
 #define IDC_MW_FALLBACK_TEX        2140  // ComboBox: Fallback Texture Style (Files tab)
+#define IDC_MW_FALLBACK_FILE_EDIT  2141  // Edit: Custom fallback texture file path (Files tab)
+#define IDC_MW_FALLBACK_FILE_BROWSE 2142 // Button: Browse for custom fallback texture
+#define IDC_MW_FALLBACK_FILE_CLEAR 2143  // Button: Clear custom fallback texture
 
 // Idle Timer controls (System tab)
 #define IDC_MW_IDLE_ENABLE         2150  // Checkbox: enable idle timer
@@ -309,6 +313,16 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WTP_CANCEL          2191  // Button: Cancel
 #define IDC_MW_WTP_WINDOWS         2192  // ComboBox: enumerated windows dropdown
 
+// Video Input source selector (Displays tab)
+#define IDC_MW_VIDINPUT_SOURCE      7050
+// Webcam controls
+#define IDC_MW_VIDINPUT_WEBCAM      7051
+#define IDC_MW_VIDINPUT_WEBCAM_REF  7052
+// Video File controls
+#define IDC_MW_VIDINPUT_FILE_EDIT   7053
+#define IDC_MW_VIDINPUT_FILE_BROWSE 7054
+#define IDC_MW_VIDINPUT_FILE_LOOP   7055
+
 // Spout Video Input controls (Displays tab)
 #define IDC_MW_SPINPUT_ENABLE       7020
 #define IDC_MW_SPINPUT_SENDER       7021
@@ -332,6 +346,80 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CTRL_SAVE        7045
 #define IDC_MW_CTRL_LOAD        7046
 #define IDC_MW_CTRL_HELP        7047
+
+// Settings window pin (always-on-top toggle)
+#define IDC_MW_SETTINGS_PIN     7060
+
+// Spout / Displays window controls
+#define IDC_MW_DISPLAYS_PIN     7061
+#define IDC_MW_DISP_FONT_PLUS   7062
+#define IDC_MW_DISP_FONT_MINUS  7063
+#define IDC_MW_OPEN_DISPLAYS    7064  // Button on General tab to open Displays window
+#define IDC_MW_DISP_TAB         7065  // Tab control in Displays window
+
+// Song Info window controls
+#define IDC_MW_SONGINFO_PIN         7070
+#define IDC_MW_SONGINFO_FONT_PLUS   7071
+#define IDC_MW_SONGINFO_FONT_MINUS  7072
+#define IDC_MW_OPEN_SONGINFO        7073  // Button on General tab to open Song Info window
+
+// Hotkeys window controls
+#define IDC_MW_HOTKEYS_PIN        7080
+#define IDC_MW_HOTKEYS_FONT_PLUS  7081
+#define IDC_MW_HOTKEYS_FONT_MINUS 7082
+#define IDC_MW_OPEN_HOTKEYS       7083  // Button on Settings System tab
+#define IDC_MW_HOTKEYS_LIST       7084  // ListView (report mode)
+#define IDC_MW_HOTKEYS_ADD        7085  // "+" button (add user hotkey)
+#define IDC_MW_HOTKEYS_EDITBTN    7086  // Edit button (open modal)
+#define IDC_MW_HOTKEYS_DELETE     7087  // Delete button (user entries only)
+#define IDC_MW_HOTKEYS_CLEARKEY   7088  // Clear Key button (unbind without deleting)
+#define IDC_MW_HOTKEYS_RESET      7089  // Reset to Defaults button
+
+// Edit Hotkey modal dialog controls
+#define IDC_HK_EDIT_ACTION        8001  // Static: action name (read-only)
+#define IDC_HK_EDIT_LABEL         8002  // Edit: user label
+#define IDC_HK_EDIT_HOTKEY        8003  // HOTKEY_CLASS: key capture
+#define IDC_HK_EDIT_CLEAR         8004  // Button: clear key
+#define IDC_HK_EDIT_SCOPE         8005  // Checkbox: global
+#define IDC_HK_EDIT_COMMAND       8006  // Edit: IPC command (Script)
+#define IDC_HK_EDIT_PATH          8007  // Edit: app path (Launch)
+#define IDC_HK_EDIT_BROWSE        8008  // Button: browse for exe (Launch)
+
+// Shared action edit dialog (8010-8019)
+#define IDC_AE_ACTION_TYPE    8010  // Combobox: action type dropdown
+#define IDC_AE_LABEL          8011  // Edit: label text
+#define IDC_AE_PAYLOAD        8012  // Edit: payload/command (multiline)
+#define IDC_AE_BROWSE         8013  // Button: browse for file
+#define IDC_AE_HOTKEY         8014  // HOTKEY_CLASS: key capture
+#define IDC_AE_CLEAR_KEY      8015  // Button: clear key binding
+#define IDC_AE_SCOPE          8016  // Checkbox: global scope
+#define IDC_AE_ACTION_LABEL   8017  // Edit (read-only): built-in action name
+
+// MIDI window controls (7090-7109)
+#define IDC_MW_MIDI_PIN         7090
+#define IDC_MW_MIDI_FONT_PLUS   7091
+#define IDC_MW_MIDI_FONT_MINUS  7092
+#define IDC_MW_MIDI_LIST        7093   // ListView (report mode)
+#define IDC_MW_MIDI_DEVICE      7094   // ComboBox: MIDI device selector
+#define IDC_MW_MIDI_SCAN        7095   // Button: Scan devices
+#define IDC_MW_MIDI_ENABLE      7096   // Checkbox: Enable MIDI
+#define IDC_MW_MIDI_LEARN       7097   // Button: Learn
+#define IDC_MW_MIDI_CLEAR       7098   // Button: Clear selected row
+#define IDC_MW_MIDI_DELETE      7099   // Button: Delete selected row
+#define IDC_MW_MIDI_SAVE        7100   // Button: Save
+#define IDC_MW_MIDI_LOAD        7101   // Button: Load
+#define IDC_MW_MIDI_DEFAULTS    7102   // Button: Defaults
+#define IDC_MW_MIDI_LABEL       7103   // Edit: row label
+#define IDC_MW_MIDI_TYPE        7104   // ComboBox: Button/Knob
+#define IDC_MW_MIDI_ACTION      7105   // ComboBox: action (dropdown for buttons, list for knobs)
+#define IDC_MW_MIDI_INCREMENT   7106   // Edit: increment (knobs only)
+#define IDC_MW_MIDI_BUFFER      7107   // Edit: buffer delay ms
+#define IDC_MW_MIDI_BUFFER_SPIN 7108   // Spin for buffer
+#define IDC_MW_OPEN_MIDI        7109   // Button on General tab
+
+#define DISPLAYS_NUM_PAGES      2
+#define DISPLAYS_PAGE_OUTPUTS   0
+#define DISPLAYS_PAGE_VIDINPUT  1
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
@@ -471,13 +559,204 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
 #define IDC_MW_DISP_MIRROR_ALTS 7014   // Checkbox: use mirrors for ALT-S
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
+#define IDC_MW_DISP_SAVE_PROFILE   7016 // Button: save display profile
+#define IDC_MW_DISP_LOAD_PROFILE   7017 // Button: load display profile
 
 // About tab
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
 #define IDC_MW_PRESET_FILTER    2201   // Button: Preset extension filter (General tab)
+#define IDC_MW_LOGOUTPUT_FILE   2202   // Checkbox: Log Output to File (About tab)
+#define IDC_MW_LOGOUTPUT_ODS    2203   // Checkbox: Log Output to Debug Messages (About tab)
 
-// Settings page count
-#define SETTINGS_NUM_PAGES      11
+// Button Board window controls (9000-9019)
+#define IDC_MW_BOARD_PIN          9000
+#define IDC_MW_BOARD_FONT_PLUS    9001
+#define IDC_MW_BOARD_FONT_MINUS   9002
+#define IDC_MW_BOARD_PANEL        9003
+#define IDC_MW_BOARD_BANK_PREV    9004
+#define IDC_MW_BOARD_BANK_NEXT    9005
+#define IDC_MW_BOARD_BANK_LABEL   9006
+#define IDC_MW_BOARD_CONFIG       9007
+
+// Presets window controls (9020-9039)
+#define IDC_MW_PRESETS_PIN          9020
+#define IDC_MW_PRESETS_FONT_PLUS    9021
+#define IDC_MW_PRESETS_FONT_MINUS   9022
+#define IDC_MW_PRESETS_STARTUP      9023  // Combo: startup mode (Random/Current/Last Used)
+
+// Sprites window controls (9040-9059)
+#define IDC_MW_SPRITES_WIN_PIN          9040
+#define IDC_MW_SPRITES_WIN_FONT_PLUS    9041
+#define IDC_MW_SPRITES_WIN_FONT_MINUS   9042
+
+// Messages window controls (9060-9079)
+#define IDC_MW_MESSAGES_WIN_PIN         9060
+#define IDC_MW_MESSAGES_WIN_FONT_PLUS   9061
+#define IDC_MW_MESSAGES_WIN_FONT_MINUS  9062
+
+// Shader Import control panel (9100-9119)
+#define IDC_MW_SHIMPORT_PIN          9100
+#define IDC_MW_SHIMPORT_FONT_PLUS    9101
+#define IDC_MW_SHIMPORT_FONT_MINUS   9102
+#define IDC_MW_SHIMPORT_ERROR_EDIT   9105  // Multiline EDIT: errors (read-only)
+#define IDC_MW_SHIMPORT_CONVERT      9106  // Button: Convert GLSL→HLSL
+#define IDC_MW_SHIMPORT_APPLY        9107  // Button: Apply (live preview)
+#define IDC_MW_SHIMPORT_SAVE         9108  // Button: Save as .milk3
+#define IDC_MW_SHIMPORT_PASS_LIST    9113  // ListBox: pass selection
+#define IDC_MW_SHIMPORT_ADD_PASS     9114  // Button: +
+#define IDC_MW_SHIMPORT_DEL_PASS     9115  // Button: -
+#define IDC_MW_SHIMPORT_SAVE_IMPORT  9116  // Button: Save Import...
+#define IDC_MW_SHIMPORT_LOAD_IMPORT  9117  // Button: Load Import...
+#define IDC_MW_SHIMPORT_NEW          9118  // Button: New
+#define IDC_MW_SHIMPORT_COPY_STATUS  9119  // Button: Copy (errors/status to clipboard)
+// Shader Editor window (9120-9129)
+#define IDC_MW_SHEDITOR_PIN          9120
+#define IDC_MW_SHEDITOR_FONT_PLUS    9121
+#define IDC_MW_SHEDITOR_FONT_MINUS   9122
+#define IDC_MW_SHEDITOR_GLSL_EDIT    9123  // Multiline EDIT: GLSL source
+#define IDC_MW_SHEDITOR_PASTE        9124  // Button: Paste GLSL
+#define IDC_MW_SHEDITOR_CLEAR        9125  // Button: Clear
+#define IDC_MW_SHEDITOR_HLSL_EDIT    9126  // Multiline EDIT: HLSL (editable)
+#define IDC_MW_SHEDITOR_COPY         9127  // Button: Copy HLSL
+#define IDC_MW_SHEDITOR_CONVERT      9128  // Button: Convert & Apply
+#define IDC_MW_SHEDITOR_NOTES_EDIT   9129  // Multiline EDIT: notes/comments
+
+// Shader Import channel input combos (9140-9143)
+#define IDC_MW_SHIMPORT_CH0          9140  // Combo: iChannel0 source
+#define IDC_MW_SHIMPORT_CH1          9141  // Combo: iChannel1 source
+#define IDC_MW_SHIMPORT_CH2          9142  // Combo: iChannel2 source
+#define IDC_MW_SHIMPORT_CH3          9143  // Combo: iChannel3 source
+
+// Welcome window (no-presets prompt)
+#define IDC_MW_WELCOME_SETTINGS      9130  // Button: Open Settings
+#define IDC_MW_WELCOME_SHADER_IMPORT 9131  // Button: Open Shader Import
+#define IDC_MW_WELCOME_PRESETS       9132  // Button: Open Preset Browser
+#define IDC_MW_WELCOME_BROWSE        9133  // Button: Browse for Resources
+#define IDC_MW_WELCOME_PATH          9134  // Static: current path display
+
+// Video Effects window (9200-9280)
+#define IDC_MW_VFX_PIN            9200
+#define IDC_MW_VFX_FONT_PLUS      9201
+#define IDC_MW_VFX_FONT_MINUS     9202
+#define IDC_MW_VFX_TAB            9203
+// Transform tab
+#define IDC_MW_VFX_POSX           9210
+#define IDC_MW_VFX_POSX_LBL      9211
+#define IDC_MW_VFX_POSY           9212
+#define IDC_MW_VFX_POSY_LBL      9213
+#define IDC_MW_VFX_SCALE          9214
+#define IDC_MW_VFX_SCALE_LBL     9215
+#define IDC_MW_VFX_ROTATION       9216
+#define IDC_MW_VFX_ROTATION_LBL  9217
+#define IDC_MW_VFX_MIRRORH        9218
+#define IDC_MW_VFX_MIRRORV        9219
+#define IDC_MW_VFX_BLENDMODE      9220
+#define IDC_MW_VFX_RESET_XFORM    9221
+// Effects tab
+#define IDC_MW_VFX_TINTR          9230
+#define IDC_MW_VFX_TINTR_LBL     9231
+#define IDC_MW_VFX_TINTG          9232
+#define IDC_MW_VFX_TINTG_LBL     9233
+#define IDC_MW_VFX_TINTB          9234
+#define IDC_MW_VFX_TINTB_LBL     9235
+#define IDC_MW_VFX_BRIGHTNESS     9236
+#define IDC_MW_VFX_BRIGHTNESS_LBL 9237
+#define IDC_MW_VFX_CONTRAST       9238
+#define IDC_MW_VFX_CONTRAST_LBL  9239
+#define IDC_MW_VFX_SATURATION     9240
+#define IDC_MW_VFX_SATURATION_LBL 9241
+#define IDC_MW_VFX_HUESHIFT       9242
+#define IDC_MW_VFX_HUESHIFT_LBL  9243
+#define IDC_MW_VFX_INVERT         9244
+#define IDC_MW_VFX_PIXELATION     9245
+#define IDC_MW_VFX_PIXELATION_LBL 9246
+#define IDC_MW_VFX_CHROMATIC      9247
+#define IDC_MW_VFX_CHROMATIC_LBL 9248
+#define IDC_MW_VFX_EDGEDETECT     9249
+#define IDC_MW_VFX_RESET_EFFECTS  9250
+// Audio tab
+#define IDC_MW_VFX_AR_POSX_SRC    9260
+#define IDC_MW_VFX_AR_POSX_INT    9261
+#define IDC_MW_VFX_AR_POSY_SRC    9262
+#define IDC_MW_VFX_AR_POSY_INT    9263
+#define IDC_MW_VFX_AR_SCALE_SRC   9264
+#define IDC_MW_VFX_AR_SCALE_INT   9265
+#define IDC_MW_VFX_AR_ROT_SRC     9266
+#define IDC_MW_VFX_AR_ROT_INT     9267
+#define IDC_MW_VFX_AR_BRIGHT_SRC  9268
+#define IDC_MW_VFX_AR_BRIGHT_INT  9269
+#define IDC_MW_VFX_AR_SAT_SRC     9270
+#define IDC_MW_VFX_AR_SAT_INT     9271
+#define IDC_MW_VFX_AR_CHROM_SRC   9272
+#define IDC_MW_VFX_AR_CHROM_INT   9273
+#define IDC_MW_VFX_RESET_AUDIO    9274
+// Open button on Displays window
+#define IDC_MW_OPEN_VFX           9280
+// Save/Load buttons on Video Effects window
+#define IDC_MW_VFX_SAVE_PROFILE   9281
+#define IDC_MW_VFX_LOAD_PROFILE   9282  // Opens profile picker
+
+// VFX Profile Picker window controls (9290-9299)
+#define IDC_MW_VFXP_PIN           9290
+#define IDC_MW_VFXP_FONT_PLUS     9291
+#define IDC_MW_VFXP_FONT_MINUS    9292
+#define IDC_MW_VFXP_LIST          9293  // Listbox: profile list
+#define IDC_MW_VFXP_SAVE          9294  // Button: Save As...
+#define IDC_MW_VFXP_DELETE        9295  // Button: Delete
+#define IDC_MW_VFXP_STARTUP       9296  // Checkbox: Load on startup
+#define IDC_MW_VFXP_SAVECLOSE     9297  // Checkbox: Save on close
+
+// Workspace Layout window (9300-9330)
+#define IDC_MW_WSLAYOUT_PIN           9300
+#define IDC_MW_WSLAYOUT_FONT_PLUS     9301
+#define IDC_MW_WSLAYOUT_FONT_MINUS    9302
+#define IDC_MW_WSLAYOUT_CORNER_TL     9303  // Radio: Top-Left
+#define IDC_MW_WSLAYOUT_CORNER_TR     9304  // Radio: Top-Right
+#define IDC_MW_WSLAYOUT_CORNER_BL     9305  // Radio: Bottom-Left
+#define IDC_MW_WSLAYOUT_CORNER_BR     9306  // Radio: Bottom-Right
+#define IDC_MW_WSLAYOUT_SIZE_SLIDER   9307  // Trackbar: render size %
+#define IDC_MW_WSLAYOUT_SIZE_LABEL    9308  // Static: "20%"
+#define IDC_MW_WSLAYOUT_APPLY         9309  // Button: Apply Layout
+#define IDC_MW_WSLAYOUT_RESET         9310  // Button: Reset to Defaults
+#define IDC_MW_WSLAYOUT_CHK_SETTINGS  9311
+#define IDC_MW_WSLAYOUT_CHK_HOTKEYS   9312
+#define IDC_MW_WSLAYOUT_CHK_MIDI      9313
+#define IDC_MW_WSLAYOUT_CHK_BOARD     9314
+#define IDC_MW_WSLAYOUT_CHK_PRESETS   9315
+#define IDC_MW_WSLAYOUT_CHK_DISPLAYS  9316
+#define IDC_MW_WSLAYOUT_CHK_SHIMPORT  9317
+#define IDC_MW_WSLAYOUT_CHK_SONGINFO  9318
+#define IDC_MW_WSLAYOUT_CHK_SPRITES   9319
+#define IDC_MW_WSLAYOUT_CHK_MESSAGES  9320
+#define IDC_MW_WSLAYOUT_MODE_CORNER   9323  // Radio: corner mode
+#define IDC_MW_WSLAYOUT_MODE_DISPLAY  9324  // Radio: fullscreen on display
+#define IDC_MW_WSLAYOUT_DISPLAY_COMBO 9325  // Combo: display picker
+
+// Welcome window — workspace layout button
+#define IDC_MW_WELCOME_LAYOUT         9135
+
+// Settings About tab — workspace layout button
+#define IDC_MW_OPEN_WORKSPACE_LAYOUT  9136
+
+// Launcher buttons on Settings General tab
+#define IDC_MW_OPEN_PRESETS       9080
+#define IDC_MW_OPEN_SPRITES       9081
+#define IDC_MW_OPEN_MESSAGES      9082
+#define IDC_MW_OPEN_BOARD         9083
+#define IDC_MW_OPEN_SHIMPORT      9084
+#define IDC_MW_TOOLS_LIST         9090  // ListView on Tools tab
+
+// Settings tab page indices
+#define SP_GENERAL  0
+#define SP_TOOLS    1
+#define SP_VISUAL   2
+#define SP_COLORS   3
+#define SP_SYSTEM   4
+#define SP_FILES    5
+#define SP_REMOTE   6
+#define SP_SCRIPT   7
+#define SP_ABOUT    8
+#define SETTINGS_NUM_PAGES  9
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)
@@ -500,6 +779,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_TOGGLE_STRETCH_MODE (WM_APP + 18) // toggle stretch across all monitors
 #define WM_MW_TOGGLE_MIRROR_MODE  (WM_APP + 19) // toggle per-output mirror windows
 #define WM_MW_RESET_WINDOW        (WM_APP + 20) // reset to safe windowed mode (Ctrl+F2)
+#define WM_MW_REBUILD_FONTS       (WM_APP + 21) // cross-window font size sync
+#define WM_MW_HOTKEY_ACTION       (WM_APP + 22) // wParam = HotkeyAction ID (dispatch to App.cpp)
+#define WM_MW_MIDI_DATA           (WM_APP + 23) // lParam = packed MIDI bytes from MidiInput callback
+#define WM_MW_NO_PRESETS_PROMPT   (WM_APP + 24) // show "no presets" dialog on UI thread
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
