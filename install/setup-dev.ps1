@@ -41,7 +41,7 @@ function Wait-Install($proc, $label) {
 Write-Step "MDropDX12 Development Environment Setup"
 Write-Host "  This script installs Git and VS 2022 Build Tools, clones the"
 Write-Host "  MDropDX12 repo, and builds it. The VS Build Tools install can"
-Write-Host "  take 1-2+ hours depending on your internet connection."
+Write-Host "  take 15-30 minutes depending on your internet connection."
 Write-Host ""
 Write-Host "  Base directory for source code [default: $defaultDir]: " -NoNewline
 $userDir = Read-Host
@@ -108,7 +108,7 @@ if ($needsInstall) {
     Download "https://aka.ms/vs/17/release/vs_BuildTools.exe" $vsInstaller
 
     Write-Host "  Components: MSVC v143, MSBuild, Windows 11 SDK (10.0.26100.0)"
-    Write-Host "  This is the longest step - typically 1-2+ hours."
+    Write-Host "  This is the longest step - typically 15-30 minutes."
     $vsArgs = @(
         "--passive", "--wait", "--norestart", "--nocache",
         "--add", "Microsoft.VisualStudio.Workload.VCTools",
@@ -173,6 +173,11 @@ if ($msbuild -and (Test-Path $msbuild)) {
     $msbuildDir = Split-Path $msbuild -Parent
     if ($env:Path -notlike "*$msbuildDir*") {
         $env:Path += ";$msbuildDir"
+        # Also update Machine PATH so child processes (build.ps1) can find MSBuild
+        $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        if ($machinePath -notlike "*$msbuildDir*") {
+            [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$msbuildDir", "Machine")
+        }
     }
     Write-Host "  MSBuild: $msbuild"
 } else {

@@ -10,7 +10,7 @@ For a fresh Windows machine or Hyper-V VM, `install/setup-dev.ps1` automates the
 powershell -ExecutionPolicy Bypass -File setup-dev.ps1
 ```
 
-This installs Git, VS 2022 Build Tools (MSVC v143, MSBuild, Windows 11 SDK), clones the repo, and runs a Release x64 build. The VS Build Tools install typically takes 1-2+ hours.
+This installs Git, VS 2022 Build Tools (MSVC v143, MSBuild, Windows 11 SDK), clones the repo, and runs a Release x64 build. The VS Build Tools install typically takes 15-30 minutes.
 
 > **Note:** Windows Sandbox is not suitable for development — the VS Build Tools installer hangs during the Windows SDK install due to Sandbox I/O constraints. Use a Hyper-V VM or a fresh Windows install instead.
 
