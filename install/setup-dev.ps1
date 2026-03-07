@@ -205,13 +205,17 @@ try {
     if ($LASTEXITCODE -eq 0 -and $repoRoot) {
         $inRepo = $true
         $cloneDir = $repoRoot
-        Write-Host "  Already in repo: $cloneDir"
+        Write-Host "  Already in repo: $cloneDir, pulling latest..."
+        git pull 2>&1 | ForEach-Object { Write-Host "  $_" }
     }
 } catch {}
 
 if (-not $inRepo) {
     if (Test-Path "$cloneDir\.git") {
-        Write-Host "  Repo already cloned at $cloneDir"
+        Write-Host "  Repo already cloned at $cloneDir, pulling latest..."
+        Push-Location $cloneDir
+        git pull 2>&1 | ForEach-Object { Write-Host "  $_" }
+        Pop-Location
     } else {
         Write-Host "  Cloning $repoUrl into $cloneDir..."
         git clone $repoUrl $cloneDir
