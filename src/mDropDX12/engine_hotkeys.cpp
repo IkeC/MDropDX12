@@ -126,6 +126,7 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_VFX_PROFILES,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open VFX Profiles",    L"OpenVFXProfiles");
     HK_DEF(i++, HK_OPEN_WORKSPACE_LAYOUT,0,               0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Workspace Layout", L"OpenWorkspaceLayout");
     HK_DEF(i++, HK_APPLY_WORKSPACE_LAYOUT,0,              0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Apply Workspace Layout", L"ApplyWorkspaceLayout");
+    HK_DEF(i++, HK_OPEN_TEXT_ANIM,   0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Text Animations",  L"OpenTextAnim");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -688,6 +689,9 @@ bool Engine::DispatchHotkeyAction(int actionId)
             m_workspaceLayoutWindow->SetAutoApply();
             m_workspaceLayoutWindow->Open();
         }
+        return true;
+    case HK_OPEN_TEXT_ANIM:
+        OpenTextAnimWindow();
         return true;
 
     // ── Shader/Effects ──

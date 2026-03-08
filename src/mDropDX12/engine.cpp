@@ -1350,6 +1350,8 @@ void Engine::MyReadConfig() {
   m_fSongTitleAnimDuration = GetPrivateProfileFloatW(L"Settings", L"fSongTitleAnimDuration", m_fSongTitleAnimDuration, pIni);
   m_fTimeBetweenRandomSongTitles = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenRandomSongTitles", m_fTimeBetweenRandomSongTitles, pIni);
   m_fTimeBetweenRandomCustomMsgs = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenRandomCustomMsgs", m_fTimeBetweenRandomCustomMsgs, pIni);
+  m_nSongTitleAnimProfile = GetPrivateProfileIntW(L"Settings", L"SongTitleAnimProfile", -1, pIni);
+  m_nPresetNameAnimProfile = GetPrivateProfileIntW(L"Settings", L"PresetNameAnimProfile", -1, pIni);
   m_adapterId = GetPrivateProfileIntW(L"Settings", L"nVideoAdapterIndex", 0, pIni);
 
   // --------
@@ -1626,6 +1628,8 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileFloatW(m_fSongTitleAnimDuration, L"fSongTitleAnimDuration", pIni, L"Settings");
   WritePrivateProfileFloatW(m_fTimeBetweenRandomSongTitles, L"fTimeBetweenRandomSongTitles", pIni, L"Settings");
   WritePrivateProfileFloatW(m_fTimeBetweenRandomCustomMsgs, L"fTimeBetweenRandomCustomMsgs", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nSongTitleAnimProfile, L"SongTitleAnimProfile", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nPresetNameAnimProfile, L"PresetNameAnimProfile", pIni, L"Settings");
 
   WritePrivateProfileIntW(m_adapterId, L"nVideoAdapterIndex", pIni, L"Settings");
   WritePrivateProfileIntW(m_bPresetLockedByUser, L"bPresetLockOnAtStartup", GetConfigIniFile(), L"Settings");
@@ -1880,6 +1884,7 @@ void Engine::CleanUpMyNonDx9Stuff() {
   ClosePresetsWindow();
   CloseSpritesWindow();
   CloseMessagesWindow();
+  CloseTextAnimWindow();
   CloseWorkspaceLayoutWindow();
   CloseMidiDevice();
 

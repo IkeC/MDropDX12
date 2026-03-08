@@ -133,6 +133,7 @@ enum HotkeyAction : int {
     HK_OPEN_VFX_PROFILES,        // (unbound) — open VFX Profile Picker window
     HK_OPEN_WORKSPACE_LAYOUT,    // (unbound) — open Workspace Layout window
     HK_APPLY_WORKSPACE_LAYOUT,   // (unbound) — apply saved workspace layout
+    HK_OPEN_TEXT_ANIM,            // (unbound) — open Text Animations window
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };

@@ -208,7 +208,357 @@ void Engine::WriteCustomMessages() {
     WritePrivateProfileStringW(section, L"rand_growth", val, m_szMsgIniFile);
     swprintf(val, 64, L"%d", m_CustomMessage[n].bRandDuration);
     WritePrivateProfileStringW(section, L"rand_duration", val, m_szMsgIniFile);
+
+    // Animation profile reference
+    swprintf(val, 64, L"%d", m_CustomMessage[n].nAnimProfile);
+    WritePrivateProfileStringW(section, L"animprofile", val, m_szMsgIniFile);
   }
+
+  // Write animation profiles
+  WriteAnimProfiles();
+}
+
+// ======== Animation Profiles ========
+
+void Engine::CreateDefaultAnimProfiles() {
+  m_nAnimProfileCount = 5;
+
+  // 1. Center Pop
+  m_AnimProfiles[0] = td_anim_profile();
+  wcscpy(m_AnimProfiles[0].szName, L"Center Pop");
+  m_AnimProfiles[0].fX = 0.5f;
+  m_AnimProfiles[0].fY = 0.5f;
+  m_AnimProfiles[0].fGrowth = 1.2f;
+  m_AnimProfiles[0].fDuration = 3.0f;
+  wcscpy(m_AnimProfiles[0].szFontFace, L"Bahnschrift");
+  m_AnimProfiles[0].bBold = 1;
+
+  // 2. Slide from Left
+  m_AnimProfiles[1] = td_anim_profile();
+  wcscpy(m_AnimProfiles[1].szName, L"Slide from Left");
+  m_AnimProfiles[1].fX = 0.5f;
+  m_AnimProfiles[1].fY = 0.5f;
+  m_AnimProfiles[1].fStartX = -0.3f;
+  m_AnimProfiles[1].fStartY = 0.5f;
+  m_AnimProfiles[1].fMoveTime = 0.8f;
+  m_AnimProfiles[1].nEaseMode = 2;
+  m_AnimProfiles[1].fDuration = 5.0f;
+  wcscpy(m_AnimProfiles[1].szFontFace, L"Segoe UI");
+
+  // 3. Slide from Right
+  m_AnimProfiles[2] = td_anim_profile();
+  wcscpy(m_AnimProfiles[2].szName, L"Slide from Right");
+  m_AnimProfiles[2].fX = 0.5f;
+  m_AnimProfiles[2].fY = 0.5f;
+  m_AnimProfiles[2].fStartX = 1.3f;
+  m_AnimProfiles[2].fStartY = 0.5f;
+  m_AnimProfiles[2].fMoveTime = 0.8f;
+  m_AnimProfiles[2].nEaseMode = 2;
+  m_AnimProfiles[2].fDuration = 5.0f;
+  wcscpy(m_AnimProfiles[2].szFontFace, L"Segoe UI");
+
+  // 4. Bottom Crawl
+  m_AnimProfiles[3] = td_anim_profile();
+  wcscpy(m_AnimProfiles[3].szName, L"Bottom Crawl");
+  m_AnimProfiles[3].fX = 0.5f;
+  m_AnimProfiles[3].fY = 0.85f;
+  m_AnimProfiles[3].fGrowth = 1.0f;
+  m_AnimProfiles[3].fDuration = 8.0f;
+  m_AnimProfiles[3].fFadeOut = 2.0f;
+  wcscpy(m_AnimProfiles[3].szFontFace, L"Segoe UI");
+
+  // 5. Top Flash
+  m_AnimProfiles[4] = td_anim_profile();
+  wcscpy(m_AnimProfiles[4].szName, L"Top Flash");
+  m_AnimProfiles[4].fX = 0.5f;
+  m_AnimProfiles[4].fY = 0.15f;
+  m_AnimProfiles[4].fGrowth = 0.8f;
+  m_AnimProfiles[4].fDuration = 2.0f;
+  m_AnimProfiles[4].bBold = 1;
+  m_AnimProfiles[4].fBurnTime = 0.3f;
+  wcscpy(m_AnimProfiles[4].szFontFace, L"Bahnschrift");
+}
+
+void Engine::ReadAnimProfiles() {
+  m_nAnimProfileCount = GetPrivateProfileIntW(L"AnimProfiles", L"Count", 0, m_szMsgIniFile);
+
+  if (m_nAnimProfileCount <= 0) {
+    CreateDefaultAnimProfiles();
+    WriteAnimProfiles();
+    return;
+  }
+
+  if (m_nAnimProfileCount > MAX_ANIM_PROFILES)
+    m_nAnimProfileCount = MAX_ANIM_PROFILES;
+
+  for (int n = 0; n < m_nAnimProfileCount; n++) {
+    m_AnimProfiles[n] = td_anim_profile();  // reset to defaults
+
+    wchar_t section[32];
+    swprintf(section, 32, L"AnimProfile%02d", n);
+
+    GetPrivateProfileStringW(section, L"name", L"", m_AnimProfiles[n].szName, 64, m_szMsgIniFile);
+    m_AnimProfiles[n].bEnabled = GetPrivateProfileBoolW(section, L"enabled", true, m_szMsgIniFile);
+
+    // Position
+    m_AnimProfiles[n].fX = GetPrivateProfileFloatW(section, (wchar_t*)L"x", 0.5f, m_szMsgIniFile);
+    m_AnimProfiles[n].fY = GetPrivateProfileFloatW(section, (wchar_t*)L"y", 0.5f, m_szMsgIniFile);
+    m_AnimProfiles[n].fRandX = GetPrivateProfileFloatW(section, (wchar_t*)L"randx", 0.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fRandY = GetPrivateProfileFloatW(section, (wchar_t*)L"randy", 0.0f, m_szMsgIniFile);
+
+    // Entry animation
+    m_AnimProfiles[n].fStartX = GetPrivateProfileFloatW(section, (wchar_t*)L"startx", -100.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fStartY = GetPrivateProfileFloatW(section, (wchar_t*)L"starty", -100.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fMoveTime = GetPrivateProfileFloatW(section, (wchar_t*)L"movetime", 0.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].nEaseMode = GetPrivateProfileIntW(section, L"easemode", 2, m_szMsgIniFile);
+    m_AnimProfiles[n].fEaseFactor = GetPrivateProfileFloatW(section, (wchar_t*)L"easefactor", 2.0f, m_szMsgIniFile);
+
+    // Appearance
+    GetPrivateProfileStringW(section, L"face", L"", m_AnimProfiles[n].szFontFace, 128, m_szMsgIniFile);
+    m_AnimProfiles[n].fFontSize = GetPrivateProfileFloatW(section, (wchar_t*)L"size", 50.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].bBold = GetPrivateProfileIntW(section, L"bold", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].bItal = GetPrivateProfileIntW(section, L"ital", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].nColorR = GetPrivateProfileIntW(section, L"r", 255, m_szMsgIniFile);
+    m_AnimProfiles[n].nColorG = GetPrivateProfileIntW(section, L"g", 255, m_szMsgIniFile);
+    m_AnimProfiles[n].nColorB = GetPrivateProfileIntW(section, L"b", 255, m_szMsgIniFile);
+    m_AnimProfiles[n].nRandR = GetPrivateProfileIntW(section, L"randr", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].nRandG = GetPrivateProfileIntW(section, L"randg", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].nRandB = GetPrivateProfileIntW(section, L"randb", 0, m_szMsgIniFile);
+
+    // Timing
+    m_AnimProfiles[n].fDuration = GetPrivateProfileFloatW(section, (wchar_t*)L"duration", 5.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fFadeIn = GetPrivateProfileFloatW(section, (wchar_t*)L"fadein", 0.2f, m_szMsgIniFile);
+    m_AnimProfiles[n].fFadeOut = GetPrivateProfileFloatW(section, (wchar_t*)L"fadeout", 0.5f, m_szMsgIniFile);
+    m_AnimProfiles[n].fBurnTime = GetPrivateProfileFloatW(section, (wchar_t*)L"burntime", 0.0f, m_szMsgIniFile);
+
+    // Effects
+    m_AnimProfiles[n].fGrowth = GetPrivateProfileFloatW(section, (wchar_t*)L"growth", 1.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fShadowOffset = GetPrivateProfileFloatW(section, (wchar_t*)L"shadow", 0.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].fBoxAlpha = GetPrivateProfileFloatW(section, (wchar_t*)L"boxalpha", 0.0f, m_szMsgIniFile);
+    m_AnimProfiles[n].nBoxColR = GetPrivateProfileIntW(section, L"boxr", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].nBoxColG = GetPrivateProfileIntW(section, L"boxg", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].nBoxColB = GetPrivateProfileIntW(section, L"boxb", 0, m_szMsgIniFile);
+
+    // Randomization flags
+    m_AnimProfiles[n].bRandPos = GetPrivateProfileIntW(section, L"rand_pos", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].bRandSize = GetPrivateProfileIntW(section, L"rand_size", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].bRandColor = GetPrivateProfileIntW(section, L"rand_color", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].bRandGrowth = GetPrivateProfileIntW(section, L"rand_growth", 0, m_szMsgIniFile);
+    m_AnimProfiles[n].bRandDuration = GetPrivateProfileIntW(section, L"rand_duration", 0, m_szMsgIniFile);
+  }
+}
+
+void Engine::WriteAnimProfiles() {
+  wchar_t val[64];
+
+  // Write count
+  swprintf(val, 64, L"%d", m_nAnimProfileCount);
+  WritePrivateProfileStringW(L"AnimProfiles", L"Count", val, m_szMsgIniFile);
+
+  // Clear any old profiles beyond current count
+  for (int n = m_nAnimProfileCount; n < MAX_ANIM_PROFILES; n++) {
+    wchar_t section[32];
+    swprintf(section, 32, L"AnimProfile%02d", n);
+    WritePrivateProfileStringW(section, NULL, NULL, m_szMsgIniFile);
+  }
+
+  for (int n = 0; n < m_nAnimProfileCount; n++) {
+    wchar_t section[32];
+    swprintf(section, 32, L"AnimProfile%02d", n);
+
+    WritePrivateProfileStringW(section, L"name", m_AnimProfiles[n].szName, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bEnabled ? 1 : 0);
+    WritePrivateProfileStringW(section, L"enabled", val, m_szMsgIniFile);
+
+    // Position
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fX);
+    WritePrivateProfileStringW(section, L"x", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fY);
+    WritePrivateProfileStringW(section, L"y", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fRandX);
+    WritePrivateProfileStringW(section, L"randx", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fRandY);
+    WritePrivateProfileStringW(section, L"randy", val, m_szMsgIniFile);
+
+    // Entry animation
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fStartX);
+    WritePrivateProfileStringW(section, L"startx", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fStartY);
+    WritePrivateProfileStringW(section, L"starty", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fMoveTime);
+    WritePrivateProfileStringW(section, L"movetime", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nEaseMode);
+    WritePrivateProfileStringW(section, L"easemode", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fEaseFactor);
+    WritePrivateProfileStringW(section, L"easefactor", val, m_szMsgIniFile);
+
+    // Appearance
+    WritePrivateProfileStringW(section, L"face", m_AnimProfiles[n].szFontFace, m_szMsgIniFile);
+    swprintf(val, 64, L"%.1f", m_AnimProfiles[n].fFontSize);
+    WritePrivateProfileStringW(section, L"size", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bBold);
+    WritePrivateProfileStringW(section, L"bold", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bItal);
+    WritePrivateProfileStringW(section, L"ital", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nColorR);
+    WritePrivateProfileStringW(section, L"r", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nColorG);
+    WritePrivateProfileStringW(section, L"g", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nColorB);
+    WritePrivateProfileStringW(section, L"b", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nRandR);
+    WritePrivateProfileStringW(section, L"randr", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nRandG);
+    WritePrivateProfileStringW(section, L"randg", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nRandB);
+    WritePrivateProfileStringW(section, L"randb", val, m_szMsgIniFile);
+
+    // Timing
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fDuration);
+    WritePrivateProfileStringW(section, L"duration", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fFadeIn);
+    WritePrivateProfileStringW(section, L"fadein", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fFadeOut);
+    WritePrivateProfileStringW(section, L"fadeout", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fBurnTime);
+    WritePrivateProfileStringW(section, L"burntime", val, m_szMsgIniFile);
+
+    // Effects
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fGrowth);
+    WritePrivateProfileStringW(section, L"growth", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fShadowOffset);
+    WritePrivateProfileStringW(section, L"shadow", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%.2f", m_AnimProfiles[n].fBoxAlpha);
+    WritePrivateProfileStringW(section, L"boxalpha", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nBoxColR);
+    WritePrivateProfileStringW(section, L"boxr", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nBoxColG);
+    WritePrivateProfileStringW(section, L"boxg", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].nBoxColB);
+    WritePrivateProfileStringW(section, L"boxb", val, m_szMsgIniFile);
+
+    // Randomization flags
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bRandPos);
+    WritePrivateProfileStringW(section, L"rand_pos", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bRandSize);
+    WritePrivateProfileStringW(section, L"rand_size", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bRandColor);
+    WritePrivateProfileStringW(section, L"rand_color", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bRandGrowth);
+    WritePrivateProfileStringW(section, L"rand_growth", val, m_szMsgIniFile);
+    swprintf(val, 64, L"%d", m_AnimProfiles[n].bRandDuration);
+    WritePrivateProfileStringW(section, L"rand_duration", val, m_szMsgIniFile);
+  }
+}
+
+int Engine::PickRandomAnimProfile() {
+  int pool[MAX_ANIM_PROFILES];
+  int poolSize = 0;
+  for (int i = 0; i < m_nAnimProfileCount; i++) {
+    if (m_AnimProfiles[i].bEnabled)
+      pool[poolSize++] = i;
+  }
+  if (poolSize == 0) return -1;
+  return pool[rand() % poolSize];
+}
+
+void Engine::ApplyAnimProfileToSupertext(td_supertext& st, const td_anim_profile& prof) {
+  // Position
+  st.fX = prof.fX;
+  st.fY = prof.fY;
+  if (prof.fRandX != 0.0f) st.fX += prof.fRandX * ((rand() % 1037) / 1037.0f * 2.0f - 1.0f);
+  if (prof.fRandY != 0.0f) st.fY += prof.fRandY * ((rand() % 1037) / 1037.0f * 2.0f - 1.0f);
+
+  // Entry animation
+  st.fStartX = prof.fStartX;
+  st.fStartY = prof.fStartY;
+  st.fMoveTime = prof.fMoveTime;
+  st.nEaseMode = prof.nEaseMode;
+  st.fEaseFactor = prof.fEaseFactor;
+
+  // Appearance
+  if (prof.szFontFace[0])
+    wcscpy(st.nFontFace, prof.szFontFace);
+  st.fFontSize = prof.fFontSize;
+  st.bBold = prof.bBold;
+  st.bItal = prof.bItal;
+  st.nColorR = prof.nColorR;
+  st.nColorG = prof.nColorG;
+  st.nColorB = prof.nColorB;
+  if (prof.nRandR) st.nColorR += (int)(prof.nRandR * ((rand() % 1037) / 1037.0f * 2.0f - 1.0f));
+  if (prof.nRandG) st.nColorG += (int)(prof.nRandG * ((rand() % 1037) / 1037.0f * 2.0f - 1.0f));
+  if (prof.nRandB) st.nColorB += (int)(prof.nRandB * ((rand() % 1037) / 1037.0f * 2.0f - 1.0f));
+  st.nColorR = max(0, min(255, st.nColorR));
+  st.nColorG = max(0, min(255, st.nColorG));
+  st.nColorB = max(0, min(255, st.nColorB));
+
+  // Timing
+  st.fDuration = prof.fDuration;
+  st.fFadeInTime = prof.fFadeIn;
+  st.fFadeOutTime = prof.fFadeOut;
+  st.fBurnTime = prof.fBurnTime;
+
+  // Effects
+  st.fGrowth = prof.fGrowth;
+  st.fShadowOffset = prof.fShadowOffset;
+  st.fBoxAlpha = prof.fBoxAlpha;
+  st.fBoxColR = prof.nBoxColR;
+  st.fBoxColG = prof.nBoxColG;
+  st.fBoxColB = prof.nBoxColB;
+
+  // Per-trigger randomization
+  if (prof.bRandPos) {
+    st.fX = (rand() % 1037) / 1037.0f * 0.6f + 0.2f;
+    st.fY = (rand() % 1037) / 1037.0f * 0.6f + 0.2f;
+  }
+  if (prof.bRandSize) {
+    st.fFontSize = 20.0f + (rand() % 1037) / 1037.0f * 60.0f;
+  }
+  if (prof.bRandColor) {
+    st.nColorR = rand() % 256;
+    st.nColorG = rand() % 256;
+    st.nColorB = rand() % 256;
+  }
+  if (prof.bRandGrowth) {
+    st.fGrowth = 0.5f + (rand() % 1037) / 1037.0f * 1.5f;
+  }
+  if (prof.bRandDuration) {
+    st.fDuration = 1.0f + (rand() % 1037) / 1037.0f * 9.0f;
+  }
+}
+
+void Engine::PushSongTitleAsMessage() {
+  if (m_szSongTitle[0] == 0) return;
+
+  int idx = GetNextFreeSupertextIndex();
+  td_supertext& st = m_supertexts[idx];
+  st = td_supertext();  // reset
+
+  wcscpy(st.szTextW, m_szSongTitle);
+  st.bIsSongTitle = false;
+  st.bRedrawSuperText = true;
+
+  // Determine profile
+  int profIdx = m_nSongTitleAnimProfile;
+  if (profIdx == -2) profIdx = PickRandomAnimProfile();
+
+  if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+    ApplyAnimProfileToSupertext(st, m_AnimProfiles[profIdx]);
+  } else {
+    // Fallback defaults
+    wcscpy(st.nFontFace, L"Segoe UI");
+    st.fFontSize = 50.0f;
+    st.fX = 0.5f;
+    st.fY = 0.5f;
+    st.fDuration = 5.0f;
+    st.fFadeInTime = 0.2f;
+    st.fGrowth = 1.0f;
+    st.nColorR = 255;
+    st.nColorG = 255;
+    st.nColorB = 255;
+  }
+
+  st.fStartTime = GetTime();
 }
 
 void Engine::SaveMsgAutoplaySettings() {
@@ -359,6 +709,9 @@ struct MsgEditDlgData {
   int         bBold, bItal;
   int         nColorR, nColorG, nColorB;
 
+  // Animation profile
+  int nAnimProfile;
+
   // Per-message randomize working copies
   bool bRandPos, bRandSize, bRandFont, bRandColor;
   bool bRandEffects, bRandGrowth, bRandDuration;
@@ -439,6 +792,14 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       data->bRandEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_EFFECTS), L"Checked");
       data->bRandGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_GROWTH), L"Checked");
       data->bRandDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_DURATION), L"Checked");
+
+      // Animation profile combo: 0=(own), 1=(random), 2+=profile index
+      {
+        int apSel = (int)SendMessage(GetDlgItem(hWnd, IDC_MSGEDIT_ANIM_PROFILE), CB_GETCURSEL, 0, 0);
+        if (apSel <= 0) data->nAnimProfile = -1;
+        else if (apSel == 1) data->nAnimProfile = -2;
+        else data->nAnimProfile = apSel - 2;
+      }
 
       data->bResult = true;
       data->bDone = true;
@@ -757,6 +1118,7 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     data.bRandEffects = m->bRandEffects != 0;
     data.bRandGrowth = m->bRandGrowth != 0;
     data.bRandDuration = m->bRandDuration != 0;
+    data.nAnimProfile = m->nAnimProfile;
   } else {
     data.szText[0] = 0;
     data.nFont = 0;
@@ -773,6 +1135,7 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     data.nColorR = -1;
     data.nColorG = -1;
     data.nColorB = -1;
+    data.nAnimProfile = -1;
   }
 
   // Create font for controls (use settings font size)
@@ -792,7 +1155,7 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
 
   // Scale dialog dimensions from baseline (440x530 at lineH=20)
   int clientW = MulDiv(440, dlgLineH, 20);
-  int clientH = MulDiv(530, dlgLineH, 20);
+  int clientH = MulDiv(560, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -913,7 +1276,28 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, fadeOutLblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFadeOut);
   CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, y, editW, editH, hFont);
-  y += dlgLineH + 8;
+  y += dlgLineH + 6;
+
+  // Animation Profile combo
+  CreateLabel(hDlg, L"Anim Profile:", margin, y + 2, lblW, smallH, hFont);
+  {
+    int apComboW = rw - lblW - 4;
+    HWND hAPCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      xVal, y, apComboW, dlgLineH * 10, hDlg,
+      (HMENU)(INT_PTR)IDC_MSGEDIT_ANIM_PROFILE, GetModuleHandle(NULL), NULL);
+    if (hAPCombo && hFont) SendMessage(hAPCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Use message settings)");
+    SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random profile)");
+    for (int i = 0; i < m_nAnimProfileCount; i++)
+      SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)m_AnimProfiles[i].szName);
+    // Map: -1 → 0, -2 → 1, 0+ → idx+2
+    int apSel = 0;
+    if (data.nAnimProfile == -2) apSel = 1;
+    else if (data.nAnimProfile >= 0) apSel = data.nAnimProfile + 2;
+    SendMessage(hAPCombo, CB_SETCURSEL, apSel, 0);
+  }
+  y += dlgLineH + 6;
 
   // --- Randomize section (2-column checkboxes) ---
   int halfW = (rw - 10) / 2;
@@ -1004,6 +1388,7 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     m->bRandEffects = data.bRandEffects ? 1 : 0;
     m->bRandGrowth = data.bRandGrowth ? 1 : 0;
     m->bRandDuration = data.bRandDuration ? 1 : 0;
+    m->nAnimProfile = data.nAnimProfile;
   } else {
     // Restore original message (Send Now may have modified it)
     *m = data.originalMsg;
@@ -1424,6 +1809,7 @@ void Engine::ReadCustomMessages() {
     m_CustomMessage[n].nRandR = 0;
     m_CustomMessage[n].nRandG = 0;
     m_CustomMessage[n].nRandB = 0;
+    m_CustomMessage[n].nAnimProfile = -1;
   }
 
   // Then read in the new file
@@ -1491,8 +1877,14 @@ void Engine::ReadCustomMessages() {
       m_CustomMessage[n].bRandEffects = GetPrivateProfileIntW(szSectionName, L"rand_effects", 0, m_szMsgIniFile);
       m_CustomMessage[n].bRandGrowth = GetPrivateProfileIntW(szSectionName, L"rand_growth", 0, m_szMsgIniFile);
       m_CustomMessage[n].bRandDuration = GetPrivateProfileIntW(szSectionName, L"rand_duration", 0, m_szMsgIniFile);
+
+      // Animation profile reference
+      m_CustomMessage[n].nAnimProfile = GetPrivateProfileIntW(szSectionName, L"animprofile", -1, m_szMsgIniFile);
     }
   }
+
+  // Read animation profiles
+  ReadAnimProfiles();
 }
 
 void Engine::LaunchCustomMessage(int nMsgNum) {
@@ -1529,6 +1921,15 @@ void Engine::LaunchCustomMessage(int nMsgNum) {
     m_supertexts[nextFreeSupertextIndex].bRedrawSuperText = true;
     m_supertexts[nextFreeSupertextIndex].bIsSongTitle = false;
     lstrcpyW(m_supertexts[nextFreeSupertextIndex].szTextW, m_CustomMessage[nMsgNum].szText);
+
+    // Check for animation profile
+    int profIdx = m_CustomMessage[nMsgNum].nAnimProfile;
+    if (profIdx == -2) profIdx = PickRandomAnimProfile();
+    if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+      ApplyAnimProfileToSupertext(m_supertexts[nextFreeSupertextIndex], m_AnimProfiles[profIdx]);
+      m_supertexts[nextFreeSupertextIndex].fStartTime = GetTime();
+      return;
+    }
 
     // regular properties:
     m_supertexts[nextFreeSupertextIndex].fFontSize = m_CustomMessage[nMsgNum].fSize;
@@ -1688,7 +2089,18 @@ void Engine::LaunchSongTitleAnim(int supertextIndex) {
   m_supertexts[supertextIndex].bRedrawSuperText = true;
   m_supertexts[supertextIndex].bIsSongTitle = true;
   lstrcpyW(m_supertexts[supertextIndex].szTextW, m_szSongTitle);
-  //lstrcpy(m_supertext[supertextIndex].szText, " ");
+
+  // Check for animation profile
+  int profIdx = m_nSongTitleAnimProfile;
+  if (profIdx == -2) profIdx = PickRandomAnimProfile();
+  if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+    m_supertexts[supertextIndex].bIsSongTitle = false;  // render as custom message style
+    ApplyAnimProfileToSupertext(m_supertexts[supertextIndex], m_AnimProfiles[profIdx]);
+    m_supertexts[supertextIndex].fStartTime = GetTime();
+    return;
+  }
+
+  // Default hardcoded song title animation
   lstrcpyW(m_supertexts[supertextIndex].nFontFace, m_fontinfo[SONGTITLE_FONT].szFace);
   m_supertexts[supertextIndex].fFontSize = (float)m_fontinfo[SONGTITLE_FONT].nSize;
   m_supertexts[supertextIndex].bBold = m_fontinfo[SONGTITLE_FONT].bBold;
@@ -1740,33 +2152,43 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     m_supertexts[nextFreeSupertextIndex].bRedrawSuperText = true;
     m_supertexts[nextFreeSupertextIndex].bIsSongTitle = false;
 
+    // Apply animation profile as base (explicit params override below)
+    bool hasProfile = false;
+    if (params.find(L"profile") != params.end()) {
+      int profIdx = std::stoi(params[L"profile"]);
+      if (profIdx == -2) profIdx = PickRandomAnimProfile();
+      if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+        ApplyAnimProfileToSupertext(m_supertexts[nextFreeSupertextIndex], m_AnimProfiles[profIdx]);
+        hasProfile = true;
+      }
+    }
+
     if (params.find(L"font") != params.end()) {
       lstrcpyW(m_supertexts[nextFreeSupertextIndex].nFontFace, ConvertToLPCWSTR(params[L"font"]));
     }
-    else {
-      // Default font
+    else if (!hasProfile) {
       lstrcpyW(m_supertexts[nextFreeSupertextIndex].nFontFace, L"Segoe UI");
     }
 
     if (params.find(L"size") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fFontSize = std::stof(params[L"size"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].fFontSize = 30.0f; // Default size
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].fFontSize = 30.0f;
     }
 
     if (params.find(L"x") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fX = std::stof(params[L"x"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].fX = 0.49f; // Default x position
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].fX = 0.49f;
     }
 
     if (params.find(L"y") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fY = std::stof(params[L"y"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].fY = 0.5f; // Default y position
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].fY = 0.5f;
     }
 
     if (params.find(L"randx") != params.end()) {
@@ -1780,64 +2202,64 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     if (params.find(L"growth") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fGrowth = std::stof(params[L"growth"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].fGrowth = 1.0f; // Default growth
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].fGrowth = 1.0f;
     }
 
     if (params.find(L"time") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fDuration = std::stof(params[L"time"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].fDuration = 5.0f; // Default duration
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].fDuration = 5.0f;
     }
 
     if (params.find(L"fade") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fFadeInTime = std::stof(params[L"fade"]);
     }
-    else {
+    else if (!hasProfile) {
       m_supertexts[nextFreeSupertextIndex].fFadeInTime = m_MessageDefaultFadeinTime;
     }
 
     if (params.find(L"fadeout") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fFadeOutTime = std::stof(params[L"fadeout"]);
     }
-    else {
+    else if (!hasProfile) {
       m_supertexts[nextFreeSupertextIndex].fFadeOutTime = m_MessageDefaultFadeoutTime;
     }
 
     if (params.find(L"bold") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].bBold = std::stoi(params[L"bold"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].bBold = 0; // Default bold
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].bBold = 0;
     }
 
     if (params.find(L"ital") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].bItal = std::stoi(params[L"ital"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].bItal = 0; // Default italic
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].bItal = 0;
     }
 
     if (params.find(L"r") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].nColorR = std::stoi(params[L"r"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].nColorR = 255; // Default red color
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].nColorR = 255;
     }
 
     if (params.find(L"g") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].nColorG = std::stoi(params[L"g"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].nColorG = 255; // Default green color
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].nColorG = 255;
     }
 
     if (params.find(L"b") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].nColorB = std::stoi(params[L"b"]);
     }
-    else {
-      m_supertexts[nextFreeSupertextIndex].nColorB = 255; // Default blue color
+    else if (!hasProfile) {
+      m_supertexts[nextFreeSupertextIndex].nColorB = 255;
     }
 
     if (params.find(L"randr") != params.end()) {
@@ -1887,7 +2309,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     if (params.find(L"burntime") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fBurnTime = std::stof(params[L"burntime"]);
     }
-    else {
+    else if (!hasProfile) {
       m_supertexts[nextFreeSupertextIndex].fBurnTime = m_MessageDefaultBurnTime;
     }
 

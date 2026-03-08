@@ -537,6 +537,41 @@ private:
   std::vector<std::wstring> m_profilePaths;  // full paths, indexed parallel to listbox
 };
 
+// ── Concrete subclass: Text Animations window ──
+
+class TextAnimWindow : public ToolWindow {
+public:
+  TextAnimWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Text Animations"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12TextAnimWnd"; }
+  const wchar_t* GetINISection() const override  { return L"TextAnimWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_TEXTANIM_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_TEXTANIM_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_TEXTANIM_FONT_MINUS; }
+  int GetMinWidth() const override  { return 520; }
+  int GetMinHeight() const override { return 650; }
+
+  DWORD   GetCommonControlFlags() const override;
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+  void    DoDestroy() override;
+
+private:
+  HWND m_hList = NULL;
+  int  m_nTopY = 0;
+  int  m_nSelectedRow = -1;
+
+  void PopulateListView();
+  void UpdateListViewRow(int idx);
+  void UpdateEditControls(int sel);
+  void SaveEditControls();
+  void SelectProfile(int idx);
+};
+
 // ── Channel input sources for Shadertoy passes ──
 
 enum ChannelSource {
