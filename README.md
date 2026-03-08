@@ -10,11 +10,10 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
 * In-app Settings window (F8) with tri-mode theme (Dark / Light / Follow System), 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
-* Preset browser with type filtering (.milk/.milk2), tagging, and subdirectory navigation
-* Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via Named Pipe IPC)
+* Double-click .milk/.milk2/.milk3 files in Explorer to load them (forwards to running instance via Named Pipe IPC)
 * One-click file association registration for .milk and .milk2 (Settings > About, no admin required)
 * Named Pipe IPC — PID-based discovery, duplex message-mode communication, no hidden windows required
-* Configurable hotkeys with per-binding local/global scope, dynamic Script/Launch entries (Hotkeys window, Ctrl+F7)
+* Configurable hotkeys with per-binding local/global scope, mouse button bindings, dynamic Script/Launch entries (Hotkeys window, Ctrl+F7)
 * Native MIDI input with 50 mapping slots, learn mode, button/knob actions (MIDI window from Settings)
 * Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
 * Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs
@@ -33,9 +32,11 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 * Native webcam and video file input mixing (background/overlay compositing with luma key)
 * Shadertoy import: GLSL->HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
 * Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
+* Preset browser with type filtering (.milk/.milk2/.milk3), tagging, and subdirectory navigation
 * Video Effects window with transform, color, and audio-reactive controls; VFX JSON profiles
 * Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
-* ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, and Workspace Layout windows run on their own threads with sticky positions and tab memory
+* Text Animations window with DX12 warped text, color/font pickers, animation profile export/import, and custom preview
+* ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, Text Animations, and Workspace Layout windows run on their own threads with sticky positions and tab memory
 * Improved window handling, input methods and stability
 * Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, shader conversion, wave manipulation, and more)
 

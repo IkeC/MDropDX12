@@ -48,8 +48,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
 - In-app Settings window (F8 / Ctrl+L) with tri-mode theme (Dark/Light/Follow System), 11-tab UI, preset browser, resource viewer, path display on About tab
-- ToolWindow system: Settings, Displays, Song Info, Hotkeys, and Button Board windows run on their own threads with independent always-on-top, sticky positions, and tab memory
-- Configurable hotkeys (Ctrl+F7) with per-binding local/global scope, conflict detection, dynamic Script/Launch entries, and Reset to Defaults
+- ToolWindow system: Settings, Displays, Song Info, Hotkeys, Button Board, Text Animations, and more run on their own threads with independent always-on-top, sticky positions, and tab memory
+- Configurable hotkeys (Ctrl+F7) with per-binding local/global scope, mouse button bindings, conflict detection, dynamic Script/Launch entries, and Reset to Defaults
 - Native MIDI input (50 mapping slots, Button/Knob actions, learn mode, JSON persistence)
 - Standalone Song Info window (Shift+Ctrl+F8) and Displays window (Ctrl+F8)
 - Self-bootstrapping exe with embedded shaders (no external .fx files required)
@@ -68,11 +68,11 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Spout video input mixing (background/overlay compositing)
 - Idle timer / screensaver mode
 - Drag-and-drop presets, folders, and textures
-- Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via Named Pipe)
+- Command-line preset loading (double-click .milk/.milk2/.milk3 in Explorer; forwards to running instance via Named Pipe)
 - Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) — PID-based discovery, duplex message-mode, no hidden window
 - File association registration for .milk/.milk2 (Settings → About, HKCU, no admin)
 - Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_importing.md`)
-- Preset filter by type (All / .milk / .milk2) in preset browser; random/sequential selection respects filter
+- Preset filter by type (All / .milk / .milk2 / .milk3) in preset browser; random/sequential selection respects filter
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 
 ## DX12 Rendering Pipeline

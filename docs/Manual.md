@@ -960,9 +960,11 @@ Click any column header to sort. Click again to reverse the sort order.
 
 Double-click any row (or select it and click **Edit**) to open the Edit Hotkey dialog:
 
-1. Press a key combination in the **Key** capture field
+1. Press a key combination in the **Key** capture field, or select a mouse button from the **Mouse** dropdown
 2. Check **Global (system-wide)** to make it work regardless of which window has focus
 3. Click **OK** to save, or **Clear** to remove the binding
+
+**Mouse button bindings**: The Mouse dropdown offers Left, Right, Middle, X1, and X2 mouse buttons. Mouse buttons are always local scope (the Windows RegisterHotKey API does not support mouse buttons). Selecting a mouse button clears any keyboard key, and vice versa.
 
 Click **Reset to Defaults** in the main window to restore all built-in assignments to factory defaults. User-added Script and Launch entries are preserved.
 
@@ -1097,6 +1099,21 @@ Each knob can have an **Increment** value for relative control (set to 0 for abs
 Press **Shift+Ctrl+F8** to open a standalone Song Info window showing the current track information (artist, title, album). This is a ToolWindow that runs on its own thread with independent always-on-top, theme support, and sticky position.
 
 The Song Info window provides the same track info source selector and display options as the General tab in Settings, allowing quick access to track info configuration without opening the full Settings window.
+
+## Text Animations
+
+Press **T** to trigger a song title animation, or open the Text Animations window from Settings > System > **Text Animations...** button.
+
+The Text Animations window provides controls for animated text rendering:
+
+- **Track Info Source**: Select which track info to display (same sources as Song Info)
+- **Font**: Click the font button to open the Windows font picker
+- **Color**: Click the color swatch to open the Windows color picker
+- **Animation Profile**: Save and load named animation presets
+- **Export/Import**: Share animation profiles as files
+- **Preview Text**: Enter custom text to preview animations without needing active track info
+
+Animations render using DX12 warped text directly in the visualizer viewport.
 
 ## GPU Protection
 

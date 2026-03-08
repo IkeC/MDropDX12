@@ -32,7 +32,7 @@ No registry entries are created and nothing is installed system-wide. To remove,
 
 On first launch, MDropDX12 self-bootstraps: it creates `resources/presets/`, `resources/textures/`, and other directories automatically. A **Welcome window** appears with options to:
 
-- **Browse for Resources Folder** — point it at an existing folder containing presets (`.milk` files) and textures
+- **Browse for Resources Folder** — point it at an existing folder containing presets (`.milk`, `.milk2`, `.milk3` files) and textures
 - **Open Shader Import** — import Shadertoy shaders directly (no presets needed)
 - **Open Settings** — configure paths, audio, display options
 
@@ -92,15 +92,15 @@ All files are human-readable and can be edited with any text editor. The Setting
 
 ## Adding Presets
 
-MDropDX12 uses `.milk` preset files compatible with MilkDrop2.
+MDropDX12 uses `.milk` and `.milk2` preset files compatible with MilkDrop2, and `.milk3` presets converted from Shadertoy.
 
 To add presets:
 
 1. Create a subfolder in `resources/presets/` (e.g., `resources/presets/MyPresets/`)
-2. Copy `.milk` files into that folder
+2. Copy `.milk`, `.milk2`, or `.milk3` files into that folder
 3. The new presets appear immediately — no restart needed
 
-You can also drag and drop `.milk` files or folders directly onto the visualizer window.
+You can also drag and drop `.milk`, `.milk2`, or `.milk3` files or folders directly onto the visualizer window.
 
 See the [Resources Guide](Resources.md) for recommended preset collections, including the excellent [Milkwave preset library](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) and [projectM presets](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets).
 
@@ -141,7 +141,7 @@ Delete the folder. No registry entries or system files are affected.
 
 ### Presets not showing up
 
-- Presets must be `.milk` files placed inside `resources/presets/` or a subdirectory.
+- Presets must be `.milk`, `.milk2`, or `.milk3` files placed inside `resources/presets/` or a subdirectory.
 - Open Settings (F8) → Files tab to verify the preset directory path.
 - Check the Settings preset browser to confirm presets are listed.
 

@@ -15,17 +15,54 @@
 - All existing text message formats unchanged (MSG|, PRESET=, WAVE|, STATE, SPOUT_SENDER=, etc.)
 - Configurable WM base offset via `PipeServer::Start(hwnd, wmIPCMessage, wmSignalBase)` for cross-project portability
 - Settings UI (Remote tab) updated to show pipe name and connection status instead of window titles
+- Pipe server tracks connected client exe path via `GetNamedPipeClientProcessId` for auto-launch
 - Removed: IPC worker thread, IPC hidden window, WM_MW_RESTART_IPC, g_szIPCWindowTitle, StartIPCThread/StopIPCThread
 
 ### Animated Song Titles
 
 - DX12 warped text animation for song title rendering with selectable track info sources
+- Windows color picker and font picker dialogs (replaced raw R/G/B fields)
+- Color swatch click-to-open color picker
+- Export/Import for animation profiles
+- Custom preview text field in Text Animations window
+
+### Mouse Button Hotkeys
+
+- Left, Right, Middle, X1, and X2 mouse buttons can now be assigned as hotkey bindings
+- New "Mouse:" dropdown combo in the hotkey edit dialog (mutual exclusion with keyboard key)
+- Mouse button bindings are forced to local scope (RegisterHotKey does not support mouse buttons)
+- Added WM_XBUTTONDOWN handler for X1/X2 mouse button dispatch
+
+### Open Remote Action
+
+- New HK_OPEN_REMOTE hotkey action: finds and activates Milkwave Remote window, or launches it if not running
+- Searches for both "MDropDX12 Remote" and "Milkwave Remote" window titles
+- Remembers last pipe-connected Remote exe path across sessions (persisted to INI)
+- New HK_POLL_TRACK_INFO hotkey action: force immediate track info poll
+
+### .milk3 Preset Support
+
+- File dialogs (Open, Save As) now include `.milk3` filter alongside `.milk` and `.milk2`
+- Preset browser type filter updated: All / .milk / .milk2 / .milk3
+
+### Bootstrap
+
+- Self-bootstrap now prefers a `resources/` directory next to the exe over walking up parent directories
+- Prevents finding a stray `resources/data/` in an unrelated ancestor directory
+
+### Bug Fixes
+
+- Fixed upside-down sprites by re-enabling DX12 Y-flip (DX12 passthrough VS doesn't negate Y like DX9 OrthoLH)
+- Fixed resize/fullscreen triggering an unwanted next-preset transition
+- Fixed device recovery (TDR) reloading the same preset instead of skipping to next
+- Fixed C5208 build warnings (anonymous typedef struct with static const member)
 
 ### Code
 
 - New files: `pipe_server.h`, `pipe_server.cpp` (Named Pipe IPC server)
-- New file: `engine_textanim_ui.cpp` (animated song title UI)
+- New file: `engine_textanim_ui.cpp` (Text Animations window)
 - Removed ~200 lines of IPC window thread and worker thread code from App.cpp and engine_presets.cpp
+- Zero code warnings in Release build
 
 ## v1.4.3 (2026-03-07)
 

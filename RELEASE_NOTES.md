@@ -3,8 +3,18 @@
 ## What's New
 
 - **Named Pipe IPC** — Replaced WM_COPYDATA / hidden window IPC with Named Pipes (`\\.\pipe\Milkwave_<PID>`). PID-based discovery eliminates fragile window-title matching and removes the hidden 1x1 IPC window entirely.
-- **Second-instance forwarding via pipe** — Double-clicking a .milk/.milk2 file forwards the preset path to the running instance over the named pipe instead of WM_COPYDATA.
-- **Animated song title rendering** — DX12 warped text animation for song titles with selectable track info sources.
+- **Animated song title rendering** — DX12 warped text animation for song titles with selectable track info sources, Windows color/font picker dialogs, export/import for animation profiles, and custom preview text.
+- **Mouse button hotkeys** — Left, Right, Middle, X1, and X2 mouse buttons can now be assigned as hotkey bindings (local scope only). New "Mouse:" dropdown in the hotkey edit dialog.
+- **Open Remote action** — New configurable hotkey action to find and activate Milkwave Remote, or launch it if not running. Remembers the last pipe-connected Remote exe path across sessions.
+- **.milk3 preset support** — File dialogs and preset browser now support `.milk3` (Shadertoy JSON) presets alongside `.milk` and `.milk2`.
+- **Bootstrap fix** — Self-bootstrap now prefers a `resources/` directory next to the exe instead of walking up parent directories.
+
+## Bug Fixes
+
+- Fixed upside-down sprites (DX12 Y-flip re-enabled)
+- Fixed resize/fullscreen triggering an unwanted next-preset transition
+- Fixed device recovery (TDR) reloading the same preset instead of skipping to next
+- Fixed C5208 build warnings (anonymous struct with static member)
 
 ## IPC Changes
 
@@ -16,6 +26,7 @@ Key benefits:
 - Deterministic PID-based discovery (no window title ambiguity)
 - Duplex communication (visualizer can send messages back to Remote)
 - Non-blocking writes (no SendMessage blocking the render pump)
+- Pipe server tracks connected client exe path for auto-launch
 
 **Requires Milkwave Remote 3.7+ for Named Pipe support.**
 
