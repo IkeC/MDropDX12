@@ -1302,6 +1302,10 @@ public:
   void OpenWorkspaceLayoutWindow();
   void CloseWorkspaceLayoutWindow();
 
+  std::unique_ptr<ErrorDisplayWindow> m_errorDisplayWindow;
+  void OpenErrorDisplayWindow();
+  void CloseErrorDisplayWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 

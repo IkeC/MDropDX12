@@ -860,4 +860,28 @@ struct ActionEditData {
 // Show the shared action edit dialog.  Returns true if user pressed OK.
 bool ShowActionEditDialog(HWND hParent, ActionEditData& data);
 
+// ── Concrete subclass: Error Display Settings window ──
+
+class ErrorDisplayWindow : public ToolWindow {
+public:
+  ErrorDisplayWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Error Display Settings"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ErrorDisplayWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ErrorDisplay"; }
+  int GetPinControlID() const override       { return IDC_ERRDLG_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_ERRDLG_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_ERRDLG_FONT_MINUS; }
+  int GetMinWidth() const override  { return 400; }
+  int GetMinHeight() const override { return 520; }
+
+  void DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+
+private:
+  void ApplySettings();   // read controls → Engine members → save INI
+  void ResetToDefaults(); // reset controls to factory values
+};
+
 } // namespace mdrop

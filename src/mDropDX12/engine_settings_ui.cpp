@@ -1259,6 +1259,12 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
+    // About tab: Error Display Settings
+    if (id == IDC_MW_ERROR_DISPLAY_SETTINGS && code == BN_CLICKED) {
+      m_pEngine->OpenErrorDisplayWindow();
+      return 0;
+    }
+
     // About tab: Register File Association
     if (id == IDC_MW_FILE_ASSOC && code == BN_CLICKED) {
       wchar_t exePath[MAX_PATH];
@@ -2453,6 +2459,16 @@ void SettingsWindow::DoBuildControls() {
   }
   y += lineH + 2;
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Tile tool windows across screen with render preview in corner)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  y += lineH + 8;
+
+  // Error Display Settings button
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Error Display:", x, y, lw, lineH, hFont, false));
+  {
+    int btnW = MulDiv(200, lineH, 26);
+    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Error Display Settings...", IDC_MW_ERROR_DISPLAY_SETTINGS, x + lw + 4, y, btnW, lineH, hFont, false));
+  }
+  y += lineH + 2;
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Configure error message appearance, duration, and LOUD mode)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
   // ===== Remote tab (page 5) =====
   y = tabTop + 10;
