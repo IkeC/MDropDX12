@@ -1214,7 +1214,7 @@ public:
   void        ToggleSetting(int id);
   void        AdjustSetting(int id, int direction);
   void        SaveSettingToINI(int id);
-  void        OpenFolderPickerForPresetDir();
+  void        OpenFolderPickerForPresetDir(HWND hOwnerOverride = NULL);
   // Settings window (ToolWindow subclass, own thread)
   std::unique_ptr<SettingsWindow> m_settingsWindow;
   int         m_nSettingsFontSize = -16;     // Shared font size for all tool windows (negative = pixel height)

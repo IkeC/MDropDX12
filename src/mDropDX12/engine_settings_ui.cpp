@@ -353,7 +353,7 @@ void Engine::SaveSettingToINI(int id) {
   WritePrivateProfileStringW(s.iniSection, s.iniKey, val, GetConfigIniFile());
 }
 
-void Engine::OpenFolderPickerForPresetDir() {
+void Engine::OpenFolderPickerForPresetDir(HWND hOwnerOverride) {
   DebugLogW(L"OpenFolderPicker: entering", LOG_VERBOSE);
 
   // COM must be initialized on this thread for IFileDialog
@@ -390,7 +390,7 @@ void Engine::OpenFolderPickerForPresetDir() {
     }
 
     DebugLogW(L"OpenFolderPicker: about to call Show()...", LOG_VERBOSE);
-    HWND hOwner = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+    HWND hOwner = hOwnerOverride ? hOwnerOverride : (m_settingsWindow ? m_settingsWindow->GetHWND() : NULL);
     hr = pfd->Show(hOwner);
     {
       wchar_t dbg[128];

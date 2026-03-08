@@ -278,7 +278,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // ── Browse Directory ──
     if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
-        p->OpenFolderPickerForPresetDir();
+        p->OpenFolderPickerForPresetDir(hWnd);
         UpdatePresetDirDisplay();
         RefreshPresetList();
         return 0;
