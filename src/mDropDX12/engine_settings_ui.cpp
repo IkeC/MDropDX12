@@ -1320,7 +1320,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       if (ok)
         p->AddNotification(L"File association registered for .milk, .milk2, and .milk3");
       else
-        p->AddError((wchar_t*)L"Failed to register file association", 3.5f, ERR_NOTIFY, true);
+        p->AddError((wchar_t*)L"Failed to register file association", p->m_ErrorDuration, ERR_NOTIFY, true);
       return 0;
     }
 
