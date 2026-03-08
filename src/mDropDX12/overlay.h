@@ -41,6 +41,11 @@ struct OverlayData {
         wchar_t text[256];
         DWORD   color;      // 0x00RRGGBB
         int     corner;     // MTO_UPPER_RIGHT=0, MTO_UPPER_LEFT=1, MTO_LOWER_RIGHT=2, MTO_LOWER_LEFT=3
+        int     fontSize;   // 0 = use default
+        bool    isLoud;     // true = LOUD mode (centered, large, pulsing)
+        DWORD   loudColor2; // second pulse color (0x00RRGGBB)
+        int     pulseSpeed; // cycles per second
+        wchar_t fontFace[128]; // font face name (empty = default)
     };
     int                  nNotifications;
     OverlayNotification  notifications[OVERLAY_MAX_NOTIFICATIONS];
@@ -114,6 +119,11 @@ private:
     void DrawShadowText(const wchar_t* text, bool alignRight,
                         int marginX, int* pY, int rightEdge,
                         bool fromBottom = false, DWORD rgbColor = 0xFFFFFF);
+
+    // Centered large text for LOUD error mode
+    void DrawCenteredLoudText(const wchar_t* text, int fontSize,
+                              DWORD color1, DWORD color2, int pulseSpeed,
+                              int w, int h);
 
     // Menu rendering
     void RenderMenuToDIB();

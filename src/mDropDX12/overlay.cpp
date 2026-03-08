@@ -366,6 +366,59 @@ void COverlayThread::DrawShadowText(const wchar_t* text, bool alignRight,
     ::DrawTextW(m_hMemDC, text, -1, &r, DT_SINGLELINE | DT_NOPREFIX);
 }
 
+void COverlayThread::DrawCenteredLoudText(const wchar_t* text, int fontSize,
+                                           DWORD color1, DWORD color2, int pulseSpeed,
+                                           int w, int h) {
+    if (!m_hMemDC || !text || !text[0]) return;
+
+    // Calculate pulse color via sin() interpolation
+    DWORD drawColor = color1;
+    if (pulseSpeed > 0 && color2 != 0) {
+        double t = (double)GetTickCount64() / 1000.0;
+        float s = (sinf((float)(t * pulseSpeed * 2.0 * 3.14159)) + 1.0f) * 0.5f;
+        BYTE r = (BYTE)((1 - s) * ((color1 >> 16) & 0xFF) + s * ((color2 >> 16) & 0xFF));
+        BYTE g = (BYTE)((1 - s) * ((color1 >> 8) & 0xFF)  + s * ((color2 >> 8) & 0xFF));
+        BYTE b = (BYTE)((1 - s) * (color1 & 0xFF)         + s * (color2 & 0xFF));
+        drawColor = ((DWORD)r << 16) | ((DWORD)g << 8) | (DWORD)b;
+    }
+
+    // Create large font
+    int fs = (fontSize > 0) ? fontSize : max(40, h / 6);
+    int dpiY = GetDeviceCaps(m_hMemDC, LOGPIXELSY);
+    if (dpiY <= 0) dpiY = 96;
+    int fontRequest = MulDiv(fs, 96, dpiY);
+    HFONT hLoud = CreateFontW(-fontRequest, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    if (!hLoud) return;
+    HFONT hOld = (HFONT)SelectObject(m_hMemDC, hLoud);
+
+    // Measure and center
+    RECT rCalc = { 0, 0, w - 40, h };
+    ::DrawTextW(m_hMemDC, text, -1, &rCalc, DT_CALCRECT | DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+    int tw = rCalc.right - rCalc.left;
+    int th = rCalc.bottom - rCalc.top;
+    int cx = (w - tw) / 2;
+    int cy = (h - th) / 2;
+    RECT rc = { cx, cy, cx + tw, cy + th };
+
+    // Shadow
+    RECT rShadow = rc;
+    OffsetRect(&rShadow, 2, 2);
+    SetTextColor(m_hMemDC, RGB(32, 32, 32));
+    ::DrawTextW(m_hMemDC, text, -1, &rShadow, DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+
+    // Main text
+    BYTE cr = (BYTE)((drawColor >> 16) & 0xFF);
+    BYTE cg = (BYTE)((drawColor >> 8) & 0xFF);
+    BYTE cb = (BYTE)(drawColor & 0xFF);
+    SetTextColor(m_hMemDC, RGB(cr, cg, cb));
+    ::DrawTextW(m_hMemDC, text, -1, &rc, DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+
+    SelectObject(m_hMemDC, hOld);
+    DeleteObject(hLoud);
+}
+
 void COverlayThread::RenderOverlayToDIB() {
     UINT w = m_texWidth;
     UINT h = m_texHeight;
@@ -482,14 +535,43 @@ void COverlayThread::RenderOverlayToDIB() {
     // --- HUD: Notifications (per-corner stacking) ---
     if (m_currentData.nNotifications > 0) {
         int notifY[4] = { upperRightY, upperLeftY, lowerRightY, lowerLeftY };
+
+        // LOUD notifications: centered, large, pulsing
         for (int i = 0; i < m_currentData.nNotifications; i++) {
             const auto& n = m_currentData.notifications[i];
-            if (!n.text[0]) continue;
-            int  c       = n.corner;
+            if (!n.text[0] || !n.isLoud) continue;
+            DrawCenteredLoudText(n.text, n.fontSize, n.color, n.loudColor2, n.pulseSpeed, (int)w, (int)h);
+        }
+
+        // Normal notifications: per-corner stacking with configurable font
+        for (int i = 0; i < m_currentData.nNotifications; i++) {
+            const auto& n = m_currentData.notifications[i];
+            if (!n.text[0] || n.isLoud) continue;
+
+            HFONT hCustom = NULL;
+            HFONT hOldFont = NULL;
+            if (n.fontSize > 0 || n.fontFace[0]) {
+                int fs = (n.fontSize > 0) ? n.fontSize : max(20, (int)h / 32);
+                int dpiY = GetDeviceCaps(m_hMemDC, LOGPIXELSY);
+                if (dpiY <= 0) dpiY = 96;
+                int fontReq = MulDiv(fs, 96, dpiY);
+                const wchar_t* face = n.fontFace[0] ? n.fontFace : L"Consolas";
+                hCustom = CreateFontW(-fontReq, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                    ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+                if (hCustom) hOldFont = (HFONT)SelectObject(m_hMemDC, hCustom);
+            }
+
+            int c = n.corner;
             if (c < 0 || c > 3) c = 0;
             bool right   = (c == 0 || c == 2);
             bool fromBot = (c == 2 || c == 3);
             DrawShadowText(n.text, right, margin, &notifY[c], (int)w - margin, fromBot, n.color);
+
+            if (hCustom) {
+                SelectObject(m_hMemDC, hOldFont);
+                DeleteObject(hCustom);
+            }
         }
     }
 

@@ -352,6 +352,19 @@ void Engine::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold)
   m_errors.push_back(x);
 }
 
+void Engine::AddLoudError(wchar_t* szMsg) {
+  DebugLogW(szMsg, LOG_WARN);
+  ErrorMsg x;
+  x.msg = szMsg;
+  x.birthTime = GetTime();
+  x.expireTime = GetTime() + m_LoudDuration;
+  x.category = ERR_MISC;
+  x.bBold = true;
+  x.bSentToRemote = false;
+  x.color = 0xFFFFFFFF; // sentinel for LOUD mode
+  m_errors.push_back(x);
+}
+
 void Engine::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
   DebugLogW(szMsg);
   ClearErrors(ERR_NOTIFY);
@@ -529,12 +542,35 @@ void Engine::MyRenderUI(
             n.color = ((DWORD)m_fontinfo[fi].R << 16) | ((DWORD)m_fontinfo[fi].G << 8) | (DWORD)m_fontinfo[fi].B;
             int sc = m_SongInfoDisplayCorner;
             n.corner = (sc == 1) ? MTO_UPPER_LEFT : (sc == 2) ? MTO_UPPER_RIGHT : (sc == 4) ? MTO_LOWER_RIGHT : MTO_LOWER_LEFT;
+            n.fontSize = 0;
+            n.isLoud = false;
+            n.loudColor2 = 0;
+            n.pulseSpeed = 0;
+            n.fontFace[0] = 0;
           }
           else if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
             auto& n = od.notifications[od.nNotifications++];
             swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
-            n.color = m_errors[i].color ? (m_errors[i].color & 0x00FFFFFF) : 0x00FFFFFF;
-            n.corner = MTO_UPPER_RIGHT;
+
+            bool isLoud = (m_errors[i].color == 0xFFFFFFFF);
+            n.isLoud = isLoud;
+            if (isLoud) {
+              n.color = ((DWORD)m_LoudColorR1 << 16) | ((DWORD)m_LoudColorG1 << 8) | (DWORD)m_LoudColorB1;
+              n.loudColor2 = ((DWORD)m_LoudColorR2 << 16) | ((DWORD)m_LoudColorG2 << 8) | (DWORD)m_LoudColorB2;
+              n.pulseSpeed = m_LoudPulseSpeed;
+              n.fontSize = m_LoudFontSize;
+              n.corner = -1; // centered
+              n.fontFace[0] = 0;
+            } else {
+              n.color = m_errors[i].color ? (m_errors[i].color & 0x00FFFFFF) :
+                ((DWORD)m_ErrorColorR << 16) | ((DWORD)m_ErrorColorG << 8) | (DWORD)m_ErrorColorB;
+              n.loudColor2 = 0;
+              n.pulseSpeed = 0;
+              n.fontSize = m_ErrorFontSize;
+              n.corner = m_ErrorCorner;
+              wcscpy_s(n.fontFace, m_szErrorFontFace);
+              n.isLoud = false;
+            }
           }
         }
       }
