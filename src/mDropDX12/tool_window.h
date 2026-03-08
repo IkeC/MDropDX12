@@ -360,7 +360,6 @@ protected:
   int GetMinWidth() const override  { return 500; }
   int GetMinHeight() const override { return 700; }
 
-  void    OnResize() override;
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
@@ -429,6 +428,7 @@ private:
   HWND m_hLblBlend = NULL, m_hEditBlend = NULL;
   HWND m_hLblTime = NULL, m_hEditTime = NULL;
   HWND m_hChkHardCuts = NULL, m_hChkLock = NULL, m_hChkSeq = NULL;
+  HWND m_hStartupCombo = NULL, m_hLblStartup = NULL;
   int  m_nTopY = 0;
 
   void LayoutControls();

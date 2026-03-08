@@ -483,6 +483,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGOVERRIDE_APPLY_HUE     4016
 #define IDC_MSGOVERRIDE_RAND_HUE      4017
 #define IDC_MSGOVERRIDE_IGNORE_PERMSG 4018
+#define IDC_MSGOVERRIDE_TAB          4019
+#define IDC_MSGOVERRIDE_ANIM_LIST    4020
+#define IDC_MSGOVERRIDE_ANIM_ALL     4021
+#define IDC_MSGOVERRIDE_ANIM_NONE    4022
 
 // Sprites tab control IDs (page 6)
 #define IDC_MW_SPR_LIST         5000

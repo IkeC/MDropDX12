@@ -158,11 +158,12 @@ void PresetsWindow::DoBuildControls() {
     // Startup preset mode combo
     {
         int startLblW = MulDiv(60, lineH, 26);
-        CreateLabel(hw, L"Startup:", x, y, startLblW, lineH, hFont);
+        m_hLblStartup = CreateLabel(hw, L"Startup:", x, y, startLblW, lineH, hFont);
         HWND hStartup = CreateWindowExW(0, L"COMBOBOX", NULL,
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
             x + startLblW + 4, y, rw - startLblW - 4, lineH * 5, hw,
             (HMENU)(INT_PTR)IDC_MW_PRESETS_STARTUP, GetModuleHandle(NULL), NULL);
+        m_hStartupCombo = hStartup;
         if (hStartup && hFont) SendMessage(hStartup, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessageW(hStartup, CB_ADDSTRING, 0, (LPARAM)L"Random");
         SendMessageW(hStartup, CB_ADDSTRING, 0, (LPARAM)L"Current Preset");
@@ -214,7 +215,8 @@ void PresetsWindow::LayoutControls() {
     // Calculate listbox height: fill remaining space minus nav + settings below
     int belowList = (lineH + 4 + gap + 4) // nav row
         + 3 * (lineH + gap) + 4           // 3 edit rows + extra gap
-        + 3 * (lineH + 2)                 // 3 checkboxes
+        + 3 * (lineH + 2) + gap + 4       // 3 checkboxes + gap
+        + (lineH + gap)                   // startup combo row
         + 8;                               // bottom margin
     int listH = rc.bottom - y - belowList;
     if (listH < 3 * lineH) listH = 3 * lineH;
@@ -259,6 +261,14 @@ void PresetsWindow::LayoutControls() {
     MoveWindow(m_hChkLock, x, y, rw, lineH, TRUE);
     y += lineH + 2;
     MoveWindow(m_hChkSeq, x, y, rw, lineH, TRUE);
+    y += lineH + gap + 4;
+
+    // Startup combo
+    {
+        int startLblW = MulDiv(60, lineH, 26);
+        if (m_hLblStartup) MoveWindow(m_hLblStartup, x, y, startLblW, lineH, TRUE);
+        if (m_hStartupCombo) MoveWindow(m_hStartupCombo, x + startLblW + 4, y, rw - startLblW - 4, lineH * 5, TRUE);
+    }
 }
 
 // ─── Commands ───────────────────────────────────────────────────────────

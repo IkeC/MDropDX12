@@ -61,9 +61,20 @@ void MessagesWindow::DoBuildControls() {
     }
     y += lineH + gap;
 
-    // Message listbox
+    // Message listbox — fill available space dynamically
     {
-        int listH = 10 * lineH;
+        RECT rc;
+        GetClientRect(hw, &rc);
+        int belowList = 4                        // listbox bottom gap
+            + (lineH + gap)                      // button row 1
+            + (lineH + gap + 4)                  // button row 2
+            + (lineH + gap)                      // font size note
+            + (lineH + 2) * 2 + (lineH + gap)   // 3 autoplay checkboxes
+            + (lineH + gap)                      // interval + jitter row
+            + (lineH * 3)                        // preview area
+            + 8;                                 // bottom margin
+        int listH = rc.bottom - y - belowList;
+        if (listH < 3 * lineH) listH = 3 * lineH;
         HWND hMsgList = CreateWindowExW(0, L"LISTBOX", L"",
             WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
             x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_MSG_LIST,
@@ -71,8 +82,8 @@ void MessagesWindow::DoBuildControls() {
         if (hMsgList && hFont) SendMessage(hMsgList, WM_SETFONT, (WPARAM)hFont, TRUE);
         p->PopulateMsgListBox(hMsgList);
         TrackControl(hMsgList);
+        y += listH + 4;
     }
-    y += 10 * lineH + 4;
 
     // Button row 1: Push Now, Up, Down, Add, Edit, Delete, Play
     {
@@ -171,8 +182,17 @@ void MessagesWindow::OnResize() {
     }
     y += lineH + gap;
 
-    // Listbox
-    int listH = 10 * lineH;
+    // Listbox — fill available space dynamically
+    int belowList = 4                        // listbox bottom gap
+        + (lineH + gap)                      // button row 1
+        + (lineH + gap + 4)                  // button row 2
+        + (lineH + gap)                      // font size note
+        + (lineH + 2) * 2 + (lineH + gap)   // 3 autoplay checkboxes
+        + (lineH + gap)                      // interval + jitter row
+        + (lineH * 3)                        // preview area
+        + 8;                                 // bottom margin
+    int listH = rc.bottom - y - belowList;
+    if (listH < 3 * lineH) listH = 3 * lineH;
     moveCtrl(IDC_MW_MSG_LIST, x, y, rw, listH);
     y += listH + 4;
 

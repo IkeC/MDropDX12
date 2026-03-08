@@ -1515,6 +1515,9 @@ bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
 struct MsgOverridesDlgData {
   Engine*    plugin;
   HWND        hDlgWnd;
+  HWND        hTab;
+  HFONT       hFont;
+  int         dlgLineH;
   bool        bResult;
   bool        bDone;
 
@@ -1538,12 +1541,146 @@ struct MsgOverridesDlgData {
   bool        bRandomHue;
   // Per-message randomization
   bool        bIgnorePerMsg;
+
+  // Animation profiles tab — working copy of bEnabled flags
+  bool        animEnabled[MAX_ANIM_PROFILES];
+  int         nAnimCount;
+
+  // Controls on randomize tab
+  std::vector<HWND> randomizeControls;
+  // Controls on animations tab
+  HWND        hAnimList;
+  HWND        hAnimAll;
+  HWND        hAnimNone;
+
+  // Sort state
+  int         nSortColumn;
+  bool        bSortAscending;
 };
+
+// Show/hide controls for the active tab
+static void MsgOverridesShowTab(MsgOverridesDlgData* data, int tab) {
+  int showRand = (tab == 0) ? SW_SHOW : SW_HIDE;
+  int showAnim = (tab == 1) ? SW_SHOW : SW_HIDE;
+  for (HWND h : data->randomizeControls)
+    ShowWindow(h, showRand);
+  if (data->hAnimList) ShowWindow(data->hAnimList, showAnim);
+  if (data->hAnimAll) ShowWindow(data->hAnimAll, showAnim);
+  if (data->hAnimNone) ShowWindow(data->hAnimNone, showAnim);
+}
+
+// Refresh animation ListView from working data
+static void MsgOverridesRefreshAnimList(MsgOverridesDlgData* data) {
+  if (!data->hAnimList) return;
+  Engine* p = data->plugin;
+  SendMessage(data->hAnimList, LVM_DELETEALLITEMS, 0, 0);
+
+  for (int i = 0; i < data->nAnimCount; i++) {
+    const auto& prof = p->m_AnimProfiles[i];
+
+    LVITEMW lvi = {};
+    lvi.mask = LVIF_TEXT | LVIF_PARAM;
+    lvi.iItem = i;
+    lvi.lParam = i;
+    lvi.pszText = (LPWSTR)prof.szName;
+    int idx = (int)SendMessageW(data->hAnimList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+    // Set check state
+    ListView_SetCheckState(data->hAnimList, idx, data->animEnabled[i]);
+
+    // Duration column
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%.1fs", prof.fDuration);
+    lvi.mask = LVIF_TEXT;
+    lvi.iItem = idx;
+    lvi.iSubItem = 1;
+    lvi.pszText = buf;
+    SendMessageW(data->hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+
+    // Effects summary column
+    std::wstring fx;
+    if (prof.fMoveTime > 0) fx += L"Slide ";
+    if (prof.fGrowth != 1.0f) fx += L"Growth ";
+    if (prof.fShadowOffset > 0) fx += L"Shadow ";
+    if (prof.fBoxAlpha > 0) fx += L"Box ";
+    if (prof.bRandPos) fx += L"RPos ";
+    if (prof.bRandColor) fx += L"RCol ";
+    if (fx.empty()) fx = L"Default";
+    lvi.iSubItem = 2;
+    lvi.pszText = (LPWSTR)fx.c_str();
+    SendMessageW(data->hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+  }
+}
+
+// Sort comparison for animation list
+enum { ANIMCOL_NAME = 0, ANIMCOL_DURATION, ANIMCOL_EFFECTS };
+
+static int CALLBACK AnimListCompare(LPARAM lp1, LPARAM lp2, LPARAM lParamSort) {
+  MsgOverridesDlgData* data = (MsgOverridesDlgData*)lParamSort;
+  Engine* p = data->plugin;
+  int i1 = (int)lp1, i2 = (int)lp2;
+  if (i1 < 0 || i1 >= data->nAnimCount || i2 < 0 || i2 >= data->nAnimCount) return 0;
+  const auto& a = p->m_AnimProfiles[i1];
+  const auto& b = p->m_AnimProfiles[i2];
+  int cmp = 0;
+  switch (data->nSortColumn) {
+  case ANIMCOL_NAME: cmp = _wcsicmp(a.szName, b.szName); break;
+  case ANIMCOL_DURATION:
+    if (a.fDuration < b.fDuration) cmp = -1;
+    else if (a.fDuration > b.fDuration) cmp = 1;
+    break;
+  case ANIMCOL_EFFECTS: break; // no sort on effects summary
+  }
+  return data->bSortAscending ? cmp : -cmp;
+}
 
 static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   MsgOverridesDlgData* data = (MsgOverridesDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
   switch (msg) {
+  case WM_NOTIFY: {
+    NMHDR* pnm = (NMHDR*)lParam;
+    if (!data) break;
+
+    // Tab selection changed
+    if (pnm->idFrom == IDC_MSGOVERRIDE_TAB && pnm->code == TCN_SELCHANGE) {
+      int tab = (int)SendMessage(data->hTab, TCM_GETCURSEL, 0, 0);
+      MsgOverridesShowTab(data, tab);
+      return 0;
+    }
+
+    // ListView column header click — sort
+    if (pnm->idFrom == IDC_MSGOVERRIDE_ANIM_LIST && pnm->code == LVN_COLUMNCLICK) {
+      NMLISTVIEW* pnmlv = (NMLISTVIEW*)lParam;
+      if (pnmlv->iSubItem == data->nSortColumn)
+        data->bSortAscending = !data->bSortAscending;
+      else {
+        data->nSortColumn = pnmlv->iSubItem;
+        data->bSortAscending = true;
+      }
+      SendMessage(data->hAnimList, LVM_SORTITEMS, (WPARAM)data, (LPARAM)AnimListCompare);
+      return 0;
+    }
+
+    // ListView checkbox toggle
+    if (pnm->idFrom == IDC_MSGOVERRIDE_ANIM_LIST && pnm->code == LVN_ITEMCHANGED) {
+      NMLISTVIEW* pnmlv = (NMLISTVIEW*)lParam;
+      if ((pnmlv->uChanged & LVIF_STATE) && ((pnmlv->uNewState ^ pnmlv->uOldState) & LVIS_STATEIMAGEMASK)) {
+        LVITEMW lvi = {};
+        lvi.mask = LVIF_PARAM;
+        lvi.iItem = pnmlv->iItem;
+        SendMessage(data->hAnimList, LVM_GETITEMW, 0, (LPARAM)&lvi);
+        int profIdx = (int)lvi.lParam;
+        if (profIdx >= 0 && profIdx < data->nAnimCount) {
+          bool checked = ListView_GetCheckState(data->hAnimList, pnmlv->iItem) != 0;
+          data->animEnabled[profIdx] = checked;
+        }
+      }
+      return 0;
+    }
+    break;
+  }
+
   case WM_COMMAND: {
     int id = LOWORD(wParam);
     int code = HIWORD(wParam);
@@ -1559,23 +1696,32 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       }
     }
 
+    // Select All / Select None buttons
+    if (id == IDC_MSGOVERRIDE_ANIM_ALL && code == BN_CLICKED) {
+      for (int i = 0; i < data->nAnimCount; i++) data->animEnabled[i] = true;
+      MsgOverridesRefreshAnimList(data);
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_ANIM_NONE && code == BN_CLICKED) {
+      for (int i = 0; i < data->nAnimCount; i++) data->animEnabled[i] = false;
+      MsgOverridesRefreshAnimList(data);
+      return 0;
+    }
+
     if (id == IDC_MSGOVERRIDE_OK && code == BN_CLICKED) {
       wchar_t buf[32];
       data->bRandomFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_FONT), L"Checked");
       data->bRandomColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_COLOR), L"Checked");
       data->bRandomSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_SIZE), L"Checked");
       data->bRandomEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_EFFECTS), L"Checked");
-      // Animation overrides
       data->bRandomPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_POS), L"Checked");
       data->bRandomGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_GROWTH), L"Checked");
       data->bSlideIn = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SLIDE_IN), L"Checked");
       data->bRandomDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_DURATION), L"Checked");
       data->bShadow = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SHADOW), L"Checked");
       data->bBox = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_BOX), L"Checked");
-      // Color shifting overrides
       data->bApplyHueShift = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_APPLY_HUE), L"Checked");
       data->bRandomHue = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_HUE), L"Checked");
-      // Per-message randomization
       data->bIgnorePerMsg = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_IGNORE_PERMSG), L"Checked");
 
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
@@ -1585,7 +1731,6 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
       data->nMaxOnScreen = _wtoi(buf);
 
-      // Clamp values
       if (data->fSizeMin < 0.01f) data->fSizeMin = 0.01f;
       if (data->fSizeMax > 100.0f) data->fSizeMax = 100.0f;
       if (data->fSizeMin >= data->fSizeMax) data->fSizeMin = data->fSizeMax * 0.5f;
@@ -1707,11 +1852,19 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   data.bApplyHueShift = m_bMsgOverrideApplyHueShift;
   data.bRandomHue = m_bMsgOverrideRandomHue;
   data.bIgnorePerMsg = m_bMsgIgnorePerMsgRandom;
+  data.nSortColumn = ANIMCOL_NAME;
+  data.bSortAscending = true;
+
+  // Animation profiles working copy
+  data.nAnimCount = m_nAnimProfileCount;
+  for (int i = 0; i < data.nAnimCount; i++)
+    data.animEnabled[i] = m_AnimProfiles[i].bEnabled;
 
   // Create font for controls (use settings font size)
   HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  data.hFont = hFont;
 
   // Compute line height from font metrics for proportional layout
   HDC hdcTmp = GetDC(hParent);
@@ -1722,10 +1875,11 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   ReleaseDC(hParent, hdcTmp);
   int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
   if (dlgLineH < 20) dlgLineH = 20;
+  data.dlgLineH = dlgLineH;
 
-  // Scale dialog dimensions from baseline (350x530 at lineH=20)
-  int clientW = MulDiv(350, dlgLineH, 20);
-  int clientH = MulDiv(530, dlgLineH, 20);
+  // Scale dialog dimensions from baseline (420x590 at lineH=20)
+  int clientW = MulDiv(420, dlgLineH, 20);
+  int clientH = MulDiv(590, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -1754,80 +1908,161 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   data.hDlgWnd = hDlg;
   SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
 
-  // Scale layout constants from baseline (designed at lineH=20)
   int margin = MulDiv(16, dlgLineH, 20), rw = clientW - margin * 2;
   int editH = dlgLineH;
   int smallH = dlgLineH - 4;
   int btnH = dlgLineH + 4;
-  int y = MulDiv(14, dlgLineH, 20);
   wchar_t buf[32];
 
-  // Checkboxes
-  CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, margin, y, rw, editH, hFont, data.bRandomFont, true);
+  // ── Tab Control ──
+  int tabY = MulDiv(6, dlgLineH, 20);
+  int tabH = clientH - tabY - btnH - MulDiv(20, dlgLineH, 20);
+  HWND hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
+    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_TABS,
+    margin - 4, tabY, rw + 8, tabH, hDlg,
+    (HMENU)(INT_PTR)IDC_MSGOVERRIDE_TAB, GetModuleHandle(NULL), NULL);
+  if (hTab && hFont) SendMessage(hTab, WM_SETFONT, (WPARAM)hFont, TRUE);
+  data.hTab = hTab;
+
+  TCITEMW tci = {};
+  tci.mask = TCIF_TEXT;
+  tci.pszText = (LPWSTR)L"Randomize";
+  SendMessageW(hTab, TCM_INSERTITEMW, 0, (LPARAM)&tci);
+  tci.pszText = (LPWSTR)L"Animations";
+  SendMessageW(hTab, TCM_INSERTITEMW, 1, (LPARAM)&tci);
+
+  // Get tab content area
+  RECT rcTab;
+  GetClientRect(hTab, &rcTab);
+  SendMessage(hTab, TCM_ADJUSTRECT, FALSE, (LPARAM)&rcTab);
+  // Convert to dialog coordinates
+  POINT ptTab = { rcTab.left, rcTab.top };
+  MapWindowPoints(hTab, hDlg, &ptTab, 1);
+  int cx = ptTab.x + 4;               // content left
+  int cy = ptTab.y + 4;               // content top
+  int cw = rcTab.right - rcTab.left - 8;  // content width
+
+  // ═══ Randomize Tab Controls ═══
+  int y = cy;
+
+  auto trackRand = [&](HWND h) { if (h) data.randomizeControls.push_back(h); };
+
+  trackRand(CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, cx, y, cw, editH, hFont, data.bRandomFont, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, margin, y, rw, editH, hFont, data.bRandomColor, true);
+  trackRand(CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, cx, y, cw, editH, hFont, data.bRandomColor, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, margin, y, rw, editH, hFont, data.bRandomEffects, true);
+  trackRand(CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, cx, y, cw, editH, hFont, data.bRandomEffects, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, margin, y, rw, editH, hFont, data.bRandomSize, true);
+  trackRand(CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, cx, y, cw, editH, hFont, data.bRandomSize, true));
   y += dlgLineH + 4;
 
   // Size min/max
   int lblW2 = MulDiv(70, dlgLineH, 20), editW2 = MulDiv(50, dlgLineH, 20);
   int indent = MulDiv(20, dlgLineH, 20);
-  CreateLabel(hDlg, L"Min size:", margin + indent, y + 2, lblW2, smallH, hFont);
+  trackRand(CreateLabel(hDlg, L"Min size:", cx + indent, y + 2, lblW2, smallH, hFont));
   swprintf(buf, 32, L"%.2g", data.fSizeMin);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + indent + lblW2, y, editW2, editH, hFont, 0);
-  CreateLabel(hDlg, L"Max size:", margin + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont);
+  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, cx + indent + lblW2, y, editW2, editH, hFont, 0));
+  trackRand(CreateLabel(hDlg, L"Max size:", cx + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont));
   swprintf(buf, 32, L"%.2g", data.fSizeMax);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0);
+  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, cx + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0));
   y += dlgLineH + 4;
 
-  CreateLabel(hDlg, L"(min \x2265 0.01, max \x2264 100, 50 = normal)", margin + indent, y, rw, smallH, hFont);
+  trackRand(CreateLabel(hDlg, L"(min \x2265 0.01, max \x2264 100, 50 = normal)", cx + indent, y, cw, smallH, hFont));
   y += dlgLineH + 2;
 
   // Max on screen
   int maxLblW = MulDiv(170, dlgLineH, 20);
-  CreateLabel(hDlg, L"Max messages on screen:", margin, y + 2, maxLblW, smallH, hFont);
+  trackRand(CreateLabel(hDlg, L"Max messages on screen:", cx, y + 2, maxLblW, smallH, hFont));
   swprintf(buf, 32, L"%d", data.nMaxOnScreen);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0);
-  CreateLabel(hDlg, L"(1-10)", margin + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont);
+  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, cx + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0));
+  trackRand(CreateLabel(hDlg, L"(1-10)", cx + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont));
   y += dlgLineH + 8;
 
-  // --- Animations section ---
-  CreateLabel(hDlg, L"Animations:", margin, y, rw, smallH, hFont);
+  // Animations section
+  trackRand(CreateLabel(hDlg, L"Animations:", cx, y, cw, smallH, hFont));
   y += dlgLineH;
-  CreateCheck(hDlg, L"Random position", IDC_MSGOVERRIDE_RAND_POS, margin, y, rw, editH, hFont, data.bRandomPos, true);
+  trackRand(CreateCheck(hDlg, L"Random position", IDC_MSGOVERRIDE_RAND_POS, cx, y, cw, editH, hFont, data.bRandomPos, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Random growth (text scales over time)", IDC_MSGOVERRIDE_RAND_GROWTH, margin, y, rw, editH, hFont, data.bRandomGrowth, true);
+  trackRand(CreateCheck(hDlg, L"Random growth (text scales over time)", IDC_MSGOVERRIDE_RAND_GROWTH, cx, y, cw, editH, hFont, data.bRandomGrowth, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Slide in from edge", IDC_MSGOVERRIDE_SLIDE_IN, margin, y, rw, editH, hFont, data.bSlideIn, true);
+  trackRand(CreateCheck(hDlg, L"Slide in from edge", IDC_MSGOVERRIDE_SLIDE_IN, cx, y, cw, editH, hFont, data.bSlideIn, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Random duration (2\x2013" L"10 seconds)", IDC_MSGOVERRIDE_RAND_DURATION, margin, y, rw, editH, hFont, data.bRandomDuration, true);
+  trackRand(CreateCheck(hDlg, L"Random duration (2\x2013" L"10 seconds)", IDC_MSGOVERRIDE_RAND_DURATION, cx, y, cw, editH, hFont, data.bRandomDuration, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Drop shadow", IDC_MSGOVERRIDE_SHADOW, margin, y, rw, editH, hFont, data.bShadow, true);
+  trackRand(CreateCheck(hDlg, L"Drop shadow", IDC_MSGOVERRIDE_SHADOW, cx, y, cw, editH, hFont, data.bShadow, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Background box", IDC_MSGOVERRIDE_BOX, margin, y, rw, editH, hFont, data.bBox, true);
+  trackRand(CreateCheck(hDlg, L"Background box", IDC_MSGOVERRIDE_BOX, cx, y, cw, editH, hFont, data.bBox, true));
   y += dlgLineH + 8;
 
-  // --- Color Shifting section ---
-  CreateLabel(hDlg, L"Color Shifting:", margin, y, rw, smallH, hFont);
+  // Color Shifting section
+  trackRand(CreateLabel(hDlg, L"Color Shifting:", cx, y, cw, smallH, hFont));
   y += dlgLineH;
-  CreateCheck(hDlg, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, margin, y, rw, editH, hFont, data.bApplyHueShift, true);
+  trackRand(CreateCheck(hDlg, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, cx, y, cw, editH, hFont, data.bApplyHueShift, true));
   y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, margin, y, rw, editH, hFont, data.bRandomHue, true);
+  trackRand(CreateCheck(hDlg, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, cx, y, cw, editH, hFont, data.bRandomHue, true));
   y += dlgLineH + 8;
 
-  // --- Per-message section ---
-  CreateLabel(hDlg, L"Per-Message:", margin, y, rw, smallH, hFont);
+  // Per-message section
+  trackRand(CreateLabel(hDlg, L"Per-Message:", cx, y, cw, smallH, hFont));
   y += dlgLineH;
-  CreateCheck(hDlg, L"Ignore per-message randomization", IDC_MSGOVERRIDE_IGNORE_PERMSG, margin, y, rw, editH, hFont, data.bIgnorePerMsg, true);
-  y += dlgLineH + 12;
+  trackRand(CreateCheck(hDlg, L"Ignore per-message randomization", IDC_MSGOVERRIDE_IGNORE_PERMSG, cx, y, cw, editH, hFont, data.bIgnorePerMsg, true));
 
-  // OK / Cancel
+  // ═══ Animations Tab Controls ═══
+  {
+    int listY = cy;
+    int listH = tabH - (cy - tabY) - btnH - MulDiv(16, dlgLineH, 20);
+
+    data.hAnimList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,
+      WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+      cx, listY, cw, listH, hDlg,
+      (HMENU)(INT_PTR)IDC_MSGOVERRIDE_ANIM_LIST, GetModuleHandle(NULL), NULL);
+    if (data.hAnimList) {
+      if (hFont) SendMessage(data.hAnimList, WM_SETFONT, (WPARAM)hFont, TRUE);
+      ListView_SetExtendedListViewStyle(data.hAnimList, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+      // Dark theme for ListView
+      if (IsDarkTheme()) {
+        ListView_SetBkColor(data.hAnimList, m_colSettingsCtrlBg);
+        ListView_SetTextBkColor(data.hAnimList, m_colSettingsCtrlBg);
+        ListView_SetTextColor(data.hAnimList, m_colSettingsText);
+      }
+
+      // Columns
+      int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
+      int colName = MulDiv(cw, 40, 100);
+      int colDur = MulDiv(cw, 18, 100);
+      int colFx = cw - colName - colDur - scrollW;
+
+      LVCOLUMNW col = {};
+      col.mask = LVCF_TEXT | LVCF_WIDTH;
+      col.pszText = (LPWSTR)L"Name";
+      col.cx = colName;
+      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_NAME, (LPARAM)&col);
+      col.pszText = (LPWSTR)L"Duration";
+      col.cx = colDur;
+      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_DURATION, (LPARAM)&col);
+      col.pszText = (LPWSTR)L"Effects";
+      col.cx = colFx;
+      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_EFFECTS, (LPARAM)&col);
+
+      MsgOverridesRefreshAnimList(&data);
+    }
+
+    // Select All / Select None buttons below list
+    int abtnY = listY + listH + 4;
+    int abtnW = MulDiv(80, dlgLineH, 20);
+    data.hAnimAll = CreateBtn(hDlg, L"Select All", IDC_MSGOVERRIDE_ANIM_ALL, cx, abtnY, abtnW, btnH, hFont);
+    data.hAnimNone = CreateBtn(hDlg, L"Select None", IDC_MSGOVERRIDE_ANIM_NONE, cx + abtnW + 8, abtnY, abtnW, btnH, hFont);
+  }
+
+  // Show Randomize tab by default, hide Animations tab
+  MsgOverridesShowTab(&data, 0);
+
+  // ── OK / Cancel ──
+  int okY = tabY + tabH + MulDiv(8, dlgLineH, 20);
   int okBtnW = MulDiv(80, dlgLineH, 20);
-  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, okY, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, okY, okBtnW, btnH, hFont);
 
   // Show dialog and make parent modal
   ShowWindow(hDlg, SW_SHOW);
@@ -1875,6 +2110,12 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
     m_bMsgOverrideApplyHueShift = data.bApplyHueShift;
     m_bMsgOverrideRandomHue = data.bRandomHue;
     m_bMsgIgnorePerMsgRandom = data.bIgnorePerMsg;
+
+    // Apply animation profile enabled flags
+    for (int i = 0; i < data.nAnimCount; i++)
+      m_AnimProfiles[i].bEnabled = data.animEnabled[i];
+    WriteAnimProfiles();
+
     SaveMsgAutoplaySettings();
   }
 

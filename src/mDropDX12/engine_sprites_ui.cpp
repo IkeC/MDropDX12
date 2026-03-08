@@ -411,13 +411,6 @@ LRESULT SpritesWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
     return -1;
 }
 
-// ─── Resize ─────────────────────────────────────────────────────────────
-
-void SpritesWindow::OnResize() {
-    // Controls are fixed-position; only the ListView could resize but
-    // the rebuild-on-resize pattern handles this automatically.
-}
-
 // ─── Destroy ────────────────────────────────────────────────────────────
 
 void SpritesWindow::DoDestroy() {
