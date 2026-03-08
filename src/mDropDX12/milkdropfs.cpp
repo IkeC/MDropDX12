@@ -6565,8 +6565,8 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
             for (int k = 0; k < 4; k++) v3[k].y /= aspect;
       }
 
-      // finally, flip 'y' for annoying DirectX
-      //for (k=0; k<4; k++) v3[k].y *= -1.0f;
+      // DX12: flip Y — DX9 OrthoLH(2,-2) negated Y implicitly; DX12 passthrough VS does not
+      for (int k = 0; k < 4; k++) v3[k].y *= -1.0f;
 
       // set u,v coords
       {
