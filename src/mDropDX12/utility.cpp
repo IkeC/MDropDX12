@@ -820,14 +820,24 @@ void DebugLogInit(const wchar_t* baseDir) {
     // Write header
     SYSTEMTIME st;
     GetLocalTime(&st);
-    fwprintf(g_debugLogFile, L"=== MDropDX12 debug log started %04d-%02d-%02d %02d:%02d:%02d ===\n",
-             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    static const wchar_t* levelNames[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = (g_debugLogLevel >= 0 && g_debugLogLevel <= 4) ? g_debugLogLevel : 0;
+    fwprintf(g_debugLogFile, L"=== MDropDX12 debug log started %04d-%02d-%02d %02d:%02d:%02d (LogLevel=%d %s) ===\n",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, g_debugLogLevel, levelNames[lvl]);
     fflush(g_debugLogFile);
   }
 }
 
 void DebugLogSetLevel(int level) {
+  int old = g_debugLogLevel;
   g_debugLogLevel = level;
+  if (level != old && g_debugLogReady && g_debugLogFile) {
+    static const wchar_t* levelNames[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = (level >= 0 && level <= 4) ? level : 0;
+    DebugLogWFmt(LOG_ERROR, L"Log level changed: %d (%s) -> %d (%s)",
+                 old, levelNames[(old >= 0 && old <= 4) ? old : 0],
+                 level, levelNames[lvl]);
+  }
 }
 
 void DebugLogSetOutput(int output) {

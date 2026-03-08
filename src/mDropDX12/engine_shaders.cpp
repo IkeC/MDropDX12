@@ -692,7 +692,7 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   }
 
   if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob, szDiagName)) {
-    DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory FAILED", LOG_ERROR);
+    DebugLogWFmt(LOG_ERROR, L"DX12: RecompilePShader FAILED: %s", m_pState ? m_pState->m_szDesc : L"(unknown)");
     return false;
   }
 
@@ -1163,6 +1163,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   lstrcpy(&szShaderText[writePos], m_szShaderIncludeText);  // first, paste in the contents of 'inputs.fx' before the actual shader text.  Has 13's and 10's.
   writePos += m_nShaderIncludeTextLen;
 
+  // Strip include's sampler_rand declarations if the preset declares its own
+  // (presets use #define MYSAMP sampler_rand00 + sampler MYSAMP; which expands
+  //  to a second declaration, causing error X3003: redefinition)
+  for (int i = 0; i <= 3; i++) {
+    char sampName[20];
+    sprintf(sampName, "sampler_rand%02d", i);
+    if (strstr(szOrigShaderText, sampName)) {
+      char decl[40];
+      sprintf(decl, "sampler2D %s;", sampName);
+      char* pos = strstr(szShaderText, decl);
+      if (pos) memset(pos, ' ', strlen(decl));
+    }
+  }
+
   // paste in any custom #defines for this shader type
   if (shaderType == SHADER_WARP && szProfile[0] == 'p') {
     lstrcpy(&szShaderText[writePos], szWarpDefines);
@@ -1400,7 +1414,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         const char* errorMsg = (const char*)m_pShaderCompileErrors->GetBufferPointer();
         // Convert to wide string
         MultiByteToWideChar(CP_ACP, 0, errorMsg, -1, wideErrorMsg, _countof(wideErrorMsg));
-        dumpmsg(wideErrorMsg, LOG_WARN);
+        dumpmsg(wideErrorMsg, LOG_ERROR);
 
         // Write D3DCompile error to diagnostic file for Shader Import window
         if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
