@@ -15,6 +15,9 @@ copy *.ini %releasePath%
 copy *.txt %releasePath%
 copy %visualizerBuildPath%\MDropDX12.exe %releasePath%
 
+copy ..\LICENSE %releasePath%\LICENSE
+copy ..\THIRD-PARTY-LICENSES.txt %releasePath%\THIRD-PARTY-LICENSES.txt
+
 copy ..\resources\sprites\cover.png %releasePath%\resources\sprites\cover.png
 
 pause
