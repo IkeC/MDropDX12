@@ -280,7 +280,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         OPENFILENAMEW ofn = {};
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = hWnd;
-        ofn.lpstrFilter = L"Preset Files (*.milk;*.milk2)\0*.milk;*.milk2\0All Files (*.*)\0*.*\0";
+        ofn.lpstrFilter = L"Preset Files (*.milk;*.milk2;*.milk3)\0*.milk;*.milk2;*.milk3\0All Files (*.*)\0*.*\0";
         ofn.lpstrFile = szFile;
         ofn.nMaxFile = MAX_PATH;
         ofn.lpstrInitialDir = p->m_szPresetDir;

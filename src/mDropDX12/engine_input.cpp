@@ -350,11 +350,12 @@ static bool HasPresetExtension(const wchar_t* path) {
   size_t len = wcslen(path);
   if (len >= 5 && _wcsicmp(path + len - 5, L".milk") == 0) return true;
   if (len >= 6 && _wcsicmp(path + len - 6, L".milk2") == 0) return true;
+  if (len >= 6 && _wcsicmp(path + len - 6, L".milk3") == 0) return true;
   return false;
 }
 
 static void ScanFolderForPresets(const wchar_t* folderPath, std::vector<std::wstring>& out) {
-  const wchar_t* patterns[] = { L"\\*.milk", L"\\*.milk2" };
+  const wchar_t* patterns[] = { L"\\*.milk", L"\\*.milk2", L"\\*.milk3" };
   for (const wchar_t* pat : patterns) {
     wchar_t searchPath[MAX_PATH];
     lstrcpyW(searchPath, folderPath);

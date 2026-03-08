@@ -2851,7 +2851,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     if (argv) {
       for (int i = 1; i < argc; i++) {
         size_t len = wcslen(argv[i]);
-        if ((len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk2") == 0) ||
+        if ((len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk3") == 0) ||
+            (len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk2") == 0) ||
             (len >= 5 && _wcsicmp(argv[i] + len - 5, L".milk") == 0)) {
           wcscpy_s(g_szCmdLinePreset, MAX_PATH, argv[i]);
           break;

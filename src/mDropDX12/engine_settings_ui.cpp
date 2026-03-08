@@ -992,7 +992,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       OPENFILENAMEW ofn = {};
       ofn.lStructSize = sizeof(ofn);
       ofn.hwndOwner = hWnd;
-      ofn.lpstrFilter = L"Preset Files (*.milk;*.milk2)\0*.milk;*.milk2\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFilter = L"Preset Files (*.milk;*.milk2;*.milk3)\0*.milk;*.milk2;*.milk3\0All Files (*.*)\0*.*\0";
       ofn.lpstrFile = szFile;
       ofn.nMaxFile = MAX_PATH;
       ofn.lpstrInitialDir = p->m_szPresetDir;
@@ -1655,7 +1655,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       wchar_t cmdLine[MAX_PATH + 8];
       swprintf_s(cmdLine, L"\"%s\" \"%%1\"", exePath);
 
-      const wchar_t* extensions[] = { L".milk", L".milk2" };
+      const wchar_t* extensions[] = { L".milk", L".milk2", L".milk3" };
       bool ok = true;
 
       for (const wchar_t* ext : extensions) {
@@ -1700,7 +1700,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 
       if (ok)
-        p->AddNotification(L"File association registered for .milk and .milk2");
+        p->AddNotification(L"File association registered for .milk, .milk2, and .milk3");
       else
         p->AddError((wchar_t*)L"Failed to register file association", 3.5f, ERR_NOTIFY, true);
       return 0;
@@ -2853,7 +2853,7 @@ void SettingsWindow::DoBuildControls() {
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
   {
     int btnW = MulDiv(200, lineH, 26);
-    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Register .milk / .milk2 / .milk3", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
   }
   y += lineH + 2;
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));

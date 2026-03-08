@@ -1195,7 +1195,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
 
       switch (act) {
       case ButtonAction::LoadPreset:
-        ofn.lpstrFilter = L"Presets (*.milk;*.milk2)\0*.milk;*.milk2\0All Files\0*.*\0";
+        ofn.lpstrFilter = L"Presets (*.milk;*.milk2;*.milk3)\0*.milk;*.milk2;*.milk3\0All Files\0*.*\0";
         ofn.lpstrTitle = L"Select Preset";
         break;
       case ButtonAction::RunScript:
