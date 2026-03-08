@@ -58,9 +58,9 @@ void ErrorDisplayWindow::DoBuildControls() {
   HFONT hFont = m_hFont;
   HFONT hFontBold = m_hFontBold;
 
-  int lw = 110;  // label width
-  int ew = 60;   // edit width
-  int cw = 40;   // color edit width
+  int lw = 140;  // label width
+  int ew = 80;   // edit width
+  int cw = 50;   // color edit width
 
   // ═══ Normal Mode ═══
   TrackControl(CreateLabel(hw, L"Normal Mode", x, y, rw, lineH, hFontBold));
