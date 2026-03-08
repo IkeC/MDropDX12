@@ -1132,6 +1132,9 @@ void Engine::MyPreInitialize() {
 
   myfft.Init(576, MY_FFT_SAMPLES, -1);
   memset(&mysound, 0, sizeof(mysound));
+  memset(m_fFFTSmoothed, 0, sizeof(m_fFFTSmoothed));
+  memset(m_fFFTPeak, 0, sizeof(m_fFFTPeak));
+  memset(m_nFFTPeakHold, 0, sizeof(m_nFFTPeakHold));
 
   for (int i = 0; i < PRESET_HIST_LEN; i++)
     m_presetHistory[i] = L"";
@@ -1442,21 +1445,10 @@ void Engine::MyReadConfig() {
 
   // Error Display Settings
   m_ErrorDuration   = GetPrivateProfileFloatW(L"Milkwave", L"ErrorDuration", m_ErrorDuration, pIni);
-  m_ErrorFontSize   = GetPrivateProfileIntW(L"Milkwave", L"ErrorFontSize", m_ErrorFontSize, pIni);
-  m_ErrorCorner     = GetPrivateProfileIntW(L"Milkwave", L"ErrorCorner", m_ErrorCorner, pIni);
-  m_ErrorColorR     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorR", m_ErrorColorR, pIni);
-  m_ErrorColorG     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorG", m_ErrorColorG, pIni);
-  m_ErrorColorB     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorB", m_ErrorColorB, pIni);
-  GetPrivateProfileStringW(L"Milkwave", L"ErrorFontFace", m_szErrorFontFace, m_szErrorFontFace, _countof(m_szErrorFontFace), pIni);
-  m_LoudDuration    = GetPrivateProfileFloatW(L"Milkwave", L"LoudDuration", m_LoudDuration, pIni);
-  m_LoudFontSize    = GetPrivateProfileIntW(L"Milkwave", L"LoudFontSize", m_LoudFontSize, pIni);
-  m_LoudColorR1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorR1", m_LoudColorR1, pIni);
-  m_LoudColorG1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorG1", m_LoudColorG1, pIni);
-  m_LoudColorB1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorB1", m_LoudColorB1, pIni);
-  m_LoudColorR2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorR2", m_LoudColorR2, pIni);
-  m_LoudColorG2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorG2", m_LoudColorG2, pIni);
-  m_LoudColorB2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorB2", m_LoudColorB2, pIni);
-  m_LoudPulseSpeed  = GetPrivateProfileIntW(L"Milkwave", L"LoudPulseSpeed", m_LoudPulseSpeed, pIni);
+
+  // FFT EQ Smoothing
+  m_fFFTAttackGlobal = GetPrivateProfileFloatW(L"Milkwave", L"FFTAttack", m_fFFTAttackGlobal, pIni);
+  m_fFFTDecayGlobal  = GetPrivateProfileFloatW(L"Milkwave", L"FFTDecay", m_fFFTDecayGlobal, pIni);
 
   m_ShowLockSymbol = GetPrivateProfileBoolW(L"Milkwave", L"ShowLockSymbol", m_ShowLockSymbol, pIni);
   m_ShaderCaching = GetPrivateProfileBoolW(L"Milkwave", L"ShaderCaching", m_ShaderCaching, pIni);
@@ -1718,21 +1710,10 @@ void Engine::MyWriteConfig() {
 
   // Error Display Settings
   WritePrivateProfileFloatW(m_ErrorDuration, L"ErrorDuration", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_ErrorFontSize, L"ErrorFontSize", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_ErrorCorner, L"ErrorCorner", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_ErrorColorR, L"ErrorColorR", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_ErrorColorG, L"ErrorColorG", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_ErrorColorB, L"ErrorColorB", pIni, L"Milkwave");
-  WritePrivateProfileStringW(L"Milkwave", L"ErrorFontFace", m_szErrorFontFace, pIni);
-  WritePrivateProfileFloatW(m_LoudDuration, L"LoudDuration", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudFontSize, L"LoudFontSize", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorR1, L"LoudColorR1", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorG1, L"LoudColorG1", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorB1, L"LoudColorB1", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorR2, L"LoudColorR2", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorG2, L"LoudColorG2", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudColorB2, L"LoudColorB2", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_LoudPulseSpeed, L"LoudPulseSpeed", pIni, L"Milkwave");
+
+  // FFT EQ Smoothing
+  WritePrivateProfileFloatW(m_fFFTAttackGlobal, L"FFTAttack", pIni, L"Milkwave");
+  WritePrivateProfileFloatW(m_fFFTDecayGlobal,  L"FFTDecay",  pIni, L"Milkwave");
 
   WritePrivateProfileIntW(m_WindowBorderless, L"WindowBorderless", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_bAlwaysOnTop, L"WindowAlwaysOnTop", pIni, L"Milkwave");
@@ -2029,15 +2010,8 @@ int Engine::AllocateMyDX9Stuff() {
 
   int nNewCanvasStretch = (m_nCanvasStretch == 0) ? 100 : m_nCanvasStretch;
 
-  DWORD PSVersion = GetCaps()->PixelShaderVersion & 0xFFFF;  // 0x0300, etc.
-  if (PSVersion >= 0x0300)
-    m_nMaxPSVersion_DX9 = MD2_PS_3_0;
-  else if (PSVersion > 0x0200)
-    m_nMaxPSVersion_DX9 = MD2_PS_2_X;
-  else if (PSVersion >= 0x0200)
-    m_nMaxPSVersion_DX9 = MD2_PS_2_0;
-  else
-    m_nMaxPSVersion_DX9 = MD2_PS_NONE;
+  // DX12 always supports SM3.0+ (DX9 caps struct may be uninitialized/garbage)
+  m_nMaxPSVersion_DX9 = MD2_PS_3_0;
 
   if (m_nMaxPSVersion_ConfigPanel == -1)
     m_nMaxPSVersion = m_nMaxPSVersion_DX9;
@@ -4177,25 +4151,64 @@ void Engine::UpdateAudioTexture()
     HRESULT hr = m_audioUploadBuffer->Map(0, &readRange, (void**)&mapped);
     if (FAILED(hr)) return;
 
-    // Row 0: FFT spectrum (512 bins) — normalize with sqrt + scale to match Shadertoy
+    // FFT EQ smoothing + peak hold (always active for get_fft()/get_fft_peak() shader functions)
     {
-        float* row0 = (float*)mapped;
-        for (UINT i = 0; i < W; i++) {
-            // Average left + right channels, apply sqrt for perceptual scaling
-            float mag = (mysound.fSpecLeft[i] + mysound.fSpecRight[i]) * 0.5f;
-            // Shadertoy-style scaling: sqrt(magnitude) * scale, clamped 0-1
-            row0[i] = min(1.0f, sqrtf(mag) * 4.0f);
+        float attack = m_fFFTAttackGlobal;
+        float decay  = m_fFFTDecayGlobal;
+        const float kNoiseGate    = 1e-4f;
+        const float kVisibleFloor = 5e-4f;
+
+        for (UINT fi = 0; fi < W; fi++) {
+            float mono = (mysound.fSpecLeft[fi] + mysound.fSpecRight[fi]) * 0.5f;
+            // Preamp: raw FFT values in MDropDX12 are ~0.01-0.5 range;
+            // shader get_fft() applies sqrt(), so we want texture values ~0.01-1.0
+            mono *= 2.0f;
+
+            if (mono < kNoiseGate) mono = 0.0f;
+
+            // Low-frequency rolloff (bins 0-4)
+            if (fi < 5) {
+                float t = fi / 5.0f;
+                mono *= 0.15f + 0.85f * t;
+            }
+
+            // Attack/decay smoothing
+            if (mono > m_fFFTSmoothed[fi])
+                m_fFFTSmoothed[fi] += (mono - m_fFFTSmoothed[fi]) * attack;
+            else {
+                float decayFactor = (1.0f - decay) * (1.0f - decay);
+                m_fFFTSmoothed[fi] += (mono - m_fFFTSmoothed[fi]) * decayFactor;
+            }
+
+            if (m_fFFTSmoothed[fi] < kVisibleFloor)
+                m_fFFTSmoothed[fi] = 0.0f;
+        }
+
+        // Peak hold: hold 30 frames then 0.97x decay
+        for (UINT fi = 0; fi < W; fi++) {
+            if (m_fFFTSmoothed[fi] >= m_fFFTPeak[fi]) {
+                m_fFFTPeak[fi] = m_fFFTSmoothed[fi];
+                m_nFFTPeakHold[fi] = 30;
+            } else if (m_nFFTPeakHold[fi] > 0) {
+                m_nFFTPeakHold[fi]--;
+            } else {
+                m_fFFTPeak[fi] *= 0.97f;
+                if (m_fFFTPeak[fi] < kVisibleFloor)
+                    m_fFFTPeak[fi] = 0.0f;
+            }
         }
     }
 
-    // Row 1: PCM waveform (512 samples from 576) — normalize -1..1 → 0..1
+    // Row 0: smoothed FFT spectrum (linear magnitude — get_fft() applies sqrt in shader)
+    {
+        float* row0 = (float*)mapped;
+        memcpy(row0, m_fFFTSmoothed, W * sizeof(float));
+    }
+
+    // Row 1: peak hold values
     {
         float* row1 = (float*)(mapped + alignedRowPitch);
-        for (UINT i = 0; i < W; i++) {
-            // Average left + right channels, normalize: waveform is -128..128 range
-            float sample = (mysound.fWave[0][i] + mysound.fWave[1][i]) * 0.5f;
-            row1[i] = sample / 256.0f + 0.5f; // map to 0..1
-        }
+        memcpy(row1, m_fFFTPeak, W * sizeof(float));
     }
 
     m_audioUploadBuffer->Unmap(0, nullptr);

@@ -385,7 +385,6 @@
     <ClCompile Include="engine_rendering.cpp" />
     <ClCompile Include="engine_settings_ui.cpp" />
     <ClCompile Include="engine_displays_ui.cpp" />
-    <ClCompile Include="engine_error_display_ui.cpp" />
     <ClCompile Include="engine_video_effects_ui.cpp" />
     <ClCompile Include="engine_vfx_profiles_ui.cpp" />
     <ClCompile Include="engine_workspace_layout_ui.cpp" />

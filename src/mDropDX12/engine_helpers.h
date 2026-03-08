@@ -846,31 +846,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_OPEN_WORKSPACE_LAYOUT  9136
 
 // Settings About tab — error display settings button
-#define IDC_MW_ERROR_DISPLAY_SETTINGS 9137
-
-// Error Display Settings dialog controls
-#define IDC_ERRDLG_PIN             9500
-#define IDC_ERRDLG_FONT_PLUS      9501
-#define IDC_ERRDLG_FONT_MINUS     9502
-#define IDC_ERRDLG_NORM_DURATION   9503
-#define IDC_ERRDLG_NORM_FONTFACE   9504
-#define IDC_ERRDLG_NORM_FONTSIZE   9505
-#define IDC_ERRDLG_NORM_CORNER     9506  // Combo box
-#define IDC_ERRDLG_NORM_R          9507
-#define IDC_ERRDLG_NORM_G          9508
-#define IDC_ERRDLG_NORM_B          9509
-#define IDC_ERRDLG_NORM_TEST       9510
-#define IDC_ERRDLG_LOUD_DURATION   9511
-#define IDC_ERRDLG_LOUD_FONTSIZE   9512
-#define IDC_ERRDLG_LOUD_R1         9513
-#define IDC_ERRDLG_LOUD_G1         9514
-#define IDC_ERRDLG_LOUD_B1         9515
-#define IDC_ERRDLG_LOUD_R2         9516
-#define IDC_ERRDLG_LOUD_G2         9517
-#define IDC_ERRDLG_LOUD_B2         9518
-#define IDC_ERRDLG_LOUD_PULSE      9519
-#define IDC_ERRDLG_LOUD_TEST       9520
-#define IDC_ERRDLG_RESET           9521
+#define IDC_MW_ERROR_DISPLAY_SETTINGS 9137  // Error Duration edit on About tab
 
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080

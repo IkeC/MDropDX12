@@ -1259,9 +1259,15 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // About tab: Error Display Settings
-    if (id == IDC_MW_ERROR_DISPLAY_SETTINGS && code == BN_CLICKED) {
-      m_pEngine->OpenErrorDisplayWindow();
+    // About tab: Error Duration edit
+    if (id == IDC_MW_ERROR_DISPLAY_SETTINGS && code == EN_KILLFOCUS) {
+      wchar_t buf[32];
+      GetDlgItemTextW(hWnd, IDC_MW_ERROR_DISPLAY_SETTINGS, buf, 32);
+      float val = (float)_wtof(buf);
+      if (val < 0.5f) val = 0.5f;
+      if (val > 120.0f) val = 120.0f;
+      m_pEngine->m_ErrorDuration = val;
+      m_pEngine->MyWriteConfig();
       return 0;
     }
 
@@ -2461,14 +2467,15 @@ void SettingsWindow::DoBuildControls() {
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Tile tool windows across screen with render preview in corner)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + 8;
 
-  // Error Display Settings button
-  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Error Display:", x, y, lw, lineH, hFont, false));
+  // Error Duration
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Error Duration (s):", x, y, lw, lineH, hFont, false));
   {
-    int btnW = MulDiv(200, lineH, 26);
-    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Error Display Settings...", IDC_MW_ERROR_DISPLAY_SETTINGS, x + lw + 4, y, btnW, lineH, hFont, false));
+    int ew = 60;
+    PAGE_CTRL(SP_ABOUT, CreateEdit(hw, L"", IDC_MW_ERROR_DISPLAY_SETTINGS, x + lw + 4, y, ew, lineH, hFont, false));
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%.1f", m_pEngine->m_ErrorDuration);
+    SetDlgItemTextW(hw, IDC_MW_ERROR_DISPLAY_SETTINGS, buf);
   }
-  y += lineH + 2;
-  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Configure error message appearance, duration, and LOUD mode)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
   // ===== Remote tab (page 5) =====
   y = tabTop + 10;
