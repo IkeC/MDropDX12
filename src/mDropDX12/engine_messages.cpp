@@ -742,7 +742,7 @@ void Engine::LoadMsgAutoplaySettings() {
   m_bMsgSequential = GetPrivateProfileIntW(L"Milkwave", L"MsgSequential", 0, pIni) != 0;
   m_fMsgAutoplayInterval = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayInterval", 30.0f, pIni);
   m_fMsgAutoplayJitter = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayJitter", 5.0f, pIni);
-  m_bMessageAutoSize = GetPrivateProfileIntW(L"Milkwave", L"MessageAutoSize", 0, pIni) != 0;
+  m_bMessageAutoSize = GetPrivateProfileIntW(L"Milkwave", L"MessageAutoSize", 1, pIni) != 0;
 
   // Load override settings
   m_bMsgOverrideRandomFont = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomFont", 0, pIni) != 0;

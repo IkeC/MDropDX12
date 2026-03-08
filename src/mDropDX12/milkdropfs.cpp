@@ -308,7 +308,12 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, flags);
 
       // Global autosize: compute fFontSize so text fills ~90% of screen width
-      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
+      // Skip when slide-in animation is active (text enters from offscreen)
+      bool bSlideIn = (m_supertexts[supertextIndex].fStartX != -100.0f &&
+                       m_supertexts[supertextIndex].fStartX != m_supertexts[supertextIndex].fX) ||
+                      (m_supertexts[supertextIndex].fStartY != -100.0f &&
+                       m_supertexts[supertextIndex].fStartY != m_supertexts[supertextIndex].fY);
+      if (m_bMessageAutoSize && !bSlideIn && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
         const float kFill = 0.9f;
         float ratio = kFill * (float)m_supertexts[supertextIndex].nFontSizeUsed
                       / ((float)m_nTexSizeX / 1024.0f * 100.0f);
@@ -323,29 +328,73 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
     }
   }
   else {
-    // Song title: use pre-created title font
+    // Song title: shrink font to fit, fall back to "..." truncation at smallest size
     wchar_t* str = m_supertexts[supertextIndex].szTextW;
 
     if (m_gdi_title_font_doublesize) {
+      // First try the pre-created font at normal size
       HGDIOBJ oldFont = SelectObject(m_titleDC, m_gdi_title_font_doublesize);
+      RECT temp = rect;
+      int h = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
+      SelectObject(m_titleDC, oldFont);
 
-      // Clip text if too wide
-      int h = 0;
-      for (int it = 0; it < 6; it++) {
-        if (!str[0]) break;
-        RECT temp = rect;
-        h = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
-        if (temp.right - temp.left <= m_nTitleTexSizeX)
-          break;
+      HFONT hShrunkFont = NULL;
+      if (temp.right - temp.left > m_nTitleTexSizeX) {
+        // Text too wide — binary search for a smaller font size
+        int nominalSize = m_fontinfo[SONGTITLE_FONT].nSize * m_nTitleTexSizeX / 256;
+        if (nominalSize < 6) nominalSize = 6;
+        int lo = 6, hi = nominalSize;
+        int bestSize = lo;
 
+        while (lo <= hi) {
+          int mid = (lo + hi) / 2;
+          HFONT testFont = CreateFontW(mid, 0, 0, 0,
+            m_fontinfo[SONGTITLE_FONT].bBold ? 900 : 400,
+            m_fontinfo[SONGTITLE_FONT].bItalic, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
+            DEFAULT_PITCH, m_fontinfo[SONGTITLE_FONT].szFace);
+          if (!testFont) { hi = mid - 1; continue; }
+
+          HGDIOBJ prev = SelectObject(m_titleDC, testFont);
+          temp = rect;
+          ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
+          SelectObject(m_titleDC, prev);
+
+          if (temp.right - temp.left <= m_nTitleTexSizeX) {
+            bestSize = mid;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
+          DeleteObject(testFont);
+        }
+
+        hShrunkFont = CreateFontW(bestSize, 0, 0, 0,
+          m_fontinfo[SONGTITLE_FONT].bBold ? 900 : 400,
+          m_fontinfo[SONGTITLE_FONT].bItalic, FALSE, FALSE,
+          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+          m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
+          DEFAULT_PITCH, m_fontinfo[SONGTITLE_FONT].szFace);
+      }
+
+      HFONT hUseFont = hShrunkFont ? hShrunkFont : m_gdi_title_font_doublesize;
+      oldFont = SelectObject(m_titleDC, hUseFont);
+
+      // Measure with the chosen font
+      temp = rect;
+      h = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
+
+      // Last resort: truncate with "..." if still too wide at smallest size
+      if (temp.right - temp.left > m_nTitleTexSizeX) {
         int len = (int)wcslen(str);
         float fPercentToKeep = 0.91f * m_nTitleTexSizeX / (float)(temp.right - temp.left);
         if (len > 8)
           lstrcpyW(&str[(int)(len * fPercentToKeep)], L"...");
-        break;
+        temp = rect;
+        h = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
       }
 
-      RECT temp;
       temp.left = 0;
       temp.right = m_nTitleTexSizeX;
       temp.top = m_nTitleTexSizeY / 2 - h / 2;
@@ -354,6 +403,7 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CENTER);
 
       SelectObject(m_titleDC, oldFont);
+      if (hShrunkFont) DeleteObject(hShrunkFont);
     } else {
       ret = false;
     }

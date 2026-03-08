@@ -1370,7 +1370,7 @@ public:
   bool    m_bMsgSequential = false;           // true=sequential, false=random
   float   m_fMsgAutoplayInterval = 30.0f;     // base seconds between messages
   float   m_fMsgAutoplayJitter = 5.0f;        // +/- randomness (seconds)
-  bool    m_bMessageAutoSize = false;         // global: auto-fit messages to screen width
+  bool    m_bMessageAutoSize = true;          // global: auto-fit messages to screen width
   float   m_fNextAutoMsgTime = -1.0f;         // scheduled time for next auto message
   int     m_nNextSequentialMsg = 0;           // index into playback order
   int     m_nMsgAutoplayOrder[MAX_CUSTOM_MESSAGES]; // playback order array

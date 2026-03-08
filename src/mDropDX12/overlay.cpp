@@ -380,10 +380,31 @@ void COverlayThread::RenderOverlayToDIB() {
 
     // --- HUD: Preset name (top-right, above FPS) ---
     if (m_currentData.bShowPresetName && m_currentData.szPresetName[0] && m_hHUDFont) {
+        // Measure at normal HUD font size; shrink if too wide for available area
+        int availW = (int)w - margin * 2;
+        HFONT hUseFont = m_hHUDFont;
+        HFONT hShrunk = NULL;
+
         HFONT hPrev = (HFONT)SelectObject(m_hMemDC, m_hHUDFont);
+        RECT rCalc = { 0, 0, availW, 2048 };
+        ::DrawTextW(m_hMemDC, m_currentData.szPresetName, -1, &rCalc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+        if (rCalc.right - rCalc.left > availW && m_hudFontH > 10) {
+            // Compute scaled font height to fit
+            int shrunkH = (int)(m_hudFontH * (float)availW / (float)(rCalc.right - rCalc.left));
+            if (shrunkH < 10) shrunkH = 10;
+            hShrunk = CreateFontW(-shrunkH, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            if (hShrunk) {
+                hUseFont = hShrunk;
+                SelectObject(m_hMemDC, hUseFont);
+            }
+        }
+
         DrawShadowText(m_currentData.szPresetName, true, margin, &upperRightY,
                        (int)w - margin, false, m_currentData.presetNameColor);
         SelectObject(m_hMemDC, hPrev);
+        if (hShrunk) DeleteObject(hShrunk);
     }
 
     // --- HUD: Rating (top-right, below preset name, above FPS) ---
