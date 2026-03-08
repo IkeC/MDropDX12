@@ -43,7 +43,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.4)
+## Key Features (current: v1.5)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
@@ -68,7 +68,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Spout video input mixing (background/overlay compositing)
 - Idle timer / screensaver mode
 - Drag-and-drop presets, folders, and textures
-- Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via IPC)
+- Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via Named Pipe)
+- Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) — PID-based discovery, duplex message-mode, no hidden window
 - File association registration for .milk/.milk2 (Settings → About, HKCU, no admin)
 - Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_importing.md`)
 - Preset filter by type (All / .milk / .milk2) in preset browser; random/sequential selection respects filter

@@ -1,5 +1,32 @@
 # MDropDX12 Changelog
 
+## v1.5.0 (2026-03-07)
+
+### Named Pipe IPC
+
+- Replaced WM_COPYDATA / hidden window IPC with Named Pipes (`\\.\pipe\Milkwave_<PID>`)
+- PID-based discovery eliminates fragile window-title matching — no more EnumWindows or FindWindow
+- Removed hidden 1x1 IPC window (IPCWindowThread, IPCWindowProc, g_szIPCWindowTitle)
+- Duplex message-mode pipe: visualizer can send messages back to Remote
+- Non-blocking outgoing messages via pipe write thread (replaces fire-and-forget SendMessage worker)
+- Second-instance forwarding rewritten: uses CreateToolhelp32Snapshot to find running instances, sends preset path over pipe
+- New files: `pipe_server.h`, `pipe_server.cpp` — self-contained PipeServer class with listen/read/write threads
+- Signal messages (`SIGNAL|NAME=VALUE`) replace PostMessage-based WM_USER+N signals
+- All existing text message formats unchanged (MSG|, PRESET=, WAVE|, STATE, SPOUT_SENDER=, etc.)
+- Configurable WM base offset via `PipeServer::Start(hwnd, wmIPCMessage, wmSignalBase)` for cross-project portability
+- Settings UI (Remote tab) updated to show pipe name and connection status instead of window titles
+- Removed: IPC worker thread, IPC hidden window, WM_MW_RESTART_IPC, g_szIPCWindowTitle, StartIPCThread/StopIPCThread
+
+### Animated Song Titles
+
+- DX12 warped text animation for song title rendering with selectable track info sources
+
+### Code
+
+- New files: `pipe_server.h`, `pipe_server.cpp` (Named Pipe IPC server)
+- New file: `engine_textanim_ui.cpp` (animated song title UI)
+- Removed ~200 lines of IPC window thread and worker thread code from App.cpp and engine_presets.cpp
+
 ## v1.4.3 (2026-03-07)
 
 ### ToolWindow Improvements

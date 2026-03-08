@@ -245,10 +245,9 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 ### Remote Tab
 
-- **Window Title / Remote Title**: Configure titles for IPC discovery by Milkwave Remote
-- **Apply and Restart IPC**: Restart the IPC server with new titles
+- **Pipe Name**: Shows the Named Pipe endpoint (`\\.\pipe\Milkwave_<PID>`) used for IPC
+- **Connection Status**: Shows whether Milkwave Remote is connected
 - **Save Screenshot**: Save current frame with file dialog
-- **Active IPC Windows**: Connected Remote clients
 - **Last Message**: Most recent IPC message received
 
 ### Script Tab
@@ -320,7 +319,7 @@ Presets are `.milk` or `.milk2` files that define visual behavior through per-fr
 - Type a letter to jump to presets starting with that letter
 - Navigate into subdirectories; BACKSPACE to go up one level
 - **Drag and drop** a .milk or .milk2 file from Explorer onto the window
-- **Double-click** a .milk or .milk2 file in Explorer to load it directly (if MDropDX12 is already running, the preset is forwarded to the existing instance via IPC)
+- **Double-click** a .milk or .milk2 file in Explorer to load it directly (if MDropDX12 is already running, the preset is forwarded to the existing instance via Named Pipe)
 - **File association**: Use Settings → About → "Register .milk / .milk2" to enable double-click loading (no admin required)
 
 ### Preset Transitions
@@ -348,7 +347,7 @@ MDropDX12 can display current track information (artist, title, album) and album
 ### Sources
 
 - **SMTC** (default): Windows System Media Transport Controls. Automatically detects track info from Spotify, YouTube (in browsers), Windows Media Player, and any app that reports to Windows media sessions. No configuration needed.
-- **IPC**: Receives track info from Milkwave Remote via the WM_COPYDATA protocol.
+- **IPC**: Receives track info from Milkwave Remote via Named Pipe.
 - **Window Title**: Parses track info from any application's window title using configurable regex patterns. Useful for media players that don't report to SMTC (internet radio apps, niche players, etc.).
 
 ### Window Title Profiles
@@ -574,7 +573,7 @@ There are three ways to toggle Spout output:
 
 - **Keyboard**: Press **F10** or **CTRL+Z**
 - **Settings UI**: Check **Spout Output** in Settings > System tab
-- **IPC command**: Send `SPOUT_ACTIVE=1` or `SPOUT_ACTIVE=0` via WM_COPYDATA
+- **IPC command**: Send `SPOUT_ACTIVE=1` or `SPOUT_ACTIVE=0` via Named Pipe
 
 A notification appears on screen confirming the state change.
 
@@ -618,7 +617,7 @@ nSpoutFixedHeight=720
 
 ### IPC Commands for Spout
 
-When controlled via Milkwave Remote or other WM_COPYDATA senders:
+When controlled via Milkwave Remote or other Named Pipe clients:
 
 | Command | Description |
 |---------|-------------|
@@ -699,7 +698,7 @@ Video input settings are saved to the `[SpoutInput]` section of `settings.ini`. 
 
 ### Hue / Saturation / Brightness
 
-Adjust the overall color of the visualizer output via Settings > Colors tab. The hue shift rotates all colors around the color wheel. These can also be controlled via the Milkwave Remote IPC protocol.
+Adjust the overall color of the visualizer output via Settings > Colors tab. The hue shift rotates all colors around the color wheel. These can also be controlled via Milkwave Remote.
 
 ### Auto Hue Cycling
 
@@ -719,7 +718,7 @@ Cycle through post-processing effects applied after the comp shader:
 
 - **CTRL+X**: Auto-saves a PNG screenshot to the `capture/` subdirectory with filename format `YYYYMMDD-HHMMSS-presetname.png`
 - **Settings > Remote tab > Save Screenshot**: Opens a file dialog to choose save location
-- **IPC**: The `CAPTURE` command triggers a screenshot from Milkwave Remote
+- **IPC**: The `CAPTURE` command triggers a screenshot via Milkwave Remote
 
 ## Preset Variables
 
@@ -828,11 +827,11 @@ Some patterns may need manual correction after conversion:
 
 ## Remote Control (Milkwave Remote)
 
-MDropDX12 is compatible with [Milkwave Remote](https://github.com/IkeC/Milkwave), a separate control application that communicates via the Windows `WM_COPYDATA` IPC protocol.
+MDropDX12 is compatible with [Milkwave Remote](https://github.com/IkeC/Milkwave), a separate control application that communicates via Named Pipes (`\\.\pipe\Milkwave_<PID>`).
 
-The Remote discovers MDropDX12 by matching the window title (configurable in Settings > Remote tab). Once connected, the Remote can control presets, messages, sprites, audio settings, Spout output, color shifting, and more.
+The Remote auto-discovers MDropDX12 by enumerating active Milkwave pipes and connecting by PID — no window title configuration needed. Once connected, the Remote can control presets, messages, sprites, audio settings, Spout output, color shifting, and more.
 
-32 of 34 Milkwave IPC commands are supported, including:
+Supported IPC commands include:
 
 - `MSG|` — Text messages with full formatting
 - `PRESET=` — Load preset by path

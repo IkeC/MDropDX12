@@ -1,6 +1,8 @@
-﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
+# MDropDX12
 
-**Current version: 1.4.2** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via Named Pipe IPC for extended control (messaging, wave manipulation, screenshots, and more).
+
+**Current version: 1.5** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -9,14 +11,13 @@
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
 * In-app Settings window (F8) with tri-mode theme (Dark / Light / Follow System), 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
 * Preset browser with type filtering (.milk/.milk2), tagging, and subdirectory navigation
-* Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via IPC)
-* One-click file association registration for .milk and .milk2 (Settings → About, no admin required)
-* Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
+* Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via Named Pipe IPC)
+* One-click file association registration for .milk and .milk2 (Settings > About, no admin required)
+* Named Pipe IPC — PID-based discovery, duplex message-mode communication, no hidden windows required
 * Configurable hotkeys with per-binding local/global scope, dynamic Script/Launch entries (Hotkeys window, Ctrl+F7)
 * Native MIDI input with 50 mapping slots, learn mode, button/knob actions (MIDI window from Settings)
 * Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
 * Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs
-* Configurable window titles for Remote discovery (Settings → Remote tab)
 * Save Screenshot from Settings UI with file dialog, or via IPC `CAPTURE` command
 * TDR recovery and GPU protection with automatic device restart
 * Async shader compilation — non-blocking preset transitions, no render stalls
@@ -30,7 +31,7 @@
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Self-bootstrapping exe — no bundled presets required (see [Resources Guide](docs/Resources.md) for preset collections)
 * Native webcam and video file input mixing (background/overlay compositing with luma key)
-* Shadertoy import: GLSL→HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
+* Shadertoy import: GLSL->HLSL converter with `.milk3` JSON format, multi-pass rendering (Buffer A/B, Image, Common), SM5.0 shaders
 * Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
 * Video Effects window with transform, color, and audio-reactive controls; VFX JSON profiles
 * Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
@@ -132,7 +133,7 @@
 
 | Key | Action | Status |
 | --- | ------ | ------ |
-| Ctrl+X | Save screenshot to /capture folder (also via Settings → Remote or IPC) | ✅ |
+| Ctrl+X | Save screenshot to /capture folder (also via Settings > Remote or IPC) | ✅ |
 | T/t | Song title animation | ✅ |
 | Ctrl+T | Kill custom messages/song titles | ✅ |
 
@@ -164,11 +165,11 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 * Windows 10 64-bit or higher (Windows 11 recommended)
 * DirectX 12 compatible GPU
 * No additional runtime libraries required (VC++ runtime is statically linked)
-* [Milkwave](https://github.com/IkeC/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
+* [Milkwave](https://github.com/IkeC/Milkwave) (optional — Remote auto-discovers visualizers via Named Pipe)
 
 ## Installation
 
-Download `MDropDX12-1.4.2-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
+Download `MDropDX12-1.5.0-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
 
 See the [Installation Guide](docs/Install.md) for detailed instructions, directory layout, configuration files, and troubleshooting.
 
