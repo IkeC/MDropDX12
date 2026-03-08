@@ -596,9 +596,9 @@ void TextAnimWindow::DoBuildControls()
     TrackControl(CreateBtn(hw, L"Color...", IDC_MW_TEXTANIM_CHOOSE_COLOR, cx, y, btnW, lineH, hFont));
     cx += btnW + 4;
 
-    // Color swatch (owner-drawn static)
+    // Color swatch (owner-drawn static, SS_NOTIFY for click)
     HWND hSwatch = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
-      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
       cx, y, swatchW, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_TEXTANIM_COLOR_SWATCH, GetModuleHandle(NULL), NULL);
     TrackControl(hSwatch);
@@ -686,7 +686,7 @@ void TextAnimWindow::DoBuildControls()
     cx += btnW + 4;
 
     HWND hBoxSwatch = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
-      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
       cx, y, swatchW, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_TEXTANIM_BOXCOL_SWATCH, GetModuleHandle(NULL), NULL);
     TrackControl(hBoxSwatch);
@@ -910,6 +910,9 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     }
     return 0;
 
+  case IDC_MW_TEXTANIM_COLOR_SWATCH:
+    if (code != STN_CLICKED) return -1;
+    // fall through to color picker
   case IDC_MW_TEXTANIM_CHOOSE_COLOR:
     if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
       td_anim_profile& prof = p->m_AnimProfiles[m_nSelectedRow];
@@ -928,6 +931,9 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     }
     return 0;
 
+  case IDC_MW_TEXTANIM_BOXCOL_SWATCH:
+    if (code != STN_CLICKED) return -1;
+    // fall through to box color picker
   case IDC_MW_TEXTANIM_CHOOSE_BOXCOL:
     if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
       td_anim_profile& prof = p->m_AnimProfiles[m_nSelectedRow];
