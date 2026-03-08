@@ -36,7 +36,14 @@ void ToggleWindowOpacity(HWND hwnd, bool bDown);
 
 #define HK_DEF(idx, _id, _mod, _vk, _scope, _cat, _action, _ini) \
     m_hotkeys[idx] = { _id, _mod, _vk, _scope, _cat, \
-                        _action, _ini, _mod, _vk, _scope }
+                        _action, _ini, _mod, _vk, _scope, \
+                        0, 0, 0, 0 }
+
+// Variant with both local and global default bindings
+#define HK_DEF2(idx, _id, _mod, _vk, _gmod, _gvk, _cat, _action, _ini) \
+    m_hotkeys[idx] = { _id, _mod, _vk, HKSCOPE_LOCAL, _cat, \
+                        _action, _ini, _mod, _vk, HKSCOPE_LOCAL, \
+                        _gmod, _gvk, _gmod, _gvk }
 
 void Engine::ResetHotkeyDefaults()
 {
@@ -157,6 +164,7 @@ void Engine::ResetHotkeyDefaults()
 }
 
 #undef HK_DEF
+#undef HK_DEF2
 
 void Engine::LoadHotkeySettings()
 {
@@ -169,7 +177,8 @@ void Engine::LoadHotkeySettings()
     // 0 (absent) = pre-expansion (only 10 hotkeys)
     // 2 = full reassignable hotkeys (fixed Script/Launch slots)
     // 3 = dynamic user hotkeys (Script/Launch replaced by vector)
-    static constexpr int HOTKEY_INI_VERSION = 3;
+    // 4 = dual local/global bindings per action
+    static constexpr int HOTKEY_INI_VERSION = 4;
     int iniVersion = GetPrivateProfileIntW(L"Hotkeys", L"Version", 0, pIni);
 
     // Migration: if old "Enabled" key exists, migrate scope for configured bindings
@@ -186,6 +195,28 @@ void Engine::LoadHotkeySettings()
             m_hotkeys[i].modifiers = (UINT)GetPrivateProfileIntW(L"Hotkeys", modKey, (int)m_hotkeys[i].modifiers, pIni);
             m_hotkeys[i].vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", vkKey, (int)m_hotkeys[i].vk, pIni);
             m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
+
+            if (iniVersion >= 4) {
+                // Version 4+: read global binding
+                wchar_t gModKey[128], gVkKey[128];
+                swprintf(gModKey, 128, L"%s_GlobalMod", m_hotkeys[i].szIniKey);
+                swprintf(gVkKey, 128, L"%s_GlobalVK", m_hotkeys[i].szIniKey);
+                m_hotkeys[i].globalMod = (UINT)GetPrivateProfileIntW(L"Hotkeys", gModKey, (int)m_hotkeys[i].globalMod, pIni);
+                m_hotkeys[i].globalVK = (UINT)GetPrivateProfileIntW(L"Hotkeys", gVkKey, (int)m_hotkeys[i].globalVK, pIni);
+            }
+        }
+
+        // Migration from version 2/3: if scope was GLOBAL, move binding to global slot
+        if (iniVersion < 4) {
+            for (int i = 0; i < NUM_HOTKEYS; i++) {
+                if (m_hotkeys[i].scope == HKSCOPE_GLOBAL && m_hotkeys[i].vk != 0) {
+                    m_hotkeys[i].globalMod = m_hotkeys[i].modifiers;
+                    m_hotkeys[i].globalVK = m_hotkeys[i].vk;
+                    m_hotkeys[i].modifiers = m_hotkeys[i].defaultMod;
+                    m_hotkeys[i].vk = m_hotkeys[i].defaultVK;
+                    m_hotkeys[i].scope = HKSCOPE_LOCAL;
+                }
+            }
         }
     } else {
         // Pre-expansion INI: only load bindings that existed in the old system
@@ -300,7 +331,7 @@ void Engine::SaveHotkeySettings()
     wchar_t buf[64];
 
     // Write version marker
-    WritePrivateProfileStringW(L"Hotkeys", L"Version", L"3", pIni);
+    WritePrivateProfileStringW(L"Hotkeys", L"Version", L"4", pIni);
 
     // Save built-in hotkey bindings
     for (int i = 0; i < NUM_HOTKEYS; i++) {
@@ -315,6 +346,15 @@ void Engine::SaveHotkeySettings()
         WritePrivateProfileStringW(L"Hotkeys", vkKey, buf, pIni);
         swprintf(buf, 64, L"%d", (int)m_hotkeys[i].scope);
         WritePrivateProfileStringW(L"Hotkeys", scopeKey, buf, pIni);
+
+        // Global binding
+        wchar_t gModKey[128], gVkKey[128];
+        swprintf(gModKey, 128, L"%s_GlobalMod", m_hotkeys[i].szIniKey);
+        swprintf(gVkKey, 128, L"%s_GlobalVK", m_hotkeys[i].szIniKey);
+        swprintf(buf, 64, L"%u", m_hotkeys[i].globalMod);
+        WritePrivateProfileStringW(L"Hotkeys", gModKey, buf, pIni);
+        swprintf(buf, 64, L"%u", m_hotkeys[i].globalVK);
+        WritePrivateProfileStringW(L"Hotkeys", gVkKey, buf, pIni);
     }
 
     // Save dynamic user hotkeys
@@ -377,8 +417,8 @@ void Engine::RegisterGlobalHotkeys(HWND hwnd)
 {
     if (!hwnd) return;
     for (int i = 0; i < NUM_HOTKEYS; i++) {
-        if (m_hotkeys[i].vk != 0 && m_hotkeys[i].scope == HKSCOPE_GLOBAL)
-            RegisterHotKey(hwnd, m_hotkeys[i].id, m_hotkeys[i].modifiers | MOD_NOREPEAT, m_hotkeys[i].vk);
+        if (m_hotkeys[i].globalVK != 0)
+            RegisterHotKey(hwnd, m_hotkeys[i].id, m_hotkeys[i].globalMod | MOD_NOREPEAT, m_hotkeys[i].globalVK);
     }
     for (const auto& uh : m_userHotkeys) {
         if (uh.vk != 0 && uh.scope == HKSCOPE_GLOBAL)
@@ -1027,10 +1067,10 @@ void Engine::RemoveUserHotkey(int index)
 
 bool Engine::LookupLocalHotkey(UINT vk, UINT modifiers)
 {
+    // Check local bindings (vk/modifiers fields are always the local binding)
     for (int i = 0; i < NUM_HOTKEYS; i++) {
         if (m_hotkeys[i].vk == vk && m_hotkeys[i].vk != 0 &&
-            m_hotkeys[i].modifiers == modifiers &&
-            m_hotkeys[i].scope == HKSCOPE_LOCAL)
+            m_hotkeys[i].modifiers == modifiers)
         {
             return DispatchHotkeyAction(m_hotkeys[i].id);
         }
@@ -1184,7 +1224,7 @@ void Engine::GenerateHelpText()
         // Check if any bound built-in or user entries exist for this category
         bool hasBuiltIn = false;
         for (int i = 0; i < NUM_HOTKEYS; i++) {
-            if ((int)m_hotkeys[i].category == cat && m_hotkeys[i].vk != 0) { hasBuiltIn = true; break; }
+            if ((int)m_hotkeys[i].category == cat && (m_hotkeys[i].vk != 0 || m_hotkeys[i].globalVK != 0)) { hasBuiltIn = true; break; }
         }
         bool hasUser = false;
         HotkeyCategory userCat = (cat == HKCAT_SCRIPT || cat == HKCAT_LAUNCH)
@@ -1202,13 +1242,23 @@ void Engine::GenerateHelpText()
         swprintf(header, 128, L"\x2500\x2500\x2500 %s \x2500\x2500\x2500", kCategoryNames[cat]);
         appendLine(header);
 
-        // List built-in bindings in this category (skip unbound)
+        // List built-in bindings in this category (skip fully unbound)
         for (int i = 0; i < NUM_HOTKEYS; i++) {
             if ((int)m_hotkeys[i].category != cat) continue;
-            if (m_hotkeys[i].vk == 0) continue;  // skip unbound hotkeys
-            std::wstring key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
-            wchar_t line[160];
-            swprintf(line, 160, L"  %-20s %s", key.c_str(), m_hotkeys[i].szAction);
+            if (m_hotkeys[i].vk == 0 && m_hotkeys[i].globalVK == 0) continue;
+            std::wstring key;
+            if (m_hotkeys[i].vk != 0 && m_hotkeys[i].globalVK != 0) {
+                key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+                key += L" / ";
+                key += FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
+            } else if (m_hotkeys[i].vk != 0) {
+                key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+            } else {
+                key = FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
+                key += L" (G)";
+            }
+            wchar_t line[256];
+            swprintf(line, 256, L"  %-28s %s", key.c_str(), m_hotkeys[i].szAction);
             appendLine(line);
         }
 

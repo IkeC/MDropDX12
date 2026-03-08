@@ -147,18 +147,24 @@ enum HotkeyScope : int {
     HKSCOPE_GLOBAL = 1,   // System-wide via RegisterHotKey
 };
 
-// A single configurable hotkey binding
+// A single configurable hotkey binding.
+// Each action supports both a local binding (vk/modifiers) and a separate
+// global binding (globalVK/globalMod). Either can be unbound (vk=0).
 struct HotkeyBinding {
     int id;                    // HotkeyAction ID (for RegisterHotKey)
-    UINT modifiers;            // MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
-    UINT vk;                   // Virtual key code (0 = unbound)
-    HotkeyScope scope;
+    UINT modifiers;            // Local binding: MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
+    UINT vk;                   // Local binding: virtual key code (0 = unbound)
+    HotkeyScope scope;         // (legacy, unused for built-in — kept for INI compat)
     HotkeyCategory category;   // Grouping for UI and F1 help
     wchar_t szAction[80];      // Action name (e.g., L"Toggle Fullscreen")
     wchar_t szIniKey[64];      // INI key prefix (e.g., L"ToggleFullscreen")
-    UINT defaultMod;           // for Reset to Defaults
+    UINT defaultMod;           // for Reset to Defaults (local)
     UINT defaultVK;
-    HotkeyScope defaultScope;
+    HotkeyScope defaultScope;  // (legacy)
+    UINT globalMod;            // Global binding: MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
+    UINT globalVK;             // Global binding: virtual key code (0 = unbound)
+    UINT defaultGlobalMod;     // for Reset to Defaults (global)
+    UINT defaultGlobalVK;
 };
 
 // Dynamic user-added hotkeys (Script Commands and Launch Apps)

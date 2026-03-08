@@ -62,7 +62,7 @@ static int  UserIndex(LPARAM lp)    { return (int)(lp & 0x7FFFFFFF); }
 //----------------------------------------------------------------------
 
 // Column indices for the ListView
-enum { COL_CATEGORY = 0, COL_ACTION, COL_SHORTCUT, COL_SCOPE };
+enum { COL_CATEGORY = 0, COL_ACTION, COL_LOCAL_KEY, COL_GLOBAL_KEY };
 
 // Sort state
 static int  s_sortColumn = COL_CATEGORY;  // default: sort by category
@@ -94,17 +94,16 @@ static void RefreshHotkeyList(HWND hList, Engine* p)
     lvi.pszText = (LPWSTR)p->m_hotkeys[i].szAction;
     SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
-    // Shortcut column
-    std::wstring shortcut = p->FormatHotkeyDisplay(p->m_hotkeys[i].modifiers, p->m_hotkeys[i].vk);
-    lvi.iSubItem = COL_SHORTCUT;
-    lvi.pszText = (LPWSTR)shortcut.c_str();
+    // Local Key column
+    std::wstring localKey = p->FormatHotkeyDisplay(p->m_hotkeys[i].modifiers, p->m_hotkeys[i].vk);
+    lvi.iSubItem = COL_LOCAL_KEY;
+    lvi.pszText = (LPWSTR)localKey.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
-    // Scope column
-    const wchar_t* scope = (p->m_hotkeys[i].vk == 0) ? L"-" :
-      (p->m_hotkeys[i].scope == HKSCOPE_GLOBAL ? L"Global" : L"Local");
-    lvi.iSubItem = COL_SCOPE;
-    lvi.pszText = (LPWSTR)scope;
+    // Global Key column
+    std::wstring globalKey = p->FormatHotkeyDisplay(p->m_hotkeys[i].globalMod, p->m_hotkeys[i].globalVK);
+    lvi.iSubItem = COL_GLOBAL_KEY;
+    lvi.pszText = (LPWSTR)globalKey.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
     row++;
   }
@@ -144,16 +143,23 @@ static void RefreshHotkeyList(HWND hList, Engine* p)
     lvi.pszText = (LPWSTR)actionName.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
+    // User hotkeys use single binding — show in local or global column based on scope
     std::wstring shortcut = p->FormatHotkeyDisplay(uh.modifiers, uh.vk);
-    lvi.iSubItem = COL_SHORTCUT;
-    lvi.pszText = (LPWSTR)shortcut.c_str();
-    SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
-
-    const wchar_t* scope = (uh.vk == 0) ? L"-" :
-      (uh.scope == HKSCOPE_GLOBAL ? L"Global" : L"Local");
-    lvi.iSubItem = COL_SCOPE;
-    lvi.pszText = (LPWSTR)scope;
-    SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+    if (uh.scope == HKSCOPE_LOCAL || uh.vk == 0) {
+      lvi.iSubItem = COL_LOCAL_KEY;
+      lvi.pszText = (LPWSTR)shortcut.c_str();
+      SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+      lvi.iSubItem = COL_GLOBAL_KEY;
+      lvi.pszText = (LPWSTR)L"(none)";
+      SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+    } else {
+      lvi.iSubItem = COL_LOCAL_KEY;
+      lvi.pszText = (LPWSTR)L"(none)";
+      SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+      lvi.iSubItem = COL_GLOBAL_KEY;
+      lvi.pszText = (LPWSTR)shortcut.c_str();
+      SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
+    }
     row++;
   }
 }
@@ -172,7 +178,7 @@ struct HKSortData {
   int category;
   const wchar_t* action;
   UINT vk, mod;
-  int scope;
+  UINT globalVK, globalMod;
 };
 
 static HKSortData GetSortData(LPARAM lp, Engine* p)
@@ -184,9 +190,11 @@ static HKSortData GetSortData(LPARAM lp, Engine* p)
       const auto& uh = p->m_userHotkeys[idx];
       d.category = (uh.type == USER_HK_SCRIPT) ? HKCAT_SCRIPT : HKCAT_LAUNCH;
       d.action = uh.label.c_str();
-      d.vk = uh.vk;
-      d.mod = uh.modifiers;
-      d.scope = (int)uh.scope;
+      if (uh.scope == HKSCOPE_GLOBAL) {
+        d.globalVK = uh.vk; d.globalMod = uh.modifiers;
+      } else {
+        d.vk = uh.vk; d.mod = uh.modifiers;
+      }
     }
   } else {
     int idx = (int)lp;
@@ -195,7 +203,8 @@ static HKSortData GetSortData(LPARAM lp, Engine* p)
       d.action = p->m_hotkeys[idx].szAction;
       d.vk = p->m_hotkeys[idx].vk;
       d.mod = p->m_hotkeys[idx].modifiers;
-      d.scope = (int)p->m_hotkeys[idx].scope;
+      d.globalVK = p->m_hotkeys[idx].globalVK;
+      d.globalMod = p->m_hotkeys[idx].globalMod;
     }
   }
   return d;
@@ -216,12 +225,13 @@ static int CALLBACK HotkeyListCompare(LPARAM lParam1, LPARAM lParam2, LPARAM lPa
   case COL_ACTION:
     cmp = _wcsicmp(a.action, b.action);
     break;
-  case COL_SHORTCUT:
+  case COL_LOCAL_KEY:
     cmp = (int)a.vk - (int)b.vk;
     if (cmp == 0) cmp = (int)a.mod - (int)b.mod;
     break;
-  case COL_SCOPE:
-    cmp = a.scope - b.scope;
+  case COL_GLOBAL_KEY:
+    cmp = (int)a.globalVK - (int)b.globalVK;
+    if (cmp == 0) cmp = (int)a.globalMod - (int)b.globalMod;
     break;
   }
   return s_sortAscending ? cmp : -cmp;
@@ -288,7 +298,8 @@ void HotkeysWindow::OpenEditDialog(int lvItem)
     data.actionName = p->m_hotkeys[entryIndex].szAction;
     data.modifiers  = p->m_hotkeys[entryIndex].modifiers;
     data.vk         = p->m_hotkeys[entryIndex].vk;
-    data.scope      = p->m_hotkeys[entryIndex].scope;
+    data.globalMod  = p->m_hotkeys[entryIndex].globalMod;
+    data.globalVK   = p->m_hotkeys[entryIndex].globalVK;
   } else {
     if (entryIndex < 0 || entryIndex >= (int)p->m_userHotkeys.size()) return;
     const auto& uh = p->m_userHotkeys[entryIndex];
@@ -305,7 +316,7 @@ void HotkeysWindow::OpenEditDialog(int lvItem)
 
   // Apply changes back
   if (isBuiltIn) {
-    // Conflict detection: clear any other binding with the same key+mod
+    // Conflict detection for local binding
     if (data.vk != 0) {
       for (int i = 0; i < NUM_HOTKEYS; i++) {
         if (i != entryIndex && p->m_hotkeys[i].vk == data.vk && p->m_hotkeys[i].modifiers == data.modifiers) {
@@ -314,7 +325,22 @@ void HotkeysWindow::OpenEditDialog(int lvItem)
         }
       }
       for (auto& uh : p->m_userHotkeys) {
-        if (uh.vk == data.vk && uh.modifiers == data.modifiers) {
+        if (uh.vk == data.vk && uh.modifiers == data.modifiers && uh.scope == HKSCOPE_LOCAL) {
+          uh.vk = 0;
+          uh.modifiers = 0;
+        }
+      }
+    }
+    // Conflict detection for global binding
+    if (data.globalVK != 0) {
+      for (int i = 0; i < NUM_HOTKEYS; i++) {
+        if (i != entryIndex && p->m_hotkeys[i].globalVK == data.globalVK && p->m_hotkeys[i].globalMod == data.globalMod) {
+          p->m_hotkeys[i].globalVK = 0;
+          p->m_hotkeys[i].globalMod = 0;
+        }
+      }
+      for (auto& uh : p->m_userHotkeys) {
+        if (uh.vk == data.globalVK && uh.modifiers == data.globalMod && uh.scope == HKSCOPE_GLOBAL) {
           uh.vk = 0;
           uh.modifiers = 0;
         }
@@ -322,7 +348,8 @@ void HotkeysWindow::OpenEditDialog(int lvItem)
     }
     p->m_hotkeys[entryIndex].modifiers = data.modifiers;
     p->m_hotkeys[entryIndex].vk = data.vk;
-    p->m_hotkeys[entryIndex].scope = data.scope;
+    p->m_hotkeys[entryIndex].globalMod = data.globalMod;
+    p->m_hotkeys[entryIndex].globalVK = data.globalVK;
   } else {
     if (entryIndex >= 0 && entryIndex < (int)p->m_userHotkeys.size()) {
       // Conflict detection
@@ -385,7 +412,7 @@ void HotkeysWindow::UpdateDeleteButton()
       } else {
         int idx = (int)lp;
         if (idx >= 0 && idx < NUM_HOTKEYS)
-          hasKey = m_pEngine->m_hotkeys[idx].vk != 0;
+          hasKey = m_pEngine->m_hotkeys[idx].vk != 0 || m_pEngine->m_hotkeys[idx].globalVK != 0;
       }
     }
     EnableWindow(m_hBtnClearKey, hasKey ? TRUE : FALSE);
@@ -426,10 +453,10 @@ void HotkeysWindow::DoBuildControls()
   TrackControl(m_hList);
   if (m_hList) {
     int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
-    int colCategory = MulDiv(rw, 18, 100);
-    int colAction   = MulDiv(rw, 35, 100);
-    int colScope    = MulDiv(rw, 15, 100);
-    int colShortcut = rw - colCategory - colAction - colScope - scrollW;
+    int colCategory = MulDiv(rw, 16, 100);
+    int colAction   = MulDiv(rw, 30, 100);
+    int colLocal    = MulDiv(rw, 26, 100);
+    int colGlobal   = rw - colCategory - colAction - colLocal - scrollW;
 
     LVCOLUMNW col = {};
     col.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -439,12 +466,12 @@ void HotkeysWindow::DoBuildControls()
     col.pszText = (LPWSTR)L"Action";
     col.cx = colAction;
     SendMessageW(m_hList, LVM_INSERTCOLUMNW, COL_ACTION, (LPARAM)&col);
-    col.pszText = (LPWSTR)L"Shortcut";
-    col.cx = colShortcut;
-    SendMessageW(m_hList, LVM_INSERTCOLUMNW, COL_SHORTCUT, (LPARAM)&col);
-    col.pszText = (LPWSTR)L"Scope";
-    col.cx = colScope;
-    SendMessageW(m_hList, LVM_INSERTCOLUMNW, COL_SCOPE, (LPARAM)&col);
+    col.pszText = (LPWSTR)L"Local Key";
+    col.cx = colLocal;
+    SendMessageW(m_hList, LVM_INSERTCOLUMNW, COL_LOCAL_KEY, (LPARAM)&col);
+    col.pszText = (LPWSTR)L"Global Key";
+    col.cx = colGlobal;
+    SendMessageW(m_hList, LVM_INSERTCOLUMNW, COL_GLOBAL_KEY, (LPARAM)&col);
 
     RefreshHotkeyList(m_hList, m_pEngine);
     ListView_SetItemState(m_hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
@@ -605,6 +632,8 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
       if (idx >= 0 && idx < NUM_HOTKEYS) {
         p->m_hotkeys[idx].vk = 0;
         p->m_hotkeys[idx].modifiers = 0;
+        p->m_hotkeys[idx].globalVK = 0;
+        p->m_hotkeys[idx].globalMod = 0;
       }
     }
     SaveAndReRegister(p);

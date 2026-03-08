@@ -775,9 +775,13 @@ struct ActionEditData {
 
     // Key binding (shown when showKeyBinding == true)
     bool showKeyBinding = true;
-    UINT modifiers = 0;         // MOD_ALT, MOD_CONTROL, MOD_SHIFT
-    UINT vk = 0;                // virtual key code (0 = unbound)
-    HotkeyScope scope = ::HKSCOPE_LOCAL;
+    UINT modifiers = 0;         // Local binding: MOD_ALT, MOD_CONTROL, MOD_SHIFT
+    UINT vk = 0;                // Local binding: virtual key code (0 = unbound)
+    HotkeyScope scope = ::HKSCOPE_LOCAL;  // For user hotkeys (single-binding mode)
+
+    // Global binding (built-in hotkeys only; separate from local)
+    UINT globalMod = 0;         // Global binding modifiers
+    UINT globalVK = 0;          // Global binding VK (0 = unbound)
 
     // Built-in hotkey mode: action type is read-only, only key + scope editable
     bool isBuiltInHotkey = false;

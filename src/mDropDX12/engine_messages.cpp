@@ -3420,9 +3420,19 @@ void Engine::OpenMDropDX12Remote() {
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi = {};
 
+  // Helper: extract directory from a full exe path
+  auto getExeDir = [](const wchar_t* exePath, wchar_t* dirOut, size_t dirSize) {
+    wcscpy_s(dirOut, dirSize, exePath);
+    wchar_t* pSlash = wcsrchr(dirOut, L'\\');
+    if (pSlash) *pSlash = L'\0';
+    else dirOut[0] = L'\0';
+  };
+
   // Try the last known Remote exe path first (remembered across sessions)
   if (m_szLastRemoteExePath[0] != L'\0') {
-    if (CreateProcessW(m_szLastRemoteExePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    wchar_t szDir[MAX_PATH] = {};
+    getExeDir(m_szLastRemoteExePath, szDir, MAX_PATH);
+    if (CreateProcessW(m_szLastRemoteExePath, NULL, NULL, NULL, FALSE, 0, NULL, szDir[0] ? szDir : NULL, &si, &pi)) {
       wchar_t szName[MAX_PATH];
       wchar_t* pName = wcsrchr(m_szLastRemoteExePath, L'\\');
       swprintf_s(szName, L"Starting %s", pName ? pName + 1 : m_szLastRemoteExePath);
@@ -3436,7 +3446,7 @@ void Engine::OpenMDropDX12Remote() {
   // Fallback: try MDropDX12Remote.exe in exe directory, then PATH
   wchar_t szPath[MAX_PATH] = {};
   swprintf(szPath, MAX_PATH, L"%sMDropDX12Remote.exe", m_szBaseDir);
-  if (!CreateProcessW(szPath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+  if (!CreateProcessW(szPath, NULL, NULL, NULL, FALSE, 0, NULL, m_szBaseDir, &si, &pi)) {
     if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
       AddError(L"Could not start Remote app", 3.0f, ERR_MISC, false);
       return;
