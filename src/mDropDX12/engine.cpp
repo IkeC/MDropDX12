@@ -3039,6 +3039,12 @@ int Engine::AllocateMyDX9Stuff() {
     LoadShaders(&m_shaders, m_pState, false, false);  // Also force-load the shaders - otherwise they'd only get compiled on a preset switch.
     CreateDX12PresetPSOs();
 
+    // Reset preset timer so the auto-advance doesn't fire immediately after resize.
+    // Without this, the time spent in cleanup + swap chain resize + reallocation
+    // can push GetTime() past m_fNextPresetTime, triggering an unwanted preset change.
+    m_fPresetStartTime = GetTime();
+    m_fNextPresetTime = -1.0f;  // will be recomputed on next UpdateTime
+
     // Reset Shadertoy start frame so iFrame restarts at 0 after resize.
     // Feedback buffers are fresh (recreated above), so the shader must
     // re-run its initialization code (e.g. "if (iFrame < 2) clear").
