@@ -3747,7 +3747,7 @@ void Engine::PopulateResourceViewer() {
         }
         // If not found by name (e.g. rand## textures get resolved to a different name),
         // check the actual shader binding to see if a texture was loaded for this slot.
-        if (!found && cd.RegisterIndex < 16) {
+        if (!found && cd.RegisterIndex < 32) {
           CShaderParams& sp = (s == 0) ? m_shaders.warp.params : m_shaders.comp.params;
           UINT srvIdx = sp.m_texture_bindings[cd.RegisterIndex].dx12SrvIndex;
           if (srvIdx != UINT_MAX) {

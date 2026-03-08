@@ -49,8 +49,8 @@ using Microsoft::WRL::ComPtr;
 
 // Descriptor heap sizes
 #define DXC_MAX_RTV  32   // 2 back buffers + 2 VS + 6 blur + 10 title + spare
-#define DXC_MAX_SRV  1280 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
-#define DXC_MAX_SAMPLERS 16
+#define DXC_MAX_SRV  2560 // texture SRVs + 32-slot binding blocks (each texture uses 33 slots)
+#define DXC_MAX_SAMPLERS 4
 
 #define SNAP_WINDOWED_MODE_BLOCKSIZE  32
 
@@ -229,17 +229,17 @@ public:
   wchar_t m_szFallbackCustomFile[MAX_PATH] = {};
   bool CreateNullTexture(int fallbackStyle = 0);
 
-  // Create a 16-entry binding block for a texture (all slots = tex for simple passthrough)
+  // Create a 32-entry binding block for a texture (all slots = tex for simple passthrough)
   // Writes to tex.bindingBlockStart. Call after CreateNullTexture().
-  static const UINT BINDING_BLOCK_SIZE = 16;
+  static const UINT BINDING_BLOCK_SIZE = 32;
   void CreateBindingBlockForTexture(DX12Texture& tex);
 
-  // Create a 16-entry binding block with tex at a specific slot, null elsewhere.
+  // Create a 32-entry binding block with tex at a specific slot, null elsewhere.
   // Returns the starting SRV heap index for the block. Used for preset shaders
   // where sampler_main maps to a t-register other than t0.
   UINT CreateBindingBlockAtSlot(const DX12Texture& tex, UINT mainSlot);
 
-  // Get GPU handle for a texture's binding block (all 16 SRV slots)
+  // Get GPU handle for a texture's binding block (all 32 SRV slots)
   D3D12_GPU_DESCRIPTOR_HANDLE GetBindingBlockGpuHandle(const DX12Texture& tex);
 
   // Get GPU handle for a binding block by its starting SRV index

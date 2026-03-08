@@ -1166,42 +1166,38 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   writePos += m_nShaderIncludeTextLen;
 
   // Strip include's sampler_rand declarations if the preset declares its own
-  // (presets use #define MYSAMP sampler_rand00 + sampler MYSAMP; which expands
-  //  to a second declaration, causing error X3003: redefinition)
+  // (presets use #define MYSAMP sampler_rand00 + sampler MYSAMP; which after
+  //  macro expansion creates a second Texture2D declaration → redefinition error)
   for (int i = 0; i <= 3; i++) {
     char sampName[20];
     sprintf(sampName, "sampler_rand%02d", i);
     if (strstr(szOrigShaderText, sampName)) {
       char decl[40];
-      sprintf(decl, "sampler2D %s;", sampName);
+      sprintf(decl, "Texture2D %s;", sampName);
       char* pos = strstr(szShaderText, decl);
       if (pos) memset(pos, ' ', strlen(decl));
     }
   }
 
-  // Strip Shadertoy-specific sampler declarations for non-Shadertoy presets.
-  // These have explicit register(sN) annotations that force register slots to be
-  // occupied even when unused, leaving fewer slots for preset textures and causing
-  // X4510 "maximum sampler register index exceeded" on texture-heavy presets.
+  // Strip Shadertoy-specific texture declarations for non-Shadertoy presets
+  // to avoid unused t-register slots and potential reflection noise.
   if (!m_bLoadingShadertoyMode) {
-    // Helper: blank out a declaration line from the include text
     auto blankDecl = [&](const char* pattern) {
       char* pos = strstr(szShaderText, pattern);
       if (pos && pos < &szShaderText[writePos]) {
-        // Blank from pattern start to the next semicolon (inclusive)
         char* end = strchr(pos, ';');
         if (end) memset(pos, ' ', end - pos + 1);
       }
     };
-    blankDecl("sampler2D sampler_feedback");
-    blankDecl("sampler2D sampler_image");
-    blankDecl("sampler2D sampler_bufferB");
-    blankDecl("sampler2D sampler_audio");
-    blankDecl("sampler2D sampler_noise_lq_st");
-    blankDecl("sampler2D sampler_noise_mq_st");
-    blankDecl("sampler2D sampler_noise_hq_st");
-    blankDecl("sampler3D sampler_noisevol_lq_st");
-    blankDecl("sampler3D sampler_noisevol_hq_st");
+    blankDecl("Texture2D sampler_feedback");
+    blankDecl("Texture2D sampler_image");
+    blankDecl("Texture2D sampler_bufferB");
+    blankDecl("Texture2D sampler_audio");
+    blankDecl("Texture2D sampler_noise_lq_st");
+    blankDecl("Texture2D sampler_noise_mq_st");
+    blankDecl("Texture2D sampler_noise_hq_st");
+    blankDecl("Texture3D sampler_noisevol_lq_st");
+    blankDecl("Texture3D sampler_noisevol_hq_st");
   }
 
   // paste in any custom #defines for this shader type
@@ -1350,6 +1346,59 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // Fix matrix * vector multiplication (HLSL requires mul())
   FixMatrixVarMultiply(szShaderText);
+
+  // Replace tex2D/tex2Dlod calls for samplers that need non-default addressing modes.
+  // The generic tex2D macro uses _samp_lw (LINEAR+WRAP). These replacements bypass
+  // the macro by directly emitting .Sample() / .SampleLevel() with the correct sampler.
+  {
+    auto replaceTex2D = [&](const char* sampName, const char* sampState) {
+      char from[80], to[80];
+      // tex2D(sampler_name, ...) → sampler_name.Sample(sampState, ...)
+      sprintf(from, "tex2D(%s,", sampName);
+      sprintf(to, "%s.Sample(%s,", sampName, sampState);
+      int fromLen = (int)strlen(from);
+      int toLen = (int)strlen(to);
+      int delta = toLen - fromLen;
+      char* p = szShaderText;
+      while ((p = strstr(p, from)) != nullptr) {
+        if (delta > 0) {
+          // expand: shift tail right
+          int tailLen = (int)strlen(p + fromLen);
+          memmove(p + toLen, p + fromLen, tailLen + 1);
+        } else if (delta < 0) {
+          // shrink: shift tail left
+          int tailLen = (int)strlen(p + fromLen);
+          memmove(p + toLen, p + fromLen, tailLen + 1);
+        }
+        memcpy(p, to, toLen);
+        p += toLen;
+      }
+      // tex2Dlod(sampler_name, v) → sampler_name.SampleLevel(sampState, v.xy, v.w)
+      // (rare for special samplers, but handle it)
+      sprintf(from, "tex2Dlod(%s,", sampName);
+      sprintf(to, "%s.SampleLevel(%s,", sampName, sampState);
+      fromLen = (int)strlen(from);
+      toLen = (int)strlen(to);
+      delta = toLen - fromLen;
+      p = szShaderText;
+      while ((p = strstr(p, from)) != nullptr) {
+        int tailLen = (int)strlen(p + fromLen);
+        memmove(p + toLen, p + fromLen, tailLen + 1);
+        memcpy(p, to, toLen);
+        p += toLen;
+      }
+    };
+    replaceTex2D("sampler_fc_main", "_samp_lc");  // LINEAR+CLAMP
+    replaceTex2D("sampler_pc_main", "_samp_pc");  // POINT+CLAMP
+    replaceTex2D("sampler_pw_main", "_samp_pw");  // POINT+WRAP
+    replaceTex2D("sampler_blur1",   "_samp_lc");  // blur = LINEAR+CLAMP
+    replaceTex2D("sampler_blur2",   "_samp_lc");
+    replaceTex2D("sampler_blur3",   "_samp_lc");
+    // Blur shaders: sampler_main needs CLAMP addressing
+    if (shaderType == SHADER_BLUR) {
+      replaceTex2D("sampler_main", "_samp_lc");
+    }
+  }
 
   // Dump assembled shader text to file for diagnostics (Verbose only)
   if (DLOG_DIAG_ENABLED() && (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {

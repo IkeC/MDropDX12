@@ -680,7 +680,7 @@ void DXContext::UpdateBindingBlockTexture(UINT blockStart, UINT texSrvIndex)
     else
         texSrc = nullSrc;
 
-    // Overwrite all 16 slots: slot 0 = texture, slots 1-15 = null
+    // Overwrite all 32 slots: slot 0 = texture, slots 1-31 = null
     for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
         D3D12_CPU_DESCRIPTOR_HANDLE dst;
         dst.ptr = heapStart.ptr + (SIZE_T)(blockStart + i) * m_srvDescriptorSize;
@@ -792,11 +792,11 @@ bool DXContext::CreateRootSignature()
     rootParams[0].Descriptor.RegisterSpace  = 0;
     rootParams[0].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Root parameter 1: Descriptor table — 16 SRVs (t0-t15)
+    // Root parameter 1: Descriptor table — 32 SRVs (t0-t31)
     // Preset shaders may reference multiple textures (main, blur1-3, noise, custom)
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors                    = 16;
+    srvRange.NumDescriptors                    = 32;
     srvRange.BaseShaderRegister                = 0;
     srvRange.RegisterSpace                     = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -806,23 +806,15 @@ bool DXContext::CreateRootSignature()
     rootParams[1].DescriptorTable.pDescriptorRanges   = &srvRange;
     rootParams[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    // Static samplers — 16 slots (s0-s15).
-    // Slots with explicit register(sN) in include.fx have fixed assignments:
-    //   s0  = sampler_main        (LINEAR + WRAP)   — default warp/comp main texture
-    //   s1  = sampler_fc_main     (LINEAR + CLAMP)  — filter + clamp
-    //   s2  = sampler_pc_main     (POINT  + CLAMP)  — point  + clamp
-    //   s3  = sampler_fw_main     (LINEAR + WRAP)   — filter + wrap
-    //   s4  = sampler_pw_main     (POINT  + WRAP)   — point  + wrap
-    //   s5-s10 = (auto-assigned, LINEAR + WRAP)     — noise textures + user textures
-    //   s11 = sampler_blur1       (LINEAR + CLAMP)  — blur output level 1
-    //   s12 = sampler_blur2       (LINEAR + CLAMP)  — blur output level 2
-    //   s13 = sampler_blur3       (LINEAR + CLAMP)  — blur output level 3
-    //   s14-s15 = (auto-assigned, LINEAR + WRAP)    — noise textures + user textures
-    // Noise samplers (sampler_noise_*, sampler_noisevol_*) have NO register annotations,
-    // so the compiler auto-assigns them only when used, sharing s5-s10/s14-s15 with
-    // user texture samplers (sampler_rand00..N). All use LINEAR+WRAP (the default).
-    D3D12_STATIC_SAMPLER_DESC staticSamplers[16] = {};
-    for (int i = 0; i < 16; i++) {
+    // Static samplers — 4 shared sampler states (s0-s3).
+    // All textures are declared as Texture2D (t-registers, no s-register limit).
+    // The 4 SamplerState objects in the include file reference these:
+    //   s0 = _samp_lw  (LINEAR + WRAP)   — default for most textures
+    //   s1 = _samp_lc  (LINEAR + CLAMP)  — fc_main, blur
+    //   s2 = _samp_pc  (POINT  + CLAMP)  — pc_main
+    //   s3 = _samp_pw  (POINT  + WRAP)   — pw_main
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[4] = {};
+    for (int i = 0; i < 4; i++) {
         staticSamplers[i].Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         staticSamplers[i].AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         staticSamplers[i].AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -831,21 +823,22 @@ bool DXContext::CreateRootSignature()
         staticSamplers[i].ShaderRegister   = i;
         staticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur), s14 (feedback)
-    for (int i : {1, 2, 11, 12, 13, 14}) {
-        staticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        staticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        staticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    }
-    // POINT filter samplers: s2 (pc_main), s4 (pw_main)
-    for (int i : {2, 4}) {
-        staticSamplers[i].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    }
+    // s1: LINEAR + CLAMP
+    staticSamplers[1].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    // s2: POINT + CLAMP
+    staticSamplers[2].Filter   = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    staticSamplers[2].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[2].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[2].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    // s3: POINT + WRAP
+    staticSamplers[3].Filter   = D3D12_FILTER_MIN_MAG_MIP_POINT;
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
     rootSigDesc.NumParameters     = 2;
     rootSigDesc.pParameters       = rootParams;
-    rootSigDesc.NumStaticSamplers = 16;
+    rootSigDesc.NumStaticSamplers = 4;
     rootSigDesc.pStaticSamplers   = staticSamplers;
     rootSigDesc.Flags             = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -863,30 +856,9 @@ bool DXContext::CreateRootSignature()
                                         IID_PPV_ARGS(&m_rootSignature));
     if (FAILED(hr)) return false;
 
-    // Create blur root signature: identical but s0 = CLAMP + LINEAR.
-    // SM5.0 backwards compat assigns the blur shader's single sampler to s0,
-    // but blur passes require CLAMP addressing (DX9 explicitly sets CLAMP).
-    staticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-
-    ComPtr<ID3DBlob> blurSig;
-    ComPtr<ID3DBlob> blurErr;
-    hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-                                      &blurSig, &blurErr);
-    if (FAILED(hr)) {
-        if (blurErr) DebugLogA((const char*)blurErr->GetBufferPointer(), LOG_ERROR);
-        DebugLogA("DX12: WARNING - blur root signature serialization failed, using main root sig");
-        m_blurRootSignature = m_rootSignature; // fallback
-        return true;
-    }
-    hr = m_device->CreateRootSignature(0, blurSig->GetBufferPointer(),
-                                        blurSig->GetBufferSize(),
-                                        IID_PPV_ARGS(&m_blurRootSignature));
-    if (FAILED(hr)) {
-        DebugLogA("DX12: WARNING - blur root signature creation failed, using main root sig");
-        m_blurRootSignature = m_rootSignature; // fallback
-    }
+    // Blur root signature: same as main. Blur shaders use _samp_lc (s1) directly
+    // via text substitution in LoadShaderFromMemory, so no special s0 override needed.
+    m_blurRootSignature = m_rootSignature;
     return true;
 }
 
@@ -1604,7 +1576,7 @@ void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
 {
     if (m_nullTexture.srvIndex == UINT_MAX || tex.srvIndex == UINT_MAX) return;
 
-    // Reserve 16 contiguous SRV slots for this texture's binding block
+    // Reserve 32 contiguous SRV slots for this texture's binding block
     tex.bindingBlockStart = m_nextFreeSrvSlot;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrvCpu;
@@ -1619,7 +1591,7 @@ void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
         D3D12_CPU_DESCRIPTOR_HANDLE dst;
         dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
                   (SIZE_T)m_nextFreeSrvSlot * m_srvDescriptorSize;
-        // Slot 0 = the actual texture, slots 1-15 = null (safe placeholder)
+        // Slot 0 = the actual texture, slots 1-31 = null (safe placeholder)
         m_device->CopyDescriptorsSimple(1, dst, (i == 0) ? texSrvCpu : nullSrvCpu,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         m_nextFreeSrvSlot++;
@@ -1700,8 +1672,8 @@ void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT b
 
     D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    // Helper to fill a 16-slot binding block
-    auto fillBlock = [&](UINT base, const UINT slots[16]) {
+    // Helper to fill a 32-slot binding block
+    auto fillBlock = [&](UINT base, const UINT slots[32]) {
         for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
             D3D12_CPU_DESCRIPTOR_HANDLE dst;
             dst.ptr = heapStart.ptr + (SIZE_T)(base + i) * m_srvDescriptorSize;

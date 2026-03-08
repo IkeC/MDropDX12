@@ -1968,7 +1968,7 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
   // Build binding slots for Buffer A, Buffer B, and comp/Image passes
-  UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
+  UINT warpSlots[32], bufferASlots[32], bufferBSlots[32], compSlots[32];
   memset(warpSlots, 0xFF, sizeof(warpSlots));  // warp unused in Shadertoy mode
   memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));
 
@@ -2309,7 +2309,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
     // warp+shapes output = VS[1].
 
-    UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
+    UINT warpSlots[32], bufferASlots[32], bufferBSlots[32], compSlots[32];
     memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));  // Buffer B unused in non-Shadertoy mode
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
@@ -6748,8 +6748,8 @@ void mdrop::Engine::RestoreShaderParams() {
 
 }
 
-void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex, const DX12Texture* imageFeedbackTex, const DX12Texture* bufferBTex) {
-  for (int i = 0; i < 16; i++) {
+void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[32], const DX12Texture* feedbackTex, const DX12Texture* imageFeedbackTex, const DX12Texture* bufferBTex) {
+  for (int i = 0; i < 32; i++) {
     outSlots[i] = UINT_MAX;
     switch (params->m_texcode[i]) {
     case TEX_VS:
@@ -6820,7 +6820,7 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
               feedbackTex ? feedbackTex->srvIndex : UINT_MAX,
               bufferBTex && bufferBTex->IsValid() ? "OK" : "no",
               bufferBTex ? bufferBTex->srvIndex : UINT_MAX);
-      for (int i = 0; i < 16; i++) {
+      for (int i = 0; i < 32; i++) {
         if (params->m_texcode[i] != 0 || outSlots[i] != UINT_MAX) {
           fprintf(fp, "  slot[%d]: texcode=%d srv=%u binding_srv=%u\n", i, params->m_texcode[i], outSlots[i],
                   params->m_texture_bindings[i].dx12SrvIndex);

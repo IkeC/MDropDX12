@@ -155,57 +155,53 @@ float4x3 rot_rand4;
 #define blur2_max _c13.y
 #define blur3_min _c13.z
 #define blur3_max _c13.w
-#define GetMain(uv) (tex2D(sampler_main,uv).xyz)
-#define GetPixel(uv) (tex2D(sampler_main,uv).xyz)
-#define GetBlur1(uv) (tex2D(sampler_blur1,uv).xyz*_c5.x + _c5.y)
-#define GetBlur2(uv) (tex2D(sampler_blur2,uv).xyz*_c5.z + _c5.w)
-#define GetBlur3(uv) (tex2D(sampler_blur3,uv).xyz*_c6.x + _c6.y)
+// 4 shared sampler states — only these consume s-registers (s0-s3).
+// All textures use Texture2D (t-registers, limit ~128), referencing one of these.
+SamplerState _samp_lw : register(s0);  // LINEAR + WRAP  (default)
+SamplerState _samp_lc : register(s1);  // LINEAR + CLAMP (fc_main, blur)
+SamplerState _samp_pc : register(s2);  // POINT  + CLAMP (pc_main)
+SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
+
+// Legacy compatibility: sampler2D/sampler/sampler3D → Texture2D/Texture3D
+#define sampler2D Texture2D
+#define sampler   Texture2D
+#define sampler3D Texture3D
+
+// tex2D/tex3D macros — default to LINEAR+WRAP.
+// Special-mode samplers (fc_main, pc_main, pw_main, blur) are text-substituted
+// in LoadShaderFromMemory to bypass these macros and use the correct SamplerState.
+#define tex2D(t, uv)     t.Sample(_samp_lw, uv)
+#define tex2Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xy, (v).w)
+#define tex3D(t, uvw)     t.Sample(_samp_lw, uvw)
+#define tex2d(t, uv)      t.Sample(_samp_lw, uv)
+#define tex3d(t, uvw)     t.Sample(_samp_lw, uvw)
 
 #define lum(x) (dot(x,float3(0.32,0.49,0.29)))
-#define tex2d tex2D
-#define tex3d tex3D
 
-// previous-frame-image samplers:
-// register(sN) annotations match static samplers in DX12 root signature.
-// SM5.0 backwards compat splits sampler2D into SamplerState (s-register) +
-// Texture2D (t-register). The t-register is resolved separately via D3D_SIT_TEXTURE
-// reflection in d3dx9compat.h, so s-register annotations are independent of texture binding.
-texture PrevFrameImage;
-sampler2D sampler_main : register(s0) = sampler_state
-{
-    Texture = <PrevFrameImage>;
-};
-sampler2D sampler_fc_main : register(s1) = sampler_state
-{
-    Texture = <PrevFrameImage>;
-};
-sampler2D sampler_pc_main : register(s2) = sampler_state
-{
-    Texture = <PrevFrameImage>;
-};
-sampler2D sampler_fw_main : register(s3) = sampler_state
-{
-    Texture = <PrevFrameImage>;
-};
-sampler2D sampler_pw_main : register(s4) = sampler_state
-{
-    Texture = <PrevFrameImage>;
-};
+#define GetMain(uv) (tex2D(sampler_main,uv).xyz)
+#define GetPixel(uv) (tex2D(sampler_main,uv).xyz)
+#define GetBlur1(uv) (sampler_blur1.Sample(_samp_lc,uv).xyz*_c5.x + _c5.y)
+#define GetBlur2(uv) (sampler_blur2.Sample(_samp_lc,uv).xyz*_c5.z + _c5.w)
+#define GetBlur3(uv) (sampler_blur3.Sample(_samp_lc,uv).xyz*_c6.x + _c6.y)
+
+// previous-frame-image samplers (Texture2D, no s-register consumed):
+Texture2D sampler_main;
+Texture2D sampler_fc_main;
+Texture2D sampler_pc_main;
+Texture2D sampler_fw_main;
+Texture2D sampler_pw_main;
 #define sampler_FC_main sampler_fc_main
 #define sampler_PC_main sampler_pc_main
 #define sampler_FW_main sampler_fw_main
 #define sampler_PW_main sampler_pw_main
 
 // built-in noise textures:
-// No register(sN) annotations — all use LINEAR+WRAP (the default static sampler mode).
-// The compiler auto-assigns slots only for noise textures actually referenced by each shader,
-// leaving more room for user texture samplers (sampler_rand00..N) within the SM5.0 limit of 16.
-sampler2D sampler_noise_lq;
-sampler2D sampler_noise_lq_lite;
-sampler2D sampler_noise_mq;
-sampler2D sampler_noise_hq;
-sampler3D sampler_noisevol_lq;
-sampler3D sampler_noisevol_hq;
+Texture2D sampler_noise_lq;
+Texture2D sampler_noise_lq_lite;
+Texture2D sampler_noise_mq;
+Texture2D sampler_noise_hq;
+Texture3D sampler_noisevol_lq;
+Texture3D sampler_noisevol_hq;
 float4 texsize_noise_lq;
 float4 texsize_noise_lq_lite;
 float4 texsize_noise_mq;
@@ -213,34 +209,29 @@ float4 texsize_noise_hq;
 float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
-// Shadertoy-compatible noise textures (uniform white noise, no interpolation, fixed seed):
-sampler2D sampler_noise_lq_st;
-sampler2D sampler_noise_mq_st;
-sampler2D sampler_noise_hq_st;
-sampler3D sampler_noisevol_lq_st;
-sampler3D sampler_noisevol_hq_st;
+// Shadertoy-compatible noise textures:
+Texture2D sampler_noise_lq_st;
+Texture2D sampler_noise_mq_st;
+Texture2D sampler_noise_hq_st;
+Texture3D sampler_noisevol_lq_st;
+Texture3D sampler_noisevol_hq_st;
 
-// user/random disk textures (auto-assigned, used by Shadertoy channel mapping):
-sampler2D sampler_rand00;
-sampler2D sampler_rand01;
-sampler2D sampler_rand02;
-sampler2D sampler_rand03;
+// user/random disk textures:
+Texture2D sampler_rand00;
+Texture2D sampler_rand01;
+Texture2D sampler_rand02;
+Texture2D sampler_rand03;
 
-// feedback buffer for Shadertoy temporal reprojection (comp shader reads own previous output):
-// Explicit register required — without it, the compiler merges sampler_feedback with sampler_main
-// (same sampler state) and the SRV never appears in reflection, so CacheParams can't detect it.
-sampler2D sampler_feedback : register(s14);
-// Image self-feedback (Image pass reads own previous frame output):
-sampler2D sampler_image : register(s15);
-// Buffer B output (second Shadertoy compute buffer):
-sampler2D sampler_bufferB : register(s9);
-// Audio texture (512x2: row 0 = FFT spectrum, row 1 = PCM waveform):
-sampler2D sampler_audio : register(s10);
+// Shadertoy feedback/buffer/audio textures:
+Texture2D sampler_feedback;
+Texture2D sampler_image;
+Texture2D sampler_bufferB;
+Texture2D sampler_audio;
 
 // procedural blur textures:
-sampler2D sampler_blur1 : register(s11);
-sampler2D sampler_blur2 : register(s12);
-sampler2D sampler_blur3 : register(s13);
+Texture2D sampler_blur1;
+Texture2D sampler_blur2;
+Texture2D sampler_blur3;
 
 float3 shiftHSV(float3 c)
 {

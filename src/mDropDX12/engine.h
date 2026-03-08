@@ -323,8 +323,8 @@ public:
   //int texbind_disk[32];
   //int texbind_voronoi;
   //...
-  SamplerInfo   m_texture_bindings[16];  // an entry for each sampler slot.  These are ALIASES - DO NOT DELETE.
-  tex_code      m_texcode[16];  // if ==TEX_VS, forget the pointer - texture bound @ that stage is the double-buffered VS.
+  SamplerInfo   m_texture_bindings[32];  // an entry for each texture slot (t-register).  These are ALIASES - DO NOT DELETE.
+  tex_code      m_texcode[32];  // if ==TEX_VS, forget the pointer - texture bound @ that stage is the double-buffered VS.
 
   void Clear();
   void CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors);
@@ -1415,7 +1415,7 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
-  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[32], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseTex_ST(const wchar_t* szTexName, int size);
