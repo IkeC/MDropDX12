@@ -451,6 +451,118 @@ void Engine::WriteAnimProfiles() {
   }
 }
 
+void Engine::ExportAnimProfiles(wchar_t* szPath) {
+  wchar_t val[64];
+  swprintf(val, 64, L"%d", m_nAnimProfileCount);
+  WritePrivateProfileStringW(L"AnimProfiles", L"Count", val, szPath);
+
+  for (int n = 0; n < m_nAnimProfileCount; n++) {
+    wchar_t section[32];
+    swprintf(section, 32, L"AnimProfile%02d", n);
+    const td_anim_profile& p = m_AnimProfiles[n];
+
+    WritePrivateProfileStringW(section, L"name", p.szName, szPath);
+    swprintf(val, 64, L"%d", p.bEnabled ? 1 : 0);
+    WritePrivateProfileStringW(section, L"enabled", val, szPath);
+
+    swprintf(val, 64, L"%.2f", p.fX); WritePrivateProfileStringW(section, L"x", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fY); WritePrivateProfileStringW(section, L"y", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fRandX); WritePrivateProfileStringW(section, L"randx", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fRandY); WritePrivateProfileStringW(section, L"randy", val, szPath);
+
+    swprintf(val, 64, L"%.2f", p.fStartX); WritePrivateProfileStringW(section, L"startx", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fStartY); WritePrivateProfileStringW(section, L"starty", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fMoveTime); WritePrivateProfileStringW(section, L"movetime", val, szPath);
+    swprintf(val, 64, L"%d", p.nEaseMode); WritePrivateProfileStringW(section, L"easemode", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fEaseFactor); WritePrivateProfileStringW(section, L"easefactor", val, szPath);
+
+    WritePrivateProfileStringW(section, L"face", p.szFontFace, szPath);
+    swprintf(val, 64, L"%.1f", p.fFontSize); WritePrivateProfileStringW(section, L"size", val, szPath);
+    swprintf(val, 64, L"%d", p.bBold); WritePrivateProfileStringW(section, L"bold", val, szPath);
+    swprintf(val, 64, L"%d", p.bItal); WritePrivateProfileStringW(section, L"ital", val, szPath);
+    swprintf(val, 64, L"%d", p.nColorR); WritePrivateProfileStringW(section, L"r", val, szPath);
+    swprintf(val, 64, L"%d", p.nColorG); WritePrivateProfileStringW(section, L"g", val, szPath);
+    swprintf(val, 64, L"%d", p.nColorB); WritePrivateProfileStringW(section, L"b", val, szPath);
+    swprintf(val, 64, L"%d", p.nRandR); WritePrivateProfileStringW(section, L"randr", val, szPath);
+    swprintf(val, 64, L"%d", p.nRandG); WritePrivateProfileStringW(section, L"randg", val, szPath);
+    swprintf(val, 64, L"%d", p.nRandB); WritePrivateProfileStringW(section, L"randb", val, szPath);
+
+    swprintf(val, 64, L"%.2f", p.fDuration); WritePrivateProfileStringW(section, L"duration", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fFadeIn); WritePrivateProfileStringW(section, L"fadein", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fFadeOut); WritePrivateProfileStringW(section, L"fadeout", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fBurnTime); WritePrivateProfileStringW(section, L"burntime", val, szPath);
+
+    swprintf(val, 64, L"%.2f", p.fGrowth); WritePrivateProfileStringW(section, L"growth", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fShadowOffset); WritePrivateProfileStringW(section, L"shadow", val, szPath);
+    swprintf(val, 64, L"%.2f", p.fBoxAlpha); WritePrivateProfileStringW(section, L"boxalpha", val, szPath);
+    swprintf(val, 64, L"%d", p.nBoxColR); WritePrivateProfileStringW(section, L"boxr", val, szPath);
+    swprintf(val, 64, L"%d", p.nBoxColG); WritePrivateProfileStringW(section, L"boxg", val, szPath);
+    swprintf(val, 64, L"%d", p.nBoxColB); WritePrivateProfileStringW(section, L"boxb", val, szPath);
+
+    swprintf(val, 64, L"%d", p.bRandPos); WritePrivateProfileStringW(section, L"rand_pos", val, szPath);
+    swprintf(val, 64, L"%d", p.bRandSize); WritePrivateProfileStringW(section, L"rand_size", val, szPath);
+    swprintf(val, 64, L"%d", p.bRandColor); WritePrivateProfileStringW(section, L"rand_color", val, szPath);
+    swprintf(val, 64, L"%d", p.bRandGrowth); WritePrivateProfileStringW(section, L"rand_growth", val, szPath);
+    swprintf(val, 64, L"%d", p.bRandDuration); WritePrivateProfileStringW(section, L"rand_duration", val, szPath);
+  }
+}
+
+void Engine::ImportAnimProfiles(wchar_t* szPath) {
+  int count = GetPrivateProfileIntW(L"AnimProfiles", L"Count", 0, szPath);
+  if (count <= 0) return;
+  if (count > MAX_ANIM_PROFILES) count = MAX_ANIM_PROFILES;
+
+  m_nAnimProfileCount = count;
+  for (int n = 0; n < count; n++) {
+    m_AnimProfiles[n] = td_anim_profile();
+    wchar_t section[32];
+    swprintf(section, 32, L"AnimProfile%02d", n);
+
+    GetPrivateProfileStringW(section, L"name", L"", m_AnimProfiles[n].szName, 64, szPath);
+    m_AnimProfiles[n].bEnabled = GetPrivateProfileBoolW(section, L"enabled", true, szPath);
+
+    m_AnimProfiles[n].fX = GetPrivateProfileFloatW(section, (wchar_t*)L"x", 0.5f, szPath);
+    m_AnimProfiles[n].fY = GetPrivateProfileFloatW(section, (wchar_t*)L"y", 0.5f, szPath);
+    m_AnimProfiles[n].fRandX = GetPrivateProfileFloatW(section, (wchar_t*)L"randx", 0.0f, szPath);
+    m_AnimProfiles[n].fRandY = GetPrivateProfileFloatW(section, (wchar_t*)L"randy", 0.0f, szPath);
+
+    m_AnimProfiles[n].fStartX = GetPrivateProfileFloatW(section, (wchar_t*)L"startx", -100.0f, szPath);
+    m_AnimProfiles[n].fStartY = GetPrivateProfileFloatW(section, (wchar_t*)L"starty", -100.0f, szPath);
+    m_AnimProfiles[n].fMoveTime = GetPrivateProfileFloatW(section, (wchar_t*)L"movetime", 0.0f, szPath);
+    m_AnimProfiles[n].nEaseMode = GetPrivateProfileIntW(section, L"easemode", 2, szPath);
+    m_AnimProfiles[n].fEaseFactor = GetPrivateProfileFloatW(section, (wchar_t*)L"easefactor", 2.0f, szPath);
+
+    GetPrivateProfileStringW(section, L"face", L"", m_AnimProfiles[n].szFontFace, 128, szPath);
+    m_AnimProfiles[n].fFontSize = GetPrivateProfileFloatW(section, (wchar_t*)L"size", 50.0f, szPath);
+    m_AnimProfiles[n].bBold = GetPrivateProfileIntW(section, L"bold", 0, szPath);
+    m_AnimProfiles[n].bItal = GetPrivateProfileIntW(section, L"ital", 0, szPath);
+    m_AnimProfiles[n].nColorR = GetPrivateProfileIntW(section, L"r", 255, szPath);
+    m_AnimProfiles[n].nColorG = GetPrivateProfileIntW(section, L"g", 255, szPath);
+    m_AnimProfiles[n].nColorB = GetPrivateProfileIntW(section, L"b", 255, szPath);
+    m_AnimProfiles[n].nRandR = GetPrivateProfileIntW(section, L"randr", 0, szPath);
+    m_AnimProfiles[n].nRandG = GetPrivateProfileIntW(section, L"randg", 0, szPath);
+    m_AnimProfiles[n].nRandB = GetPrivateProfileIntW(section, L"randb", 0, szPath);
+
+    m_AnimProfiles[n].fDuration = GetPrivateProfileFloatW(section, (wchar_t*)L"duration", 5.0f, szPath);
+    m_AnimProfiles[n].fFadeIn = GetPrivateProfileFloatW(section, (wchar_t*)L"fadein", 0.2f, szPath);
+    m_AnimProfiles[n].fFadeOut = GetPrivateProfileFloatW(section, (wchar_t*)L"fadeout", 0.5f, szPath);
+    m_AnimProfiles[n].fBurnTime = GetPrivateProfileFloatW(section, (wchar_t*)L"burntime", 0.0f, szPath);
+
+    m_AnimProfiles[n].fGrowth = GetPrivateProfileFloatW(section, (wchar_t*)L"growth", 1.0f, szPath);
+    m_AnimProfiles[n].fShadowOffset = GetPrivateProfileFloatW(section, (wchar_t*)L"shadow", 0.0f, szPath);
+    m_AnimProfiles[n].fBoxAlpha = GetPrivateProfileFloatW(section, (wchar_t*)L"boxalpha", 0.0f, szPath);
+    m_AnimProfiles[n].nBoxColR = GetPrivateProfileIntW(section, L"boxr", 0, szPath);
+    m_AnimProfiles[n].nBoxColG = GetPrivateProfileIntW(section, L"boxg", 0, szPath);
+    m_AnimProfiles[n].nBoxColB = GetPrivateProfileIntW(section, L"boxb", 0, szPath);
+
+    m_AnimProfiles[n].bRandPos = GetPrivateProfileIntW(section, L"rand_pos", 0, szPath);
+    m_AnimProfiles[n].bRandSize = GetPrivateProfileIntW(section, L"rand_size", 0, szPath);
+    m_AnimProfiles[n].bRandColor = GetPrivateProfileIntW(section, L"rand_color", 0, szPath);
+    m_AnimProfiles[n].bRandGrowth = GetPrivateProfileIntW(section, L"rand_growth", 0, szPath);
+    m_AnimProfiles[n].bRandDuration = GetPrivateProfileIntW(section, L"rand_duration", 0, szPath);
+  }
+}
+
 int Engine::PickRandomAnimProfile() {
   int pool[MAX_ANIM_PROFILES];
   int poolSize = 0;

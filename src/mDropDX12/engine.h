@@ -1179,6 +1179,8 @@ public:
   int     PickRandomAnimProfile();
   void    ReadAnimProfiles();
   void    WriteAnimProfiles();
+  void    ExportAnimProfiles(wchar_t* szPath);
+  void    ImportAnimProfiles(wchar_t* szPath);
   void    CreateDefaultAnimProfiles();
   void    CaptureScreenshot();
   bool    CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFilenameSize);

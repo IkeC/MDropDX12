@@ -794,6 +794,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_TEXTANIM_COLOR_SWATCH  9462  // Static: text color preview swatch
 #define IDC_MW_TEXTANIM_BOXCOL_SWATCH 9463  // Static: box color preview swatch
 #define IDC_MW_TEXTANIM_FONT_PREVIEW  9464  // Static: font name/style preview
+#define IDC_MW_TEXTANIM_EXPORT        9465  // Export profiles to .ini file
+#define IDC_MW_TEXTANIM_IMPORT        9466  // Import profiles from .ini file
 
 // Custom message for animation preview
 #define WM_MW_PUSH_ANIM_PREVIEW       (WM_APP + 25)

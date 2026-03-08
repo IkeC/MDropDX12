@@ -445,7 +445,7 @@ void TextAnimWindow::DoBuildControls()
   }
   y += listH + gap;
 
-  // ── Button row: Add, Duplicate, Delete, Move Up, Move Down, Templates ──
+  // ── Button row 1: Add, Duplicate, Delete, Move Up, Move Down ──
   {
     int btnW = MulDiv(58, lineH, 26);
     int btnGap = 4;
@@ -460,10 +460,15 @@ void TextAnimWindow::DoBuildControls()
     bx += MulDiv(30, lineH, 26) + btnGap;
     TrackControl(CreateBtn(hw, L"\x25BC", IDC_MW_TEXTANIM_MOVEDOWN, bx, y, MulDiv(30, lineH, 26), lineH, hFont));
 
-    // Right-aligned: Templates
+    // Right-aligned: Export, Import, Templates
+    int eiW = MulDiv(60, lineH, 26);
     int templW = MulDiv(80, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Templates", IDC_MW_TEXTANIM_TEMPLATES,
-      x + rw - templW, y, templW, lineH, hFont));
+    int rx = x + rw - templW;
+    TrackControl(CreateBtn(hw, L"Defaults", IDC_MW_TEXTANIM_TEMPLATES, rx, y, templW, lineH, hFont));
+    rx -= eiW + btnGap;
+    TrackControl(CreateBtn(hw, L"Import", IDC_MW_TEXTANIM_IMPORT, rx, y, eiW, lineH, hFont));
+    rx -= eiW + btnGap;
+    TrackControl(CreateBtn(hw, L"Export", IDC_MW_TEXTANIM_EXPORT, rx, y, eiW, lineH, hFont));
   }
   y += lineH + gap + 4;
 
@@ -834,18 +839,75 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     return 0;
 
   case IDC_MW_TEXTANIM_TEMPLATES:
-    if (MessageBoxW(hWnd, L"Reset profiles to built-in defaults?\nThis will replace all current profiles.",
-                    L"Load Templates", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+    if (MessageBoxW(hWnd, L"Reset profiles to built-in defaults?\n\nThis will replace all current profiles.\nUse Export first to back up your profiles.",
+                    L"Reset to Defaults", MB_YESNO | MB_ICONWARNING) == IDYES) {
       p->CreateDefaultAnimProfiles();
       PopulateListView();
       SelectProfile(0);
-      // Refresh combos
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
                            p, p->m_nSongTitleAnimProfile, L"(Default)");
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
                            p, p->m_nPresetNameAnimProfile, L"(Disabled)");
     }
     return 0;
+
+  case IDC_MW_TEXTANIM_EXPORT:
+  {
+    SaveEditControls();
+    wchar_t szFile[MAX_PATH] = L"animations.ini";
+    OPENFILENAMEW ofn = { sizeof(ofn) };
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFilter = L"INI Files (*.ini)\0*.ini\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"ini";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.lpstrTitle = L"Export Animation Profiles";
+    // Default to app directory
+    wchar_t szInitDir[MAX_PATH];
+    wcscpy_s(szInitDir, p->m_szBaseDir);
+    ofn.lpstrInitialDir = szInitDir;
+
+    if (GetSaveFileNameW(&ofn)) {
+      // Delete existing file so we write a clean export (no stale sections)
+      DeleteFileW(szFile);
+      p->ExportAnimProfiles(szFile);
+      wchar_t msg[MAX_PATH + 64];
+      swprintf(msg, MAX_PATH + 64, L"Exported %d profiles.", p->m_nAnimProfileCount);
+      p->AddNotification(msg);
+    }
+    return 0;
+  }
+
+  case IDC_MW_TEXTANIM_IMPORT:
+  {
+    wchar_t szFile[MAX_PATH] = {};
+    OPENFILENAMEW ofn = { sizeof(ofn) };
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFilter = L"INI Files (*.ini)\0*.ini\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.lpstrTitle = L"Import Animation Profiles";
+    wchar_t szInitDir[MAX_PATH];
+    wcscpy_s(szInitDir, p->m_szBaseDir);
+    ofn.lpstrInitialDir = szInitDir;
+
+    if (GetOpenFileNameW(&ofn)) {
+      int oldCount = p->m_nAnimProfileCount;
+      p->ImportAnimProfiles(szFile);
+      PopulateListView();
+      SelectProfile(0);
+      PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
+                           p, p->m_nSongTitleAnimProfile, L"(Default)");
+      PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
+                           p, p->m_nPresetNameAnimProfile, L"(Disabled)");
+      wchar_t msg[MAX_PATH + 64];
+      swprintf(msg, MAX_PATH + 64, L"Imported %d profiles (was %d).", p->m_nAnimProfileCount, oldCount);
+      p->AddNotification(msg);
+    }
+    return 0;
+  }
 
   case IDC_MW_TEXTANIM_PREVIEW:
     if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
