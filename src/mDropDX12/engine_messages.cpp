@@ -7,6 +7,7 @@
 
 #include "engine.h"
 #include "engine_helpers.h"
+#include "tool_window.h"
 #include "pipe_server.h"
 #include "utility.h"
 #include "AutoCharFn.h"
@@ -801,148 +802,271 @@ void Engine::ScheduleNextAutoMessage() {
   m_fNextAutoMsgTime = GetTime() + interval;
 }
 
-// Message edit dialog procedure
-struct MsgEditDlgData {
-  Engine*    plugin;
-  int         msgIndex;
-  bool        isNew;
-  HWND        hDlgWnd;
-  bool        bResult;
-  bool        bDone;
+// ======== Message Edit Dialog (ModalDialog subclass) ========
+
+class MsgEditDialog : public mdrop::ModalDialog {
+public:
+  MsgEditDialog(Engine* pEngine) : ModalDialog(pEngine) {}
+
+  // Context
+  int  msgIndex = 0;
+  bool isNew = false;
 
   // Working copy of message fields
-  wchar_t     szText[256];
-  int         nFont;
-  float       fSize, x, y, growth, fTime, fFade, fFadeOut;
+  wchar_t szText[256] = {};
+  int  nFont = 0;
+  float fSize = 50.0f, x = 0.5f, y = 0.5f, growth = 1.0f;
+  float fTime = 5.0f, fFade = 1.0f, fFadeOut = 1.0f;
 
   // Font override working copy
-  bool        bOverrideFace, bOverrideBold, bOverrideItal;
-  bool        bOverrideColorR, bOverrideColorG, bOverrideColorB;
-  wchar_t     szFace[128];
-  int         bBold, bItal;
-  int         nColorR, nColorG, nColorB;
+  bool bOverrideFace = false, bOverrideBold = false, bOverrideItal = false;
+  bool bOverrideColorR = false, bOverrideColorG = false, bOverrideColorB = false;
+  wchar_t szFace[128] = {};
+  int  bBold = -1, bItal = -1;
+  int  nColorR = -1, nColorG = -1, nColorB = -1;
 
   // Animation profile
-  int nAnimProfile;
+  int nAnimProfile = -1;
 
   // Per-message randomize working copies
-  bool bRandPos, bRandSize, bRandFont, bRandColor;
-  bool bRandEffects, bRandGrowth, bRandDuration;
+  bool bRandPos = false, bRandSize = false, bRandFont = false, bRandColor = false;
+  bool bRandEffects = false, bRandGrowth = false, bRandDuration = false;
 
   // Original message backup (for Send Now + Cancel)
-  td_custom_msg originalMsg;
+  td_custom_msg originalMsg = {};
 
   static COLORREF s_acrCustColors[16];
-};
-COLORREF MsgEditDlgData::s_acrCustColors[16] = {};
 
-static void UpdateMsgEditFontPreview(MsgEditDlgData* data) {
-  if (!data || !data->hDlgWnd) return;
-  Engine* p = data->plugin;
-  int fontID = data->nFont;
-  if (fontID < 0) fontID = 0;
-  if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
+protected:
+  const wchar_t* GetDialogTitle() const override {
+    return isNew ? L"Add Message" : L"Edit Message";
+  }
+  const wchar_t* GetDialogClass() const override { return L"MDropDX12MsgEdit"; }
 
-  const wchar_t* face = data->bOverrideFace ? data->szFace : p->m_CustomMessageFont[fontID].szFace;
-  bool bold = data->bOverrideBold ? (data->bBold != 0) : (p->m_CustomMessageFont[fontID].bBold != 0);
-  bool ital = data->bOverrideItal ? (data->bItal != 0) : (p->m_CustomMessageFont[fontID].bItal != 0);
-  int r = data->bOverrideColorR ? data->nColorR : p->m_CustomMessageFont[fontID].nColorR;
-  int g = data->bOverrideColorG ? data->nColorG : p->m_CustomMessageFont[fontID].nColorG;
-  int b = data->bOverrideColorB ? data->nColorB : p->m_CustomMessageFont[fontID].nColorB;
+  void DoBuildControls(int clientW, int clientH) override {
+    HFONT hFont = GetFont();
+    HINSTANCE hInst = GetModuleHandle(NULL);
+    int lineH = GetLineHeight();
+    int margin = MulDiv(12, lineH, 20);
+    int rw = clientW - margin * 2;
+    int lblW = MulDiv(90, lineH, 20), editW = MulDiv(60, lineH, 20);
+    int yPos = MulDiv(10, lineH, 20);
+    int xVal = margin + lblW + 4;
+    int smallH = lineH - 4;
+    int editH = lineH;
+    int btnH = lineH + 4;
+    int textEditH = lineH * 2 + 8;
+    wchar_t buf[64];
 
-  wchar_t preview[256];
-  swprintf(preview, 256, L"%s%s%s   RGB(%d, %d, %d)",
-    face, bold ? L", Bold" : L"", ital ? L", Italic" : L"", r, g, b);
-  SetWindowTextW(GetDlgItem(data->hDlgWnd, IDC_MSGEDIT_FONT_PREVIEW), preview);
-  InvalidateRect(GetDlgItem(data->hDlgWnd, IDC_MSGEDIT_COLOR_SWATCH), NULL, TRUE);
-}
+    // Text label + edit
+    TrackControl(CreateLabel(m_hWnd, L"Message Text:", margin, yPos, rw, smallH, hFont));
+    yPos += smallH + 2;
+    TrackControl(CreateEdit(m_hWnd, szText, IDC_MSGEDIT_TEXT, margin, yPos, rw, textEditH, hFont,
+      ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL));
+    yPos += textEditH + 6;
 
-static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-  MsgEditDlgData* data = (MsgEditDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    // Font section
+    TrackControl(CreateLabel(m_hWnd, L"Base Font:", margin, yPos + 2, MulDiv(70, lineH, 20), smallH, hFont));
+    m_hFontCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+      margin + MulDiv(74, lineH, 20), yPos, rw - MulDiv(74, lineH, 20), 300, m_hWnd,
+      (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO, hInst, NULL);
+    if (m_hFontCombo) SendMessage(m_hFontCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(m_hFontCombo);
+    for (int i = 0; i < MAX_CUSTOM_MESSAGE_FONTS; i++) {
+      wchar_t entry[160];
+      swprintf(entry, 160, L"Font %02d: %s%s%s", i,
+        m_pEngine->m_CustomMessageFont[i].szFace,
+        m_pEngine->m_CustomMessageFont[i].bBold ? L" [Bold]" : L"",
+        m_pEngine->m_CustomMessageFont[i].bItal ? L" [Italic]" : L"");
+      SendMessageW(m_hFontCombo, CB_ADDSTRING, 0, (LPARAM)entry);
+    }
+    SendMessage(m_hFontCombo, CB_SETCURSEL, nFont, 0);
+    yPos += lineH + 4;
 
-  switch (msg) {
-  case WM_COMMAND: {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
+    // Choose Font, Choose Color, Color Swatch
+    int chooseBtnW = MulDiv(110, lineH, 20);
+    TrackControl(CreateBtn(m_hWnd, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, yPos, chooseBtnW, btnH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + chooseBtnW + 6, yPos, chooseBtnW, btnH, hFont));
+    // Color swatch (owner-drawn static, uses SwatchColor prop for HandleDarkDrawItem)
+    int swatchSize = smallH;
+    HWND hSwatch = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
+      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
+      margin + chooseBtnW * 2 + 12, yPos + 2, swatchSize, swatchSize, m_hWnd,
+      (HMENU)(INT_PTR)IDC_MSGEDIT_COLOR_SWATCH, hInst, NULL);
+    TrackControl(hSwatch);
+    yPos += btnH + 6;
 
+    // Font preview
+    HWND hPreview = CreateLabel(m_hWnd, L"", margin, yPos, rw, smallH, hFont);
+    SetWindowLongPtr(hPreview, GWL_ID, IDC_MSGEDIT_FONT_PREVIEW);
+    TrackControl(hPreview);
+    yPos += lineH + 4;
+
+    // Separator
+    yPos += 4;
+
+    // Size, X, Y on same row
+    TrackControl(CreateLabel(m_hWnd, L"Size (0-100):", margin, yPos + 2, lblW, smallH, hFont));
+    swprintf(buf, 64, L"%.0f", fSize);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_SIZE, xVal, yPos, editW, editH, hFont));
+    int smallLblW = MulDiv(16, lineH, 20);
+    TrackControl(CreateLabel(m_hWnd, L"X:", xVal + editW + 10, yPos + 2, smallLblW, smallH, hFont));
+    swprintf(buf, 64, L"%.2f", x);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_XPOS, xVal + editW + 10 + smallLblW + 2, yPos, editW, editH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"Y:", xVal + editW * 2 + 10 + smallLblW + 12, yPos + 2, smallLblW, smallH, hFont));
+    swprintf(buf, 64, L"%.2f", y);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 10 + smallLblW * 2 + 14, yPos, editW, editH, hFont));
+    yPos += lineH + 4;
+
+    // Growth
+    TrackControl(CreateLabel(m_hWnd, L"Growth:", margin, yPos + 2, lblW, smallH, hFont));
+    swprintf(buf, 64, L"%.2f", growth);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_GROWTH, xVal, yPos, editW, editH, hFont));
+    yPos += lineH + 4;
+
+    // Duration
+    TrackControl(CreateLabel(m_hWnd, L"Duration (s):", margin, yPos + 2, lblW, smallH, hFont));
+    swprintf(buf, 64, L"%.1f", fTime);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_TIME, xVal, yPos, editW, editH, hFont));
+    yPos += lineH + 4;
+
+    // Fade In, Fade Out on same row
+    int fadeOutLblW = MulDiv(70, lineH, 20);
+    TrackControl(CreateLabel(m_hWnd, L"Fade In (s):", margin, yPos + 2, lblW, smallH, hFont));
+    swprintf(buf, 64, L"%.1f", fFade);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_FADEIN, xVal, yPos, editW, editH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"Fade Out:", xVal + editW + 10, yPos + 2, fadeOutLblW, smallH, hFont));
+    swprintf(buf, 64, L"%.1f", fFadeOut);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, yPos, editW, editH, hFont));
+    yPos += lineH + 6;
+
+    // Animation Profile combo
+    TrackControl(CreateLabel(m_hWnd, L"Anim Profile:", margin, yPos + 2, lblW, smallH, hFont));
+    {
+      int apComboW = rw - lblW - 4;
+      HWND hAPCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        xVal, yPos, apComboW, lineH * 10, m_hWnd,
+        (HMENU)(INT_PTR)IDC_MSGEDIT_ANIM_PROFILE, hInst, NULL);
+      if (hAPCombo) SendMessage(hAPCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+      TrackControl(hAPCombo);
+      SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Use message settings)");
+      SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random profile)");
+      for (int i = 0; i < m_pEngine->m_nAnimProfileCount; i++)
+        SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)m_pEngine->m_AnimProfiles[i].szName);
+      int apSel = 0;
+      if (nAnimProfile == -2) apSel = 1;
+      else if (nAnimProfile >= 0) apSel = nAnimProfile + 2;
+      SendMessage(hAPCombo, CB_SETCURSEL, apSel, 0);
+    }
+    yPos += lineH + 6;
+
+    // --- Randomize section (2-column checkboxes) ---
+    int halfW = (rw - 10) / 2;
+    int randBtnW = MulDiv(110, lineH, 20);
+    TrackControl(CreateLabel(m_hWnd, L"Randomize:", margin, yPos + 2, MulDiv(80, lineH, 20), smallH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"Randomize All", IDC_MSGEDIT_RAND_ALL, margin + rw - randBtnW, yPos, randBtnW, btnH, hFont));
+    yPos += btnH + 4;
+
+    TrackControl(CreateCheck(m_hWnd, L"Position", IDC_MSGEDIT_RAND_POS, margin, yPos, halfW, editH, hFont, bRandPos, true));
+    TrackControl(CreateCheck(m_hWnd, L"Font", IDC_MSGEDIT_RAND_FONT, margin + halfW + 10, yPos, halfW, editH, hFont, bRandFont, true));
+    yPos += lineH + 2;
+    TrackControl(CreateCheck(m_hWnd, L"Size", IDC_MSGEDIT_RAND_SIZE, margin, yPos, halfW, editH, hFont, bRandSize, true));
+    TrackControl(CreateCheck(m_hWnd, L"Color", IDC_MSGEDIT_RAND_COLOR, margin + halfW + 10, yPos, halfW, editH, hFont, bRandColor, true));
+    yPos += lineH + 2;
+    TrackControl(CreateCheck(m_hWnd, L"Effects (bold/ital)", IDC_MSGEDIT_RAND_EFFECTS, margin, yPos, halfW, editH, hFont, bRandEffects, true));
+    TrackControl(CreateCheck(m_hWnd, L"Growth", IDC_MSGEDIT_RAND_GROWTH, margin + halfW + 10, yPos, halfW, editH, hFont, bRandGrowth, true));
+    yPos += lineH + 2;
+    TrackControl(CreateCheck(m_hWnd, L"Duration", IDC_MSGEDIT_RAND_DURATION, margin, yPos, halfW, editH, hFont, bRandDuration, true));
+    yPos += lineH + 12;
+
+    // Send Now / OK / Cancel buttons
+    int okBtnW = MulDiv(80, lineH, 20);
+    int sendBtnW = MulDiv(90, lineH, 20);
+    TrackControl(CreateBtn(m_hWnd, L"Send Now", IDC_MSGEDIT_SEND_NOW, margin, yPos, sendBtnW, btnH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW + 20, yPos, okBtnW, btnH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + okBtnW + 20, yPos, okBtnW, btnH, hFont));
+
+    // Update the font preview + color swatch
+    UpdateFontPreview();
+  }
+
+  LRESULT DoCommand(int id, int code, LPARAM lParam) override {
     if (id == IDC_MSGEDIT_OK && code == BN_CLICKED) {
       wchar_t buf[256];
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TEXT), data->szText, 256);
-      if (data->szText[0] == 0) {
-        MessageBoxW(hWnd, L"Message text cannot be empty.", L"Messages", MB_OK);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_TEXT), szText, 256);
+      if (szText[0] == 0) {
+        MessageBoxW(m_hWnd, L"Message text cannot be empty.", L"Messages", MB_OK);
         return 0;
       }
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_SIZE), buf, 64);
-      data->fSize = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_XPOS), buf, 64);
-      data->x = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_YPOS), buf, 64);
-      data->y = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_GROWTH), buf, 64);
-      data->growth = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TIME), buf, 64);
-      data->fTime = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEIN), buf, 64);
-      data->fFade = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEOUT), buf, 64);
-      data->fFadeOut = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_SIZE), buf, 64);
+      fSize = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_XPOS), buf, 64);
+      x = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_YPOS), buf, 64);
+      y = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_GROWTH), buf, 64);
+      growth = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_TIME), buf, 64);
+      fTime = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_FADEIN), buf, 64);
+      fFade = (float)_wtof(buf);
+      GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_FADEOUT), buf, 64);
+      fFadeOut = (float)_wtof(buf);
 
-      int sel = (int)SendMessage(GetDlgItem(hWnd, IDC_MSGEDIT_FONT_COMBO), CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS) data->nFont = sel;
+      int sel = (int)SendMessage(GetDlgItem(m_hWnd, IDC_MSGEDIT_FONT_COMBO), CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS) nFont = sel;
 
       // Clamp
-      if (data->nFont < 0) data->nFont = 0;
-      if (data->nFont >= MAX_CUSTOM_MESSAGE_FONTS) data->nFont = MAX_CUSTOM_MESSAGE_FONTS - 1;
-      if (data->fSize < 0) data->fSize = 0;
-      if (data->fSize > 100) data->fSize = 100;
-      if (data->fTime < 0.1f) data->fTime = 0.1f;
+      if (nFont < 0) nFont = 0;
+      if (nFont >= MAX_CUSTOM_MESSAGE_FONTS) nFont = MAX_CUSTOM_MESSAGE_FONTS - 1;
+      if (fSize < 0) fSize = 0;
+      if (fSize > 100) fSize = 100;
+      if (fTime < 0.1f) fTime = 0.1f;
 
       // Read randomize checkbox states
-      data->bRandPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_POS), L"Checked");
-      data->bRandSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_SIZE), L"Checked");
-      data->bRandFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_FONT), L"Checked");
-      data->bRandColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_COLOR), L"Checked");
-      data->bRandEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_EFFECTS), L"Checked");
-      data->bRandGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_GROWTH), L"Checked");
-      data->bRandDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_DURATION), L"Checked");
+      bRandPos = IsChecked(IDC_MSGEDIT_RAND_POS);
+      bRandSize = IsChecked(IDC_MSGEDIT_RAND_SIZE);
+      bRandFont = IsChecked(IDC_MSGEDIT_RAND_FONT);
+      bRandColor = IsChecked(IDC_MSGEDIT_RAND_COLOR);
+      bRandEffects = IsChecked(IDC_MSGEDIT_RAND_EFFECTS);
+      bRandGrowth = IsChecked(IDC_MSGEDIT_RAND_GROWTH);
+      bRandDuration = IsChecked(IDC_MSGEDIT_RAND_DURATION);
 
       // Animation profile combo: 0=(own), 1=(random), 2+=profile index
       {
-        int apSel = (int)SendMessage(GetDlgItem(hWnd, IDC_MSGEDIT_ANIM_PROFILE), CB_GETCURSEL, 0, 0);
-        if (apSel <= 0) data->nAnimProfile = -1;
-        else if (apSel == 1) data->nAnimProfile = -2;
-        else data->nAnimProfile = apSel - 2;
+        int apSel = (int)SendMessage(GetDlgItem(m_hWnd, IDC_MSGEDIT_ANIM_PROFILE), CB_GETCURSEL, 0, 0);
+        if (apSel <= 0) nAnimProfile = -1;
+        else if (apSel == 1) nAnimProfile = -2;
+        else nAnimProfile = apSel - 2;
       }
 
-      data->bResult = true;
-      data->bDone = true;
+      EndDialog(true);
       return 0;
     }
     if (id == IDC_MSGEDIT_CANCEL && code == BN_CLICKED) {
-      data->bResult = false;
-      data->bDone = true;
+      EndDialog(false);
       return 0;
     }
     if (id == IDC_MSGEDIT_FONT_COMBO && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
       if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS)
-        data->nFont = sel;
-      UpdateMsgEditFontPreview(data);
+        nFont = sel;
+      UpdateFontPreview();
       return 0;
     }
     if (id == IDC_MSGEDIT_CHOOSE_FONT && code == BN_CLICKED) {
-      Engine* p = data->plugin;
-      int fontID = data->nFont;
+      int fontID = nFont;
       if (fontID < 0) fontID = 0;
       if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
 
-      // Resolve current effective values
-      const wchar_t* curFace = data->bOverrideFace ? data->szFace : p->m_CustomMessageFont[fontID].szFace;
-      bool curBold = data->bOverrideBold ? (data->bBold != 0) : (p->m_CustomMessageFont[fontID].bBold != 0);
-      bool curItal = data->bOverrideItal ? (data->bItal != 0) : (p->m_CustomMessageFont[fontID].bItal != 0);
-      int curR = data->bOverrideColorR ? data->nColorR : p->m_CustomMessageFont[fontID].nColorR;
-      int curG = data->bOverrideColorG ? data->nColorG : p->m_CustomMessageFont[fontID].nColorG;
-      int curB = data->bOverrideColorB ? data->nColorB : p->m_CustomMessageFont[fontID].nColorB;
+      const wchar_t* curFace = bOverrideFace ? szFace : m_pEngine->m_CustomMessageFont[fontID].szFace;
+      bool curBold = bOverrideBold ? (bBold != 0) : (m_pEngine->m_CustomMessageFont[fontID].bBold != 0);
+      bool curItal = bOverrideItal ? (bItal != 0) : (m_pEngine->m_CustomMessageFont[fontID].bItal != 0);
+      int curR = bOverrideColorR ? nColorR : m_pEngine->m_CustomMessageFont[fontID].nColorR;
+      int curG = bOverrideColorG ? nColorG : m_pEngine->m_CustomMessageFont[fontID].nColorG;
+      int curB = bOverrideColorB ? nColorB : m_pEngine->m_CustomMessageFont[fontID].nColorB;
 
       LOGFONTW lf = {};
       wcscpy_s(lf.lfFaceName, 32, curFace);
@@ -951,1175 +1075,671 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       lf.lfHeight = -24;
 
       CHOOSEFONTW cf = { sizeof(cf) };
-      cf.hwndOwner = hWnd;
+      cf.hwndOwner = m_hWnd;
       cf.lpLogFont = &lf;
       cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
       cf.rgbColors = RGB(curR < 0 ? 255 : curR, curG < 0 ? 255 : curG, curB < 0 ? 255 : curB);
 
       if (ChooseFontW(&cf)) {
-        data->bOverrideFace = true;
-        wcscpy_s(data->szFace, 128, lf.lfFaceName);
-        data->bOverrideBold = true;
-        data->bBold = (lf.lfWeight >= FW_BOLD) ? 1 : 0;
-        data->bOverrideItal = true;
-        data->bItal = lf.lfItalic ? 1 : 0;
-        data->bOverrideColorR = true;
-        data->bOverrideColorG = true;
-        data->bOverrideColorB = true;
-        data->nColorR = GetRValue(cf.rgbColors);
-        data->nColorG = GetGValue(cf.rgbColors);
-        data->nColorB = GetBValue(cf.rgbColors);
-        UpdateMsgEditFontPreview(data);
+        bOverrideFace = true;
+        wcscpy_s(szFace, 128, lf.lfFaceName);
+        bOverrideBold = true;
+        bBold = (lf.lfWeight >= FW_BOLD) ? 1 : 0;
+        bOverrideItal = true;
+        bItal = lf.lfItalic ? 1 : 0;
+        bOverrideColorR = true;
+        bOverrideColorG = true;
+        bOverrideColorB = true;
+        nColorR = GetRValue(cf.rgbColors);
+        nColorG = GetGValue(cf.rgbColors);
+        nColorB = GetBValue(cf.rgbColors);
+        UpdateFontPreview();
       }
       return 0;
     }
     if (id == IDC_MSGEDIT_CHOOSE_COLOR && code == BN_CLICKED) {
-      Engine* p = data->plugin;
-      int fontID = data->nFont;
+      int fontID = nFont;
       if (fontID < 0) fontID = 0;
       if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
 
-      int curR = data->bOverrideColorR ? data->nColorR : p->m_CustomMessageFont[fontID].nColorR;
-      int curG = data->bOverrideColorG ? data->nColorG : p->m_CustomMessageFont[fontID].nColorG;
-      int curB = data->bOverrideColorB ? data->nColorB : p->m_CustomMessageFont[fontID].nColorB;
+      int curR = bOverrideColorR ? nColorR : m_pEngine->m_CustomMessageFont[fontID].nColorR;
+      int curG = bOverrideColorG ? nColorG : m_pEngine->m_CustomMessageFont[fontID].nColorG;
+      int curB = bOverrideColorB ? nColorB : m_pEngine->m_CustomMessageFont[fontID].nColorB;
 
       CHOOSECOLORW cc = { sizeof(cc) };
-      cc.hwndOwner = hWnd;
+      cc.hwndOwner = m_hWnd;
       cc.rgbResult = RGB(curR < 0 ? 255 : curR, curG < 0 ? 255 : curG, curB < 0 ? 255 : curB);
-      cc.lpCustColors = MsgEditDlgData::s_acrCustColors;
+      cc.lpCustColors = s_acrCustColors;
       cc.Flags = CC_FULLOPEN | CC_RGBINIT;
 
       if (ChooseColorW(&cc)) {
-        data->bOverrideColorR = true;
-        data->bOverrideColorG = true;
-        data->bOverrideColorB = true;
-        data->nColorR = GetRValue(cc.rgbResult);
-        data->nColorG = GetGValue(cc.rgbResult);
-        data->nColorB = GetBValue(cc.rgbResult);
-        UpdateMsgEditFontPreview(data);
+        bOverrideColorR = true;
+        bOverrideColorG = true;
+        bOverrideColorB = true;
+        nColorR = GetRValue(cc.rgbResult);
+        nColorG = GetGValue(cc.rgbResult);
+        nColorB = GetBValue(cc.rgbResult);
+        UpdateFontPreview();
       }
       return 0;
     }
-    // Randomize All — check all per-message randomize checkboxes
+    // Randomize All
     if (id == IDC_MSGEDIT_RAND_ALL && code == BN_CLICKED) {
       int ids[] = { IDC_MSGEDIT_RAND_POS, IDC_MSGEDIT_RAND_SIZE, IDC_MSGEDIT_RAND_FONT,
                     IDC_MSGEDIT_RAND_COLOR, IDC_MSGEDIT_RAND_EFFECTS, IDC_MSGEDIT_RAND_GROWTH,
                     IDC_MSGEDIT_RAND_DURATION };
-      for (int cid : ids) {
-        HWND hCtrl = GetDlgItem(hWnd, cid);
-        if (hCtrl) {
-          SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)1);
-          InvalidateRect(hCtrl, NULL, TRUE);
-        }
-      }
+      for (int cid : ids)
+        SetChecked(cid, true);
       return 0;
     }
-    // Send Now — preview the message immediately
-    if (id == IDC_MSGEDIT_SEND_NOW && code == BN_CLICKED && data) {
-      // Read current control values into data
-      wchar_t buf[256];
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TEXT), data->szText, 256);
-      if (data->szText[0] == 0) return 0;
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_SIZE), buf, 64);
-      data->fSize = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_XPOS), buf, 64);
-      data->x = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_YPOS), buf, 64);
-      data->y = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_GROWTH), buf, 64);
-      data->growth = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_TIME), buf, 64);
-      data->fTime = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEIN), buf, 64);
-      data->fFade = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGEDIT_FADEOUT), buf, 64);
-      data->fFadeOut = (float)_wtof(buf);
-      int sel = (int)SendMessage(GetDlgItem(hWnd, IDC_MSGEDIT_FONT_COMBO), CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS) data->nFont = sel;
-      // Read randomize flags
-      data->bRandPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_POS), L"Checked");
-      data->bRandSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_SIZE), L"Checked");
-      data->bRandFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_FONT), L"Checked");
-      data->bRandColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_COLOR), L"Checked");
-      data->bRandEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_EFFECTS), L"Checked");
-      data->bRandGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_GROWTH), L"Checked");
-      data->bRandDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGEDIT_RAND_DURATION), L"Checked");
+    // Send Now
+    if (id == IDC_MSGEDIT_SEND_NOW && code == BN_CLICKED) {
+      ReadControlValues();
+      if (szText[0] == 0) return 0;
 
       // Temporarily write to the message slot and push it
-      Engine* p = data->plugin;
-      td_custom_msg* m = &p->m_CustomMessage[data->msgIndex];
-      wcscpy_s(m->szText, 256, data->szText);
-      m->nFont = data->nFont;
-      m->fSize = data->fSize;
-      m->x = data->x;
-      m->y = data->y;
-      m->growth = data->growth;
-      m->fTime = data->fTime;
-      m->fFade = data->fFade;
-      m->fFadeOut = data->fFadeOut;
-      m->bOverrideFace = data->bOverrideFace ? 1 : 0;
-      m->bOverrideBold = data->bOverrideBold ? 1 : 0;
-      m->bOverrideItal = data->bOverrideItal ? 1 : 0;
-      m->bOverrideColorR = data->bOverrideColorR ? 1 : 0;
-      m->bOverrideColorG = data->bOverrideColorG ? 1 : 0;
-      m->bOverrideColorB = data->bOverrideColorB ? 1 : 0;
-      wcscpy_s(m->szFace, 128, data->szFace);
-      m->bBold = data->bBold;
-      m->bItal = data->bItal;
-      m->nColorR = data->nColorR;
-      m->nColorG = data->nColorG;
-      m->nColorB = data->nColorB;
-      m->bRandPos = data->bRandPos ? 1 : 0;
-      m->bRandSize = data->bRandSize ? 1 : 0;
-      m->bRandFont = data->bRandFont ? 1 : 0;
-      m->bRandColor = data->bRandColor ? 1 : 0;
-      m->bRandEffects = data->bRandEffects ? 1 : 0;
-      m->bRandGrowth = data->bRandGrowth ? 1 : 0;
-      m->bRandDuration = data->bRandDuration ? 1 : 0;
+      td_custom_msg* m = &m_pEngine->m_CustomMessage[msgIndex];
+      wcscpy_s(m->szText, 256, szText);
+      m->nFont = nFont;
+      m->fSize = fSize;
+      m->x = x;
+      m->y = y;
+      m->growth = growth;
+      m->fTime = fTime;
+      m->fFade = fFade;
+      m->fFadeOut = fFadeOut;
+      m->bOverrideFace = bOverrideFace ? 1 : 0;
+      m->bOverrideBold = bOverrideBold ? 1 : 0;
+      m->bOverrideItal = bOverrideItal ? 1 : 0;
+      m->bOverrideColorR = bOverrideColorR ? 1 : 0;
+      m->bOverrideColorG = bOverrideColorG ? 1 : 0;
+      m->bOverrideColorB = bOverrideColorB ? 1 : 0;
+      wcscpy_s(m->szFace, 128, szFace);
+      m->bBold = bBold;
+      m->bItal = bItal;
+      m->nColorR = nColorR;
+      m->nColorG = nColorG;
+      m->nColorB = nColorB;
+      m->bRandPos = bRandPos ? 1 : 0;
+      m->bRandSize = bRandSize ? 1 : 0;
+      m->bRandFont = bRandFont ? 1 : 0;
+      m->bRandColor = bRandColor ? 1 : 0;
+      m->bRandEffects = bRandEffects ? 1 : 0;
+      m->bRandGrowth = bRandGrowth ? 1 : 0;
+      m->bRandDuration = bRandDuration ? 1 : 0;
 
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_PUSH_MESSAGE, data->msgIndex, 0);
+      HWND hw = m_pEngine->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_PUSH_MESSAGE, msgIndex, 0);
       return 0;
     }
-    // Owner-drawn checkbox toggle for randomize checkboxes
-    if (code == BN_CLICKED) {
-      HWND hCtrl = (HWND)lParam;
-      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
-      if (bIsCheckbox) {
-        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
-        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
-        InvalidateRect(hCtrl, NULL, TRUE);
-      }
-    }
-    break;
+    return -1;
   }
 
-  case WM_DRAWITEM: {
-    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-    if (!pDIS) break;
-    if (pDIS->CtlType == ODT_BUTTON) {
-      // Owner-drawn checkbox rendering
-      if (data && data->plugin) {
-        Engine* p = data->plugin;
-        bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
-        if (bIsCheckbox) {
-          DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
-            p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-          return TRUE;
-        }
-      }
-      if ((int)pDIS->CtlID == IDC_MSGEDIT_COLOR_SWATCH && data) {
-        // Draw color swatch
-        Engine* p = data->plugin;
-        int fontID = data->nFont;
-        if (fontID < 0) fontID = 0;
-        if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
-        int r = data->bOverrideColorR ? data->nColorR : p->m_CustomMessageFont[fontID].nColorR;
-        int g = data->bOverrideColorG ? data->nColorG : p->m_CustomMessageFont[fontID].nColorG;
-        int b = data->bOverrideColorB ? data->nColorB : p->m_CustomMessageFont[fontID].nColorB;
-        HBRUSH hBr = CreateSolidBrush(RGB(r < 0 ? 255 : r, g < 0 ? 255 : g, b < 0 ? 255 : b));
-        FillRect(pDIS->hDC, &pDIS->rcItem, hBr);
-        DeleteObject(hBr);
-        FrameRect(pDIS->hDC, &pDIS->rcItem, (HBRUSH)GetStockObject(WHITE_BRUSH));
-        return TRUE;
-      }
-      if (data && data->plugin) {
-        Engine* p = data->plugin;
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-        return TRUE;
-      }
-    }
-    break;
+private:
+  HWND m_hFontCombo = NULL;
+
+  void ReadControlValues() {
+    wchar_t buf[256];
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_TEXT), szText, 256);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_SIZE), buf, 64);
+    fSize = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_XPOS), buf, 64);
+    x = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_YPOS), buf, 64);
+    y = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_GROWTH), buf, 64);
+    growth = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_TIME), buf, 64);
+    fTime = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_FADEIN), buf, 64);
+    fFade = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_FADEOUT), buf, 64);
+    fFadeOut = (float)_wtof(buf);
+    int sel = (int)SendMessage(GetDlgItem(m_hWnd, IDC_MSGEDIT_FONT_COMBO), CB_GETCURSEL, 0, 0);
+    if (sel >= 0 && sel < MAX_CUSTOM_MESSAGE_FONTS) nFont = sel;
+    bRandPos = IsChecked(IDC_MSGEDIT_RAND_POS);
+    bRandSize = IsChecked(IDC_MSGEDIT_RAND_SIZE);
+    bRandFont = IsChecked(IDC_MSGEDIT_RAND_FONT);
+    bRandColor = IsChecked(IDC_MSGEDIT_RAND_COLOR);
+    bRandEffects = IsChecked(IDC_MSGEDIT_RAND_EFFECTS);
+    bRandGrowth = IsChecked(IDC_MSGEDIT_RAND_GROWTH);
+    bRandDuration = IsChecked(IDC_MSGEDIT_RAND_DURATION);
   }
 
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
-      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
-    }
-    break;
+  void UpdateFontPreview() {
+    int fontID = nFont;
+    if (fontID < 0) fontID = 0;
+    if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
 
-  case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
-      return (LRESULT)data->plugin->m_hBrSettingsBg;
-    }
-    break;
+    const wchar_t* face = bOverrideFace ? szFace : m_pEngine->m_CustomMessageFont[fontID].szFace;
+    bool bold = bOverrideBold ? (bBold != 0) : (m_pEngine->m_CustomMessageFont[fontID].bBold != 0);
+    bool ital = bOverrideItal ? (bItal != 0) : (m_pEngine->m_CustomMessageFont[fontID].bItal != 0);
+    int r = bOverrideColorR ? nColorR : m_pEngine->m_CustomMessageFont[fontID].nColorR;
+    int g = bOverrideColorG ? nColorG : m_pEngine->m_CustomMessageFont[fontID].nColorG;
+    int b = bOverrideColorB ? nColorB : m_pEngine->m_CustomMessageFont[fontID].nColorB;
 
-  case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->IsDarkTheme()) {
-      RECT rc; GetClientRect(hWnd, &rc);
-      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
-      FillRect((HDC)wParam, &rc, hBr);
-      DeleteObject(hBr);
-      return 1;
-    }
-    break;
+    wchar_t preview[256];
+    swprintf(preview, 256, L"%s%s%s   RGB(%d, %d, %d)",
+      face, bold ? L", Bold" : L"", ital ? L", Italic" : L"", r, g, b);
+    SetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGEDIT_FONT_PREVIEW), preview);
 
-  case WM_CLOSE:
-    if (data) { data->bResult = false; data->bDone = true; }
-    return 0;
-
-  case WM_KEYDOWN:
-    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
-    if (wParam == VK_RETURN && data) {
-      // Simulate OK click
-      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_MSGEDIT_OK, BN_CLICKED), 0);
-      return 0;
+    // Update color swatch via SwatchColor property (handled by HandleDarkDrawItem)
+    HWND hSwatch = GetDlgItem(m_hWnd, IDC_MSGEDIT_COLOR_SWATCH);
+    if (hSwatch) {
+      SetPropW(hSwatch, L"SwatchColor", (HANDLE)(intptr_t)RGB(r < 0 ? 255 : r, g < 0 ? 255 : g, b < 0 ? 255 : b));
+      InvalidateRect(hSwatch, NULL, TRUE);
     }
-    break;
   }
-  return DefWindowProcW(hWnd, msg, wParam, lParam);
-}
+};
+COLORREF MsgEditDialog::s_acrCustColors[16] = {};
 
 bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
-  // Register window class (once)
-  static bool registered = false;
-  static const wchar_t* WND_CLASS = L"MDropDX12MsgEdit";
-  if (!registered) {
-    WNDCLASSEXW wc = { sizeof(wc) };
-    wc.lpfnWndProc = MsgEditWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.lpszClassName = WND_CLASS;
-    RegisterClassExW(&wc);
-    registered = true;
-  }
-
-  // Initialize working copy from message data
-  MsgEditDlgData data = {};
-  data.plugin = this;
-  data.msgIndex = msgIndex;
-  data.isNew = isNew;
-  data.bResult = false;
-  data.bDone = false;
+  MsgEditDialog dlg(this);
+  dlg.msgIndex = msgIndex;
+  dlg.isNew = isNew;
 
   td_custom_msg* m = &m_CustomMessage[msgIndex];
-  data.originalMsg = *m; // Save original for Cancel after Send Now
+  dlg.originalMsg = *m;
 
   if (!isNew) {
-    wcscpy_s(data.szText, 256, m->szText);
-    data.nFont = m->nFont;
-    data.fSize = m->fSize;
-    data.x = m->x;
-    data.y = m->y;
-    data.growth = m->growth;
-    data.fTime = m->fTime;
-    data.fFade = m->fFade;
-    data.fFadeOut = m->fFadeOut;
-    data.bOverrideFace = m->bOverrideFace != 0;
-    data.bOverrideBold = m->bOverrideBold != 0;
-    data.bOverrideItal = m->bOverrideItal != 0;
-    data.bOverrideColorR = m->bOverrideColorR != 0;
-    data.bOverrideColorG = m->bOverrideColorG != 0;
-    data.bOverrideColorB = m->bOverrideColorB != 0;
-    wcscpy_s(data.szFace, 128, m->szFace);
-    data.bBold = m->bBold;
-    data.bItal = m->bItal;
-    data.nColorR = m->nColorR;
-    data.nColorG = m->nColorG;
-    data.nColorB = m->nColorB;
-    data.bRandPos = m->bRandPos != 0;
-    data.bRandSize = m->bRandSize != 0;
-    data.bRandFont = m->bRandFont != 0;
-    data.bRandColor = m->bRandColor != 0;
-    data.bRandEffects = m->bRandEffects != 0;
-    data.bRandGrowth = m->bRandGrowth != 0;
-    data.bRandDuration = m->bRandDuration != 0;
-    data.nAnimProfile = m->nAnimProfile;
-  } else {
-    data.szText[0] = 0;
-    data.nFont = 0;
-    data.fSize = 50.0f;
-    data.x = 0.5f;
-    data.y = 0.5f;
-    data.growth = 1.0f;
-    data.fTime = 5.0f;
-    data.fFade = 1.0f;
-    data.fFadeOut = 1.0f;
-    data.szFace[0] = 0;
-    data.bBold = -1;
-    data.bItal = -1;
-    data.nColorR = -1;
-    data.nColorG = -1;
-    data.nColorB = -1;
-    data.nAnimProfile = -1;
+    wcscpy_s(dlg.szText, 256, m->szText);
+    dlg.nFont = m->nFont;
+    dlg.fSize = m->fSize;
+    dlg.x = m->x;
+    dlg.y = m->y;
+    dlg.growth = m->growth;
+    dlg.fTime = m->fTime;
+    dlg.fFade = m->fFade;
+    dlg.fFadeOut = m->fFadeOut;
+    dlg.bOverrideFace = m->bOverrideFace != 0;
+    dlg.bOverrideBold = m->bOverrideBold != 0;
+    dlg.bOverrideItal = m->bOverrideItal != 0;
+    dlg.bOverrideColorR = m->bOverrideColorR != 0;
+    dlg.bOverrideColorG = m->bOverrideColorG != 0;
+    dlg.bOverrideColorB = m->bOverrideColorB != 0;
+    wcscpy_s(dlg.szFace, 128, m->szFace);
+    dlg.bBold = m->bBold;
+    dlg.bItal = m->bItal;
+    dlg.nColorR = m->nColorR;
+    dlg.nColorG = m->nColorG;
+    dlg.nColorB = m->nColorB;
+    dlg.bRandPos = m->bRandPos != 0;
+    dlg.bRandSize = m->bRandSize != 0;
+    dlg.bRandFont = m->bRandFont != 0;
+    dlg.bRandColor = m->bRandColor != 0;
+    dlg.bRandEffects = m->bRandEffects != 0;
+    dlg.bRandGrowth = m->bRandGrowth != 0;
+    dlg.bRandDuration = m->bRandDuration != 0;
+    dlg.nAnimProfile = m->nAnimProfile;
   }
 
-  // Create font for controls (use settings font size)
-  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  // Compute line height from font size for proportional layout
+  HFONT hTmp = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  // Compute line height from font metrics for proportional layout
   HDC hdcTmp = GetDC(hParent);
-  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
-  TEXTMETRIC tmDlg = {};
-  GetTextMetrics(hdcTmp, &tmDlg);
-  SelectObject(hdcTmp, hOldTmp);
+  HFONT hOld = (HFONT)SelectObject(hdcTmp, hTmp);
+  TEXTMETRIC tm = {};
+  GetTextMetrics(hdcTmp, &tm);
+  SelectObject(hdcTmp, hOld);
   ReleaseDC(hParent, hdcTmp);
-  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
-  if (dlgLineH < 20) dlgLineH = 20;
+  DeleteObject(hTmp);
+  int lineH = tm.tmHeight + tm.tmExternalLeading + 6;
+  if (lineH < 20) lineH = 20;
 
-  // Scale dialog dimensions from baseline (440x530 at lineH=20)
-  int clientW = MulDiv(440, dlgLineH, 20);
-  int clientH = MulDiv(560, dlgLineH, 20);
-  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
-  RECT rcSize = { 0, 0, clientW, clientH };
-  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
-  int dlgW = rcSize.right - rcSize.left;
-  int dlgH = rcSize.bottom - rcSize.top;
+  int clientW = MulDiv(440, lineH, 20);
+  int clientH = MulDiv(560, lineH, 20);
 
-  // Center on the monitor that contains the parent window
-  RECT rcParent;
-  GetWindowRect(hParent, &rcParent);
-  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = { sizeof(mi) };
-  GetMonitorInfo(hMon, &mi);
-  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
-  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
-  // Clamp to monitor work area
-  if (px < mi.rcWork.left) px = mi.rcWork.left;
-  if (py < mi.rcWork.top) py = mi.rcWork.top;
-  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
-  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
+  bool accepted = dlg.Show(hParent, clientW, clientH);
 
-  const wchar_t* title = isNew ? L"Add Message" : L"Edit Message";
-  HWND hDlg = CreateWindowExW(dwExStyle,
-    WND_CLASS, title, dwStyle,
-    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) { DeleteObject(hFont); return false; }
-
-  data.hDlgWnd = hDlg;
-  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
-
-  // Scale layout constants from baseline (designed at lineH=20)
-  int margin = MulDiv(12, dlgLineH, 20);
-  int rw = clientW - margin * 2;
-  int lblW = MulDiv(90, dlgLineH, 20), editW = MulDiv(60, dlgLineH, 20);
-  int y = MulDiv(10, dlgLineH, 20);
-  int xVal = margin + lblW + 4;
-  int smallH = dlgLineH - 4;      // label height
-  int editH = dlgLineH;           // edit control height
-  int btnH = dlgLineH + 4;        // button height
-  int textEditH = dlgLineH * 2 + 8; // multiline text edit
-  wchar_t buf[64];
-
-  // Text label + edit
-  CreateLabel(hDlg, L"Message Text:", margin, y, rw, smallH, hFont);
-  y += smallH + 2;
-  HWND hText = CreateEdit(hDlg, data.szText, IDC_MSGEDIT_TEXT, margin, y, rw, textEditH, hFont,
-    ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL);
-  y += textEditH + 6;
-
-  // Font section
-  CreateLabel(hDlg, L"Base Font:", margin, y + 2, MulDiv(70, dlgLineH, 20), smallH, hFont);
-  HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-    margin + MulDiv(74, dlgLineH, 20), y, rw - MulDiv(74, dlgLineH, 20), 300, hDlg, (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO,
-    GetModuleHandle(NULL), NULL);
-  if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-  for (int i = 0; i < MAX_CUSTOM_MESSAGE_FONTS; i++) {
-    wchar_t entry[160];
-    swprintf(entry, 160, L"Font %02d: %s%s%s", i,
-      m_CustomMessageFont[i].szFace,
-      m_CustomMessageFont[i].bBold ? L" [Bold]" : L"",
-      m_CustomMessageFont[i].bItal ? L" [Italic]" : L"");
-    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)entry);
-  }
-  SendMessage(hCombo, CB_SETCURSEL, data.nFont, 0);
-  y += dlgLineH + 4;
-
-  // Choose Font, Choose Color, Color Swatch
-  int chooseBtnW = MulDiv(110, dlgLineH, 20);
-  CreateBtn(hDlg, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, y, chooseBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + chooseBtnW + 6, y, chooseBtnW, btnH, hFont);
-  // Color swatch (owner-drawn button)
-  int swatchSize = smallH;
-  HWND hSwatch = CreateWindowExW(0, L"BUTTON", L"",
-    WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-    margin + chooseBtnW * 2 + 12, y + 2, swatchSize, swatchSize, hDlg,
-    (HMENU)(INT_PTR)IDC_MSGEDIT_COLOR_SWATCH, GetModuleHandle(NULL), NULL);
-  y += btnH + 6;
-
-  // Font preview
-  HWND hPreview = CreateLabel(hDlg, L"", margin, y, rw, smallH, hFont);
-  SetWindowLongPtr(hPreview, GWL_ID, IDC_MSGEDIT_FONT_PREVIEW);
-  y += dlgLineH + 4;
-
-  // Separator
-  y += 4;
-
-  // Size, X, Y on same row
-  CreateLabel(hDlg, L"Size (0-100):", margin, y + 2, lblW, smallH, hFont);
-  swprintf(buf, 64, L"%.0f", data.fSize);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_SIZE, xVal, y, editW, editH, hFont);
-  int smallLblW = MulDiv(16, dlgLineH, 20);
-  CreateLabel(hDlg, L"X:", xVal + editW + 10, y + 2, smallLblW, smallH, hFont);
-  swprintf(buf, 64, L"%.2f", data.x);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_XPOS, xVal + editW + 10 + smallLblW + 2, y, editW, editH, hFont);
-  CreateLabel(hDlg, L"Y:", xVal + editW * 2 + 10 + smallLblW + 12, y + 2, smallLblW, smallH, hFont);
-  swprintf(buf, 64, L"%.2f", data.y);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 10 + smallLblW * 2 + 14, y, editW, editH, hFont);
-  y += dlgLineH + 4;
-
-  // Growth
-  CreateLabel(hDlg, L"Growth:", margin, y + 2, lblW, smallH, hFont);
-  swprintf(buf, 64, L"%.2f", data.growth);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_GROWTH, xVal, y, editW, editH, hFont);
-  y += dlgLineH + 4;
-
-  // Duration
-  CreateLabel(hDlg, L"Duration (s):", margin, y + 2, lblW, smallH, hFont);
-  swprintf(buf, 64, L"%.1f", data.fTime);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_TIME, xVal, y, editW, editH, hFont);
-  y += dlgLineH + 4;
-
-  // Fade In, Fade Out on same row
-  int fadeOutLblW = MulDiv(70, dlgLineH, 20);
-  CreateLabel(hDlg, L"Fade In (s):", margin, y + 2, lblW, smallH, hFont);
-  swprintf(buf, 64, L"%.1f", data.fFade);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEIN, xVal, y, editW, editH, hFont);
-  CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, fadeOutLblW, smallH, hFont);
-  swprintf(buf, 64, L"%.1f", data.fFadeOut);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, y, editW, editH, hFont);
-  y += dlgLineH + 6;
-
-  // Animation Profile combo
-  CreateLabel(hDlg, L"Anim Profile:", margin, y + 2, lblW, smallH, hFont);
-  {
-    int apComboW = rw - lblW - 4;
-    HWND hAPCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-      xVal, y, apComboW, dlgLineH * 10, hDlg,
-      (HMENU)(INT_PTR)IDC_MSGEDIT_ANIM_PROFILE, GetModuleHandle(NULL), NULL);
-    if (hAPCombo && hFont) SendMessage(hAPCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Use message settings)");
-    SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random profile)");
-    for (int i = 0; i < m_nAnimProfileCount; i++)
-      SendMessageW(hAPCombo, CB_ADDSTRING, 0, (LPARAM)m_AnimProfiles[i].szName);
-    // Map: -1 → 0, -2 → 1, 0+ → idx+2
-    int apSel = 0;
-    if (data.nAnimProfile == -2) apSel = 1;
-    else if (data.nAnimProfile >= 0) apSel = data.nAnimProfile + 2;
-    SendMessage(hAPCombo, CB_SETCURSEL, apSel, 0);
-  }
-  y += dlgLineH + 6;
-
-  // --- Randomize section (2-column checkboxes) ---
-  int halfW = (rw - 10) / 2;
-  int randBtnW = MulDiv(110, dlgLineH, 20);
-  CreateLabel(hDlg, L"Randomize:", margin, y + 2, MulDiv(80, dlgLineH, 20), smallH, hFont);
-  CreateBtn(hDlg, L"Randomize All", IDC_MSGEDIT_RAND_ALL, margin + rw - randBtnW, y, randBtnW, btnH, hFont);
-  y += btnH + 4;
-
-  CreateCheck(hDlg, L"Position", IDC_MSGEDIT_RAND_POS, margin, y, halfW, editH, hFont, data.bRandPos, true);
-  CreateCheck(hDlg, L"Font", IDC_MSGEDIT_RAND_FONT, margin + halfW + 10, y, halfW, editH, hFont, data.bRandFont, true);
-  y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Size", IDC_MSGEDIT_RAND_SIZE, margin, y, halfW, editH, hFont, data.bRandSize, true);
-  CreateCheck(hDlg, L"Color", IDC_MSGEDIT_RAND_COLOR, margin + halfW + 10, y, halfW, editH, hFont, data.bRandColor, true);
-  y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Effects (bold/ital)", IDC_MSGEDIT_RAND_EFFECTS, margin, y, halfW, editH, hFont, data.bRandEffects, true);
-  CreateCheck(hDlg, L"Growth", IDC_MSGEDIT_RAND_GROWTH, margin + halfW + 10, y, halfW, editH, hFont, data.bRandGrowth, true);
-  y += dlgLineH + 2;
-  CreateCheck(hDlg, L"Duration", IDC_MSGEDIT_RAND_DURATION, margin, y, halfW, editH, hFont, data.bRandDuration, true);
-  y += dlgLineH + 12;
-
-  // Send Now / OK / Cancel buttons
-  int okBtnW = MulDiv(80, dlgLineH, 20);
-  int sendBtnW = MulDiv(90, dlgLineH, 20);
-  CreateBtn(hDlg, L"Send Now", IDC_MSGEDIT_SEND_NOW, margin, y, sendBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW + 20, y, okBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + okBtnW + 20, y, okBtnW, btnH, hFont);
-
-  // Update the font preview
-  UpdateMsgEditFontPreview(&data);
-
-  // Show dialog and make parent modal
-  ShowWindow(hDlg, SW_SHOW);
-  UpdateWindow(hDlg);
-  EnableWindow(hParent, FALSE);
-
-  // Local message loop
-  MSG msg2;
-  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
-    // Handle Tab key navigation
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
-      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
-      if (hNext) SetFocus(hNext);
-      continue;
-    }
-    // ESC closes dialog
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
-      data.bResult = false;
-      data.bDone = true;
-      break;
-    }
-    TranslateMessage(&msg2);
-    DispatchMessage(&msg2);
-  }
-
-  // Cleanup
-  EnableWindow(hParent, TRUE);
-  SetForegroundWindow(hParent);
-  DestroyWindow(hDlg);
-  if (hFont) DeleteObject(hFont);
-
-  // Copy working data back if OK
-  if (data.bResult) {
-    wcscpy_s(m->szText, 256, data.szText);
-    m->nFont = data.nFont;
-    m->fSize = data.fSize;
-    m->x = data.x;
-    m->y = data.y;
-    m->growth = data.growth;
-    m->fTime = data.fTime;
-    m->fFade = data.fFade;
-    m->fFadeOut = data.fFadeOut;
-    m->bOverrideFace = data.bOverrideFace ? 1 : 0;
-    m->bOverrideBold = data.bOverrideBold ? 1 : 0;
-    m->bOverrideItal = data.bOverrideItal ? 1 : 0;
-    m->bOverrideColorR = data.bOverrideColorR ? 1 : 0;
-    m->bOverrideColorG = data.bOverrideColorG ? 1 : 0;
-    m->bOverrideColorB = data.bOverrideColorB ? 1 : 0;
-    wcscpy_s(m->szFace, 128, data.szFace);
-    m->bBold = data.bBold;
-    m->bItal = data.bItal;
-    m->nColorR = data.nColorR;
-    m->nColorG = data.nColorG;
-    m->nColorB = data.nColorB;
-    m->bRandPos = data.bRandPos ? 1 : 0;
-    m->bRandSize = data.bRandSize ? 1 : 0;
-    m->bRandFont = data.bRandFont ? 1 : 0;
-    m->bRandColor = data.bRandColor ? 1 : 0;
-    m->bRandEffects = data.bRandEffects ? 1 : 0;
-    m->bRandGrowth = data.bRandGrowth ? 1 : 0;
-    m->bRandDuration = data.bRandDuration ? 1 : 0;
-    m->nAnimProfile = data.nAnimProfile;
+  if (accepted) {
+    wcscpy_s(m->szText, 256, dlg.szText);
+    m->nFont = dlg.nFont;
+    m->fSize = dlg.fSize;
+    m->x = dlg.x;
+    m->y = dlg.y;
+    m->growth = dlg.growth;
+    m->fTime = dlg.fTime;
+    m->fFade = dlg.fFade;
+    m->fFadeOut = dlg.fFadeOut;
+    m->bOverrideFace = dlg.bOverrideFace ? 1 : 0;
+    m->bOverrideBold = dlg.bOverrideBold ? 1 : 0;
+    m->bOverrideItal = dlg.bOverrideItal ? 1 : 0;
+    m->bOverrideColorR = dlg.bOverrideColorR ? 1 : 0;
+    m->bOverrideColorG = dlg.bOverrideColorG ? 1 : 0;
+    m->bOverrideColorB = dlg.bOverrideColorB ? 1 : 0;
+    wcscpy_s(m->szFace, 128, dlg.szFace);
+    m->bBold = dlg.bBold;
+    m->bItal = dlg.bItal;
+    m->nColorR = dlg.nColorR;
+    m->nColorG = dlg.nColorG;
+    m->nColorB = dlg.nColorB;
+    m->bRandPos = dlg.bRandPos ? 1 : 0;
+    m->bRandSize = dlg.bRandSize ? 1 : 0;
+    m->bRandFont = dlg.bRandFont ? 1 : 0;
+    m->bRandColor = dlg.bRandColor ? 1 : 0;
+    m->bRandEffects = dlg.bRandEffects ? 1 : 0;
+    m->bRandGrowth = dlg.bRandGrowth ? 1 : 0;
+    m->bRandDuration = dlg.bRandDuration ? 1 : 0;
+    m->nAnimProfile = dlg.nAnimProfile;
   } else {
     // Restore original message (Send Now may have modified it)
-    *m = data.originalMsg;
+    *m = dlg.originalMsg;
   }
 
-  return data.bResult;
+  return accepted;
 }
 
-// ======== Message Overrides Dialog ========
+// ======== Message Overrides Dialog (ModalDialog subclass) ========
 
-struct MsgOverridesDlgData {
-  Engine*    plugin;
-  HWND        hDlgWnd;
-  HWND        hTab;
-  HFONT       hFont;
-  int         dlgLineH;
-  bool        bResult;
-  bool        bDone;
-
-  // Working copies
-  bool        bRandomFont;
-  bool        bRandomColor;
-  bool        bRandomSize;
-  bool        bRandomEffects;
-  float       fSizeMin;
-  float       fSizeMax;
-  int         nMaxOnScreen;
-  // Animation overrides
-  bool        bRandomPos;
-  bool        bRandomGrowth;
-  bool        bSlideIn;
-  bool        bRandomDuration;
-  bool        bShadow;
-  bool        bBox;
-  // Color shifting overrides
-  bool        bApplyHueShift;
-  bool        bRandomHue;
-  // Per-message randomization
-  bool        bIgnorePerMsg;
-
-  // Animation profiles tab — working copy of bEnabled flags
-  bool        animEnabled[MAX_ANIM_PROFILES];
-  int         nAnimCount;
-
-  // Controls on randomize tab
-  std::vector<HWND> randomizeControls;
-  // Controls on animations tab
-  HWND        hAnimList;
-  HWND        hAnimAll;
-  HWND        hAnimNone;
-
-  // Sort state
-  int         nSortColumn;
-  bool        bSortAscending;
-};
-
-// Show/hide controls for the active tab
-static void MsgOverridesShowTab(MsgOverridesDlgData* data, int tab) {
-  int showRand = (tab == 0) ? SW_SHOW : SW_HIDE;
-  int showAnim = (tab == 1) ? SW_SHOW : SW_HIDE;
-  for (HWND h : data->randomizeControls)
-    ShowWindow(h, showRand);
-  if (data->hAnimList) ShowWindow(data->hAnimList, showAnim);
-  if (data->hAnimAll) ShowWindow(data->hAnimAll, showAnim);
-  if (data->hAnimNone) ShowWindow(data->hAnimNone, showAnim);
-}
-
-// Refresh animation ListView from working data
-static void MsgOverridesRefreshAnimList(MsgOverridesDlgData* data) {
-  if (!data->hAnimList) return;
-  Engine* p = data->plugin;
-  SendMessage(data->hAnimList, LVM_DELETEALLITEMS, 0, 0);
-
-  for (int i = 0; i < data->nAnimCount; i++) {
-    const auto& prof = p->m_AnimProfiles[i];
-
-    LVITEMW lvi = {};
-    lvi.mask = LVIF_TEXT | LVIF_PARAM;
-    lvi.iItem = i;
-    lvi.lParam = i;
-    lvi.pszText = (LPWSTR)prof.szName;
-    int idx = (int)SendMessageW(data->hAnimList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
-
-    // Set check state
-    ListView_SetCheckState(data->hAnimList, idx, data->animEnabled[i]);
-
-    // Duration column
-    wchar_t buf[32];
-    swprintf(buf, 32, L"%.1fs", prof.fDuration);
-    lvi.mask = LVIF_TEXT;
-    lvi.iItem = idx;
-    lvi.iSubItem = 1;
-    lvi.pszText = buf;
-    SendMessageW(data->hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
-
-    // Effects summary column
-    std::wstring fx;
-    if (prof.fMoveTime > 0) fx += L"Slide ";
-    if (prof.fGrowth != 1.0f) fx += L"Growth ";
-    if (prof.fShadowOffset > 0) fx += L"Shadow ";
-    if (prof.fBoxAlpha > 0) fx += L"Box ";
-    if (prof.bRandPos) fx += L"RPos ";
-    if (prof.bRandColor) fx += L"RCol ";
-    if (fx.empty()) fx = L"Default";
-    lvi.iSubItem = 2;
-    lvi.pszText = (LPWSTR)fx.c_str();
-    SendMessageW(data->hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
-  }
-}
-
-// Sort comparison for animation list
 enum { ANIMCOL_NAME = 0, ANIMCOL_DURATION, ANIMCOL_EFFECTS };
 
-static int CALLBACK AnimListCompare(LPARAM lp1, LPARAM lp2, LPARAM lParamSort) {
-  MsgOverridesDlgData* data = (MsgOverridesDlgData*)lParamSort;
-  Engine* p = data->plugin;
-  int i1 = (int)lp1, i2 = (int)lp2;
-  if (i1 < 0 || i1 >= data->nAnimCount || i2 < 0 || i2 >= data->nAnimCount) return 0;
-  const auto& a = p->m_AnimProfiles[i1];
-  const auto& b = p->m_AnimProfiles[i2];
-  int cmp = 0;
-  switch (data->nSortColumn) {
-  case ANIMCOL_NAME: cmp = _wcsicmp(a.szName, b.szName); break;
-  case ANIMCOL_DURATION:
-    if (a.fDuration < b.fDuration) cmp = -1;
-    else if (a.fDuration > b.fDuration) cmp = 1;
-    break;
-  case ANIMCOL_EFFECTS: break; // no sort on effects summary
+class MsgOverridesDialog : public mdrop::ModalDialog {
+public:
+  MsgOverridesDialog(Engine* pEngine) : ModalDialog(pEngine) {}
+
+  // Working copies (populated before Show, read back after)
+  bool bRandomFont = false, bRandomColor = false, bRandomSize = false, bRandomEffects = false;
+  float fSizeMin = 1.0f, fSizeMax = 100.0f;
+  int  nMaxOnScreen = 3;
+  bool bRandomPos = false, bRandomGrowth = false, bSlideIn = false, bRandomDuration = false;
+  bool bShadow = false, bBox = false;
+  bool bApplyHueShift = false, bRandomHue = false;
+  bool bIgnorePerMsg = false;
+  bool animEnabled[MAX_ANIM_PROFILES] = {};
+  int  nAnimCount = 0;
+
+protected:
+  const wchar_t* GetDialogTitle() const override { return L"Message Overrides"; }
+  const wchar_t* GetDialogClass() const override { return L"MDropDX12MsgOverrides"; }
+
+  void DoBuildControls(int clientW, int clientH) override {
+    HFONT hFont = GetFont();
+    HINSTANCE hInst = GetModuleHandle(NULL);
+    int lineH = GetLineHeight();
+    int margin = MulDiv(16, lineH, 20), rw = clientW - margin * 2;
+    int editH = lineH, smallH = lineH - 4, btnH = lineH + 4;
+    wchar_t buf[32];
+
+    // ── Tab Control ──
+    int tabY = MulDiv(6, lineH, 20);
+    int tabH = clientH - tabY - btnH - MulDiv(20, lineH, 20);
+    m_hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
+      WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_TABS | TCS_OWNERDRAWFIXED,
+      margin - 4, tabY, rw + 8, tabH, m_hWnd,
+      (HMENU)(INT_PTR)IDC_MSGOVERRIDE_TAB, hInst, NULL);
+    if (m_hTab) {
+      SendMessage(m_hTab, WM_SETFONT, (WPARAM)hFont, TRUE);
+      SetWindowSubclass(m_hTab, mdrop::DarkTabSubclassProc, 1, (DWORD_PTR)m_pEngine);
+    }
+    TrackControl(m_hTab);
+
+    TCITEMW tci = {};
+    tci.mask = TCIF_TEXT;
+    tci.pszText = (LPWSTR)L"Randomize";
+    SendMessageW(m_hTab, TCM_INSERTITEMW, 0, (LPARAM)&tci);
+    tci.pszText = (LPWSTR)L"Animations";
+    SendMessageW(m_hTab, TCM_INSERTITEMW, 1, (LPARAM)&tci);
+
+    // Get tab content area
+    RECT rcTab;
+    GetClientRect(m_hTab, &rcTab);
+    SendMessage(m_hTab, TCM_ADJUSTRECT, FALSE, (LPARAM)&rcTab);
+    POINT ptTab = { rcTab.left, rcTab.top };
+    MapWindowPoints(m_hTab, m_hWnd, &ptTab, 1);
+    int cx = ptTab.x + 4, cy = ptTab.y + 4;
+    int cw = rcTab.right - rcTab.left - 8;
+
+    // ═══ Randomize Tab Controls ═══
+    int y = cy;
+    auto trackRand = [&](HWND h) { if (h) { m_randomizeControls.push_back(h); TrackControl(h); } };
+
+    trackRand(CreateCheck(m_hWnd, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, cx, y, cw, editH, hFont, bRandomFont, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, cx, y, cw, editH, hFont, bRandomColor, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, cx, y, cw, editH, hFont, bRandomEffects, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, cx, y, cw, editH, hFont, bRandomSize, true));
+    y += lineH + 4;
+
+    // Size min/max
+    int lblW2 = MulDiv(70, lineH, 20), editW2 = MulDiv(50, lineH, 20);
+    int indent = MulDiv(20, lineH, 20);
+    trackRand(CreateLabel(m_hWnd, L"Min size:", cx + indent, y + 2, lblW2, smallH, hFont));
+    swprintf(buf, 32, L"%.2g", fSizeMin);
+    trackRand(CreateEdit(m_hWnd, buf, IDC_MSGOVERRIDE_SIZE_MIN, cx + indent + lblW2, y, editW2, editH, hFont, 0));
+    trackRand(CreateLabel(m_hWnd, L"Max size:", cx + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont));
+    swprintf(buf, 32, L"%.2g", fSizeMax);
+    trackRand(CreateEdit(m_hWnd, buf, IDC_MSGOVERRIDE_SIZE_MAX, cx + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0));
+    y += lineH + 4;
+
+    trackRand(CreateLabel(m_hWnd, L"(min \x2265 0.01, max \x2264 100, 50 = normal)", cx + indent, y, cw, smallH, hFont));
+    y += lineH + 2;
+
+    // Max on screen
+    int maxLblW = MulDiv(170, lineH, 20);
+    trackRand(CreateLabel(m_hWnd, L"Max messages on screen:", cx, y + 2, maxLblW, smallH, hFont));
+    swprintf(buf, 32, L"%d", nMaxOnScreen);
+    trackRand(CreateEdit(m_hWnd, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, cx + maxLblW + 4, y, MulDiv(40, lineH, 20), editH, hFont, 0));
+    trackRand(CreateLabel(m_hWnd, L"(1-10)", cx + maxLblW + MulDiv(50, lineH, 20), y + 2, MulDiv(50, lineH, 20), smallH, hFont));
+    y += lineH + 8;
+
+    trackRand(CreateLabel(m_hWnd, L"Animations:", cx, y, cw, smallH, hFont));
+    y += lineH;
+    trackRand(CreateCheck(m_hWnd, L"Random position", IDC_MSGOVERRIDE_RAND_POS, cx, y, cw, editH, hFont, bRandomPos, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Random growth (text scales over time)", IDC_MSGOVERRIDE_RAND_GROWTH, cx, y, cw, editH, hFont, bRandomGrowth, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Slide in from edge", IDC_MSGOVERRIDE_SLIDE_IN, cx, y, cw, editH, hFont, bSlideIn, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Random duration (2\x2013" L"10 seconds)", IDC_MSGOVERRIDE_RAND_DURATION, cx, y, cw, editH, hFont, bRandomDuration, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Drop shadow", IDC_MSGOVERRIDE_SHADOW, cx, y, cw, editH, hFont, bShadow, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Background box", IDC_MSGOVERRIDE_BOX, cx, y, cw, editH, hFont, bBox, true));
+    y += lineH + 8;
+
+    trackRand(CreateLabel(m_hWnd, L"Color Shifting:", cx, y, cw, smallH, hFont));
+    y += lineH;
+    trackRand(CreateCheck(m_hWnd, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, cx, y, cw, editH, hFont, bApplyHueShift, true));
+    y += lineH + 2;
+    trackRand(CreateCheck(m_hWnd, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, cx, y, cw, editH, hFont, bRandomHue, true));
+    y += lineH + 8;
+
+    trackRand(CreateLabel(m_hWnd, L"Per-Message:", cx, y, cw, smallH, hFont));
+    y += lineH;
+    trackRand(CreateCheck(m_hWnd, L"Ignore per-message randomization", IDC_MSGOVERRIDE_IGNORE_PERMSG, cx, y, cw, editH, hFont, bIgnorePerMsg, true));
+
+    // ═══ Animations Tab Controls ═══
+    {
+      int listY = cy;
+      int listH = tabH - (cy - tabY) - btnH - MulDiv(16, lineH, 20);
+
+      m_hAnimList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,
+        WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        cx, listY, cw, listH, m_hWnd,
+        (HMENU)(INT_PTR)IDC_MSGOVERRIDE_ANIM_LIST, hInst, NULL);
+      if (m_hAnimList) {
+        SendMessage(m_hAnimList, WM_SETFONT, (WPARAM)hFont, TRUE);
+        ListView_SetExtendedListViewStyle(m_hAnimList, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        TrackControl(m_hAnimList);
+
+        int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
+        int colName = MulDiv(cw, 40, 100);
+        int colDur = MulDiv(cw, 18, 100);
+        int colFx = cw - colName - colDur - scrollW;
+
+        LVCOLUMNW col = {};
+        col.mask = LVCF_TEXT | LVCF_WIDTH;
+        col.pszText = (LPWSTR)L"Name";
+        col.cx = colName;
+        SendMessageW(m_hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_NAME, (LPARAM)&col);
+        col.pszText = (LPWSTR)L"Duration";
+        col.cx = colDur;
+        SendMessageW(m_hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_DURATION, (LPARAM)&col);
+        col.pszText = (LPWSTR)L"Effects";
+        col.cx = colFx;
+        SendMessageW(m_hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_EFFECTS, (LPARAM)&col);
+
+        RefreshAnimList();
+      }
+
+      int abtnY = listY + listH + 4;
+      int abtnW = MulDiv(80, lineH, 20);
+      m_hAnimAll = CreateBtn(m_hWnd, L"Select All", IDC_MSGOVERRIDE_ANIM_ALL, cx, abtnY, abtnW, btnH, hFont);
+      m_hAnimNone = CreateBtn(m_hWnd, L"Select None", IDC_MSGOVERRIDE_ANIM_NONE, cx + abtnW + 8, abtnY, abtnW, btnH, hFont);
+      TrackControl(m_hAnimAll);
+      TrackControl(m_hAnimNone);
+    }
+
+    // Show Randomize tab by default, hide Animations tab
+    ShowTab(0);
+
+    // ── OK / Cancel ──
+    int okY = tabY + tabH + MulDiv(8, lineH, 20);
+    int okBtnW = MulDiv(80, lineH, 20);
+    TrackControl(CreateBtn(m_hWnd, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, okY, okBtnW, btnH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, okY, okBtnW, btnH, hFont));
   }
-  return data->bSortAscending ? cmp : -cmp;
-}
 
-static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-  MsgOverridesDlgData* data = (MsgOverridesDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+  LRESULT DoCommand(int id, int code, LPARAM lParam) override {
+    if (id == IDC_MSGOVERRIDE_ANIM_ALL && code == BN_CLICKED) {
+      for (int i = 0; i < nAnimCount; i++) animEnabled[i] = true;
+      RefreshAnimList();
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_ANIM_NONE && code == BN_CLICKED) {
+      for (int i = 0; i < nAnimCount; i++) animEnabled[i] = false;
+      RefreshAnimList();
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_OK && code == BN_CLICKED) {
+      ReadBackCheckboxes();
+      EndDialog(true);
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_CANCEL && code == BN_CLICKED) {
+      EndDialog(false);
+      return 0;
+    }
+    return -1;
+  }
 
-  switch (msg) {
-  case WM_NOTIFY: {
-    NMHDR* pnm = (NMHDR*)lParam;
-    if (!data) break;
-
+  LRESULT DoNotify(NMHDR* pnm) override {
     // Tab selection changed
     if (pnm->idFrom == IDC_MSGOVERRIDE_TAB && pnm->code == TCN_SELCHANGE) {
-      int tab = (int)SendMessage(data->hTab, TCM_GETCURSEL, 0, 0);
-      MsgOverridesShowTab(data, tab);
+      ShowTab((int)SendMessage(m_hTab, TCM_GETCURSEL, 0, 0));
       return 0;
     }
-
     // ListView column header click — sort
     if (pnm->idFrom == IDC_MSGOVERRIDE_ANIM_LIST && pnm->code == LVN_COLUMNCLICK) {
-      NMLISTVIEW* pnmlv = (NMLISTVIEW*)lParam;
-      if (pnmlv->iSubItem == data->nSortColumn)
-        data->bSortAscending = !data->bSortAscending;
+      NMLISTVIEW* pnmlv = (NMLISTVIEW*)pnm;
+      if (pnmlv->iSubItem == m_nSortColumn)
+        m_bSortAscending = !m_bSortAscending;
       else {
-        data->nSortColumn = pnmlv->iSubItem;
-        data->bSortAscending = true;
+        m_nSortColumn = pnmlv->iSubItem;
+        m_bSortAscending = true;
       }
-      SendMessage(data->hAnimList, LVM_SORTITEMS, (WPARAM)data, (LPARAM)AnimListCompare);
+      SendMessage(m_hAnimList, LVM_SORTITEMS, (WPARAM)this, (LPARAM)AnimListCompare);
       return 0;
     }
-
     // ListView checkbox toggle
     if (pnm->idFrom == IDC_MSGOVERRIDE_ANIM_LIST && pnm->code == LVN_ITEMCHANGED) {
-      NMLISTVIEW* pnmlv = (NMLISTVIEW*)lParam;
+      NMLISTVIEW* pnmlv = (NMLISTVIEW*)pnm;
       if ((pnmlv->uChanged & LVIF_STATE) && ((pnmlv->uNewState ^ pnmlv->uOldState) & LVIS_STATEIMAGEMASK)) {
         LVITEMW lvi = {};
         lvi.mask = LVIF_PARAM;
         lvi.iItem = pnmlv->iItem;
-        SendMessage(data->hAnimList, LVM_GETITEMW, 0, (LPARAM)&lvi);
+        SendMessage(m_hAnimList, LVM_GETITEMW, 0, (LPARAM)&lvi);
         int profIdx = (int)lvi.lParam;
-        if (profIdx >= 0 && profIdx < data->nAnimCount) {
-          bool checked = ListView_GetCheckState(data->hAnimList, pnmlv->iItem) != 0;
-          data->animEnabled[profIdx] = checked;
+        if (profIdx >= 0 && profIdx < nAnimCount) {
+          bool checked = ListView_GetCheckState(m_hAnimList, pnmlv->iItem) != 0;
+          animEnabled[profIdx] = checked;
         }
       }
       return 0;
     }
-    break;
+    return -1;
   }
 
-  case WM_COMMAND: {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
-
-    // Owner-drawn checkbox toggle
-    if (code == BN_CLICKED) {
-      HWND hCtrl = (HWND)lParam;
-      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
-      if (bIsCheckbox) {
-        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
-        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
-        InvalidateRect(hCtrl, NULL, TRUE);
-      }
-    }
-
-    // Select All / Select None buttons
-    if (id == IDC_MSGOVERRIDE_ANIM_ALL && code == BN_CLICKED) {
-      for (int i = 0; i < data->nAnimCount; i++) data->animEnabled[i] = true;
-      MsgOverridesRefreshAnimList(data);
+  LRESULT DoMessage(UINT msg, WPARAM wParam, LPARAM lParam) override {
+    if (msg == WM_KEYDOWN && wParam == VK_RETURN) {
+      SendMessage(m_hWnd, WM_COMMAND, MAKEWPARAM(IDC_MSGOVERRIDE_OK, BN_CLICKED), 0);
       return 0;
     }
-    if (id == IDC_MSGOVERRIDE_ANIM_NONE && code == BN_CLICKED) {
-      for (int i = 0; i < data->nAnimCount; i++) data->animEnabled[i] = false;
-      MsgOverridesRefreshAnimList(data);
-      return 0;
-    }
+    return -1;
+  }
 
-    if (id == IDC_MSGOVERRIDE_OK && code == BN_CLICKED) {
+private:
+  HWND m_hTab = NULL;
+  HWND m_hAnimList = NULL, m_hAnimAll = NULL, m_hAnimNone = NULL;
+  std::vector<HWND> m_randomizeControls;
+  int  m_nSortColumn = ANIMCOL_NAME;
+  bool m_bSortAscending = true;
+
+  void ShowTab(int tab) {
+    int showRand = (tab == 0) ? SW_SHOW : SW_HIDE;
+    int showAnim = (tab == 1) ? SW_SHOW : SW_HIDE;
+    for (HWND h : m_randomizeControls) ShowWindow(h, showRand);
+    if (m_hAnimList) ShowWindow(m_hAnimList, showAnim);
+    if (m_hAnimAll) ShowWindow(m_hAnimAll, showAnim);
+    if (m_hAnimNone) ShowWindow(m_hAnimNone, showAnim);
+  }
+
+  void RefreshAnimList() {
+    if (!m_hAnimList) return;
+    SendMessage(m_hAnimList, LVM_DELETEALLITEMS, 0, 0);
+    for (int i = 0; i < nAnimCount; i++) {
+      const auto& prof = m_pEngine->m_AnimProfiles[i];
+      LVITEMW lvi = {};
+      lvi.mask = LVIF_TEXT | LVIF_PARAM;
+      lvi.iItem = i;
+      lvi.lParam = i;
+      lvi.pszText = (LPWSTR)prof.szName;
+      int idx = (int)SendMessageW(m_hAnimList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+      ListView_SetCheckState(m_hAnimList, idx, animEnabled[i]);
+
       wchar_t buf[32];
-      data->bRandomFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_FONT), L"Checked");
-      data->bRandomColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_COLOR), L"Checked");
-      data->bRandomSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_SIZE), L"Checked");
-      data->bRandomEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_EFFECTS), L"Checked");
-      data->bRandomPos = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_POS), L"Checked");
-      data->bRandomGrowth = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_GROWTH), L"Checked");
-      data->bSlideIn = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SLIDE_IN), L"Checked");
-      data->bRandomDuration = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_DURATION), L"Checked");
-      data->bShadow = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SHADOW), L"Checked");
-      data->bBox = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_BOX), L"Checked");
-      data->bApplyHueShift = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_APPLY_HUE), L"Checked");
-      data->bRandomHue = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_HUE), L"Checked");
-      data->bIgnorePerMsg = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_IGNORE_PERMSG), L"Checked");
+      swprintf(buf, 32, L"%.1fs", prof.fDuration);
+      lvi.mask = LVIF_TEXT;
+      lvi.iItem = idx;
+      lvi.iSubItem = 1;
+      lvi.pszText = buf;
+      SendMessageW(m_hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
-      data->fSizeMin = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MAX), buf, 32);
-      data->fSizeMax = (float)_wtof(buf);
-      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
-      data->nMaxOnScreen = _wtoi(buf);
-
-      if (data->fSizeMin < 0.01f) data->fSizeMin = 0.01f;
-      if (data->fSizeMax > 100.0f) data->fSizeMax = 100.0f;
-      if (data->fSizeMin >= data->fSizeMax) data->fSizeMin = data->fSizeMax * 0.5f;
-      if (data->nMaxOnScreen < 1) data->nMaxOnScreen = 1;
-      if (data->nMaxOnScreen > NUM_SUPERTEXTS) data->nMaxOnScreen = NUM_SUPERTEXTS;
-
-      data->bResult = true;
-      data->bDone = true;
-      return 0;
+      std::wstring fx;
+      if (prof.fMoveTime > 0) fx += L"Slide ";
+      if (prof.fGrowth != 1.0f) fx += L"Growth ";
+      if (prof.fShadowOffset > 0) fx += L"Shadow ";
+      if (prof.fBoxAlpha > 0) fx += L"Box ";
+      if (prof.bRandPos) fx += L"RPos ";
+      if (prof.bRandColor) fx += L"RCol ";
+      if (fx.empty()) fx = L"Default";
+      lvi.iSubItem = 2;
+      lvi.pszText = (LPWSTR)fx.c_str();
+      SendMessageW(m_hAnimList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
     }
-    if (id == IDC_MSGOVERRIDE_CANCEL && code == BN_CLICKED) {
-      data->bResult = false;
-      data->bDone = true;
-      return 0;
-    }
-    break;
   }
 
-  case WM_DRAWITEM: {
-    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-    if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
-      Engine* p = data->plugin;
-      bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
-      if (bIsCheckbox) {
-        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      } else {
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-      }
-      return TRUE;
-    }
-    break;
+  void ReadBackCheckboxes() {
+    bRandomFont = IsChecked(IDC_MSGOVERRIDE_RAND_FONT);
+    bRandomColor = IsChecked(IDC_MSGOVERRIDE_RAND_COLOR);
+    bRandomSize = IsChecked(IDC_MSGOVERRIDE_RAND_SIZE);
+    bRandomEffects = IsChecked(IDC_MSGOVERRIDE_RAND_EFFECTS);
+    bRandomPos = IsChecked(IDC_MSGOVERRIDE_RAND_POS);
+    bRandomGrowth = IsChecked(IDC_MSGOVERRIDE_RAND_GROWTH);
+    bSlideIn = IsChecked(IDC_MSGOVERRIDE_SLIDE_IN);
+    bRandomDuration = IsChecked(IDC_MSGOVERRIDE_RAND_DURATION);
+    bShadow = IsChecked(IDC_MSGOVERRIDE_SHADOW);
+    bBox = IsChecked(IDC_MSGOVERRIDE_BOX);
+    bApplyHueShift = IsChecked(IDC_MSGOVERRIDE_APPLY_HUE);
+    bRandomHue = IsChecked(IDC_MSGOVERRIDE_RAND_HUE);
+    bIgnorePerMsg = IsChecked(IDC_MSGOVERRIDE_IGNORE_PERMSG);
+
+    wchar_t buf[32];
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
+    fSizeMin = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGOVERRIDE_SIZE_MAX), buf, 32);
+    fSizeMax = (float)_wtof(buf);
+    GetWindowTextW(GetDlgItem(m_hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
+    nMaxOnScreen = _wtoi(buf);
+
+    if (fSizeMin < 0.01f) fSizeMin = 0.01f;
+    if (fSizeMax > 100.0f) fSizeMax = 100.0f;
+    if (fSizeMin >= fSizeMax) fSizeMin = fSizeMax * 0.5f;
+    if (nMaxOnScreen < 1) nMaxOnScreen = 1;
+    if (nMaxOnScreen > NUM_SUPERTEXTS) nMaxOnScreen = NUM_SUPERTEXTS;
   }
 
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
-      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
+  static int CALLBACK AnimListCompare(LPARAM lp1, LPARAM lp2, LPARAM lParamSort) {
+    MsgOverridesDialog* dlg = (MsgOverridesDialog*)lParamSort;
+    int i1 = (int)lp1, i2 = (int)lp2;
+    if (i1 < 0 || i1 >= dlg->nAnimCount || i2 < 0 || i2 >= dlg->nAnimCount) return 0;
+    const auto& a = dlg->m_pEngine->m_AnimProfiles[i1];
+    const auto& b = dlg->m_pEngine->m_AnimProfiles[i2];
+    int cmp = 0;
+    switch (dlg->m_nSortColumn) {
+    case ANIMCOL_NAME: cmp = _wcsicmp(a.szName, b.szName); break;
+    case ANIMCOL_DURATION:
+      if (a.fDuration < b.fDuration) cmp = -1;
+      else if (a.fDuration > b.fDuration) cmp = 1;
+      break;
+    case ANIMCOL_EFFECTS: break;
     }
-    break;
-
-  case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
-      return (LRESULT)data->plugin->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_CTLCOLORBTN:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
-      return (LRESULT)data->plugin->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->IsDarkTheme()) {
-      RECT rc; GetClientRect(hWnd, &rc);
-      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
-      FillRect((HDC)wParam, &rc, hBr);
-      DeleteObject(hBr);
-      return 1;
-    }
-    break;
-
-  case WM_CLOSE:
-    if (data) { data->bResult = false; data->bDone = true; }
-    return 0;
-
-  case WM_KEYDOWN:
-    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
-    if (wParam == VK_RETURN && data) {
-      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_MSGOVERRIDE_OK, BN_CLICKED), 0);
-      return 0;
-    }
-    break;
+    return dlg->m_bSortAscending ? cmp : -cmp;
   }
-  return DefWindowProcW(hWnd, msg, wParam, lParam);
-}
+};
 
 bool Engine::ShowMsgOverridesDialog(HWND hParent) {
-  // Register window class (once)
-  static bool registered = false;
-  static const wchar_t* WND_CLASS = L"MDropDX12MsgOverrides";
-  if (!registered) {
-    WNDCLASSEXW wc = { sizeof(wc) };
-    wc.lpfnWndProc = MsgOverridesWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.lpszClassName = WND_CLASS;
-    RegisterClassExW(&wc);
-    registered = true;
-  }
+  MsgOverridesDialog dlg(this);
 
-  // Initialize working copy from current settings
-  MsgOverridesDlgData data = {};
-  data.plugin = this;
-  data.bResult = false;
-  data.bDone = false;
-  data.bRandomFont = m_bMsgOverrideRandomFont;
-  data.bRandomColor = m_bMsgOverrideRandomColor;
-  data.bRandomSize = m_bMsgOverrideRandomSize;
-  data.bRandomEffects = m_bMsgOverrideRandomEffects;
-  data.fSizeMin = m_fMsgOverrideSizeMin;
-  data.fSizeMax = m_fMsgOverrideSizeMax;
-  data.nMaxOnScreen = m_nMsgMaxOnScreen;
-  data.bRandomPos = m_bMsgOverrideRandomPos;
-  data.bRandomGrowth = m_bMsgOverrideRandomGrowth;
-  data.bSlideIn = m_bMsgOverrideSlideIn;
-  data.bRandomDuration = m_bMsgOverrideRandomDuration;
-  data.bShadow = m_bMsgOverrideShadow;
-  data.bBox = m_bMsgOverrideBox;
-  data.bApplyHueShift = m_bMsgOverrideApplyHueShift;
-  data.bRandomHue = m_bMsgOverrideRandomHue;
-  data.bIgnorePerMsg = m_bMsgIgnorePerMsgRandom;
-  data.nSortColumn = ANIMCOL_NAME;
-  data.bSortAscending = true;
+  // Populate working copies
+  dlg.bRandomFont = m_bMsgOverrideRandomFont;
+  dlg.bRandomColor = m_bMsgOverrideRandomColor;
+  dlg.bRandomSize = m_bMsgOverrideRandomSize;
+  dlg.bRandomEffects = m_bMsgOverrideRandomEffects;
+  dlg.fSizeMin = m_fMsgOverrideSizeMin;
+  dlg.fSizeMax = m_fMsgOverrideSizeMax;
+  dlg.nMaxOnScreen = m_nMsgMaxOnScreen;
+  dlg.bRandomPos = m_bMsgOverrideRandomPos;
+  dlg.bRandomGrowth = m_bMsgOverrideRandomGrowth;
+  dlg.bSlideIn = m_bMsgOverrideSlideIn;
+  dlg.bRandomDuration = m_bMsgOverrideRandomDuration;
+  dlg.bShadow = m_bMsgOverrideShadow;
+  dlg.bBox = m_bMsgOverrideBox;
+  dlg.bApplyHueShift = m_bMsgOverrideApplyHueShift;
+  dlg.bRandomHue = m_bMsgOverrideRandomHue;
+  dlg.bIgnorePerMsg = m_bMsgIgnorePerMsgRandom;
+  dlg.nAnimCount = m_nAnimProfileCount;
+  for (int i = 0; i < dlg.nAnimCount; i++)
+    dlg.animEnabled[i] = m_AnimProfiles[i].bEnabled;
 
-  // Animation profiles working copy
-  data.nAnimCount = m_nAnimProfileCount;
-  for (int i = 0; i < data.nAnimCount; i++)
-    data.animEnabled[i] = m_AnimProfiles[i].bEnabled;
-
-  // Create font for controls (use settings font size)
-  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  // Compute line height from font size for proportional layout
+  // (font not yet created — use a temporary font to measure)
+  HFONT hTmp = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-  data.hFont = hFont;
-
-  // Compute line height from font metrics for proportional layout
   HDC hdcTmp = GetDC(hParent);
-  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
-  TEXTMETRIC tmDlg = {};
-  GetTextMetrics(hdcTmp, &tmDlg);
-  SelectObject(hdcTmp, hOldTmp);
+  HFONT hOld = (HFONT)SelectObject(hdcTmp, hTmp);
+  TEXTMETRIC tm = {};
+  GetTextMetrics(hdcTmp, &tm);
+  SelectObject(hdcTmp, hOld);
   ReleaseDC(hParent, hdcTmp);
-  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
-  if (dlgLineH < 20) dlgLineH = 20;
-  data.dlgLineH = dlgLineH;
+  DeleteObject(hTmp);
+  int lineH = tm.tmHeight + tm.tmExternalLeading + 6;
+  if (lineH < 20) lineH = 20;
 
-  // Scale dialog dimensions from baseline (420x590 at lineH=20)
-  int clientW = MulDiv(420, dlgLineH, 20);
-  int clientH = MulDiv(590, dlgLineH, 20);
-  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
-  RECT rcSize = { 0, 0, clientW, clientH };
-  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
-  int dlgW = rcSize.right - rcSize.left;
-  int dlgH = rcSize.bottom - rcSize.top;
+  int clientW = MulDiv(420, lineH, 20);
+  int clientH = MulDiv(590, lineH, 20);
 
-  // Center on parent
-  RECT rcParent;
-  GetWindowRect(hParent, &rcParent);
-  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = { sizeof(mi) };
-  GetMonitorInfo(hMon, &mi);
-  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
-  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
-  if (px < mi.rcWork.left) px = mi.rcWork.left;
-  if (py < mi.rcWork.top) py = mi.rcWork.top;
-  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
-  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
+  if (!dlg.Show(hParent, clientW, clientH))
+    return false;
 
-  HWND hDlg = CreateWindowExW(dwExStyle,
-    WND_CLASS, L"Message Overrides", dwStyle,
-    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) { DeleteObject(hFont); return false; }
+  // Apply results
+  m_bMsgOverrideRandomFont = dlg.bRandomFont;
+  m_bMsgOverrideRandomColor = dlg.bRandomColor;
+  m_bMsgOverrideRandomSize = dlg.bRandomSize;
+  m_bMsgOverrideRandomEffects = dlg.bRandomEffects;
+  m_fMsgOverrideSizeMin = dlg.fSizeMin;
+  m_fMsgOverrideSizeMax = dlg.fSizeMax;
+  m_nMsgMaxOnScreen = dlg.nMaxOnScreen;
+  m_bMsgOverrideRandomPos = dlg.bRandomPos;
+  m_bMsgOverrideRandomGrowth = dlg.bRandomGrowth;
+  m_bMsgOverrideSlideIn = dlg.bSlideIn;
+  m_bMsgOverrideRandomDuration = dlg.bRandomDuration;
+  m_bMsgOverrideShadow = dlg.bShadow;
+  m_bMsgOverrideBox = dlg.bBox;
+  m_bMsgOverrideApplyHueShift = dlg.bApplyHueShift;
+  m_bMsgOverrideRandomHue = dlg.bRandomHue;
+  m_bMsgIgnorePerMsgRandom = dlg.bIgnorePerMsg;
 
-  data.hDlgWnd = hDlg;
-  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
+  for (int i = 0; i < dlg.nAnimCount; i++)
+    m_AnimProfiles[i].bEnabled = dlg.animEnabled[i];
+  WriteAnimProfiles();
+  SaveMsgAutoplaySettings();
 
-  int margin = MulDiv(16, dlgLineH, 20), rw = clientW - margin * 2;
-  int editH = dlgLineH;
-  int smallH = dlgLineH - 4;
-  int btnH = dlgLineH + 4;
-  wchar_t buf[32];
-
-  // ── Tab Control ──
-  int tabY = MulDiv(6, dlgLineH, 20);
-  int tabH = clientH - tabY - btnH - MulDiv(20, dlgLineH, 20);
-  HWND hTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
-    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_TABS,
-    margin - 4, tabY, rw + 8, tabH, hDlg,
-    (HMENU)(INT_PTR)IDC_MSGOVERRIDE_TAB, GetModuleHandle(NULL), NULL);
-  if (hTab && hFont) SendMessage(hTab, WM_SETFONT, (WPARAM)hFont, TRUE);
-  data.hTab = hTab;
-
-  TCITEMW tci = {};
-  tci.mask = TCIF_TEXT;
-  tci.pszText = (LPWSTR)L"Randomize";
-  SendMessageW(hTab, TCM_INSERTITEMW, 0, (LPARAM)&tci);
-  tci.pszText = (LPWSTR)L"Animations";
-  SendMessageW(hTab, TCM_INSERTITEMW, 1, (LPARAM)&tci);
-
-  // Get tab content area
-  RECT rcTab;
-  GetClientRect(hTab, &rcTab);
-  SendMessage(hTab, TCM_ADJUSTRECT, FALSE, (LPARAM)&rcTab);
-  // Convert to dialog coordinates
-  POINT ptTab = { rcTab.left, rcTab.top };
-  MapWindowPoints(hTab, hDlg, &ptTab, 1);
-  int cx = ptTab.x + 4;               // content left
-  int cy = ptTab.y + 4;               // content top
-  int cw = rcTab.right - rcTab.left - 8;  // content width
-
-  // ═══ Randomize Tab Controls ═══
-  int y = cy;
-
-  auto trackRand = [&](HWND h) { if (h) data.randomizeControls.push_back(h); };
-
-  trackRand(CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, cx, y, cw, editH, hFont, data.bRandomFont, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, cx, y, cw, editH, hFont, data.bRandomColor, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, cx, y, cw, editH, hFont, data.bRandomEffects, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, cx, y, cw, editH, hFont, data.bRandomSize, true));
-  y += dlgLineH + 4;
-
-  // Size min/max
-  int lblW2 = MulDiv(70, dlgLineH, 20), editW2 = MulDiv(50, dlgLineH, 20);
-  int indent = MulDiv(20, dlgLineH, 20);
-  trackRand(CreateLabel(hDlg, L"Min size:", cx + indent, y + 2, lblW2, smallH, hFont));
-  swprintf(buf, 32, L"%.2g", data.fSizeMin);
-  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, cx + indent + lblW2, y, editW2, editH, hFont, 0));
-  trackRand(CreateLabel(hDlg, L"Max size:", cx + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont));
-  swprintf(buf, 32, L"%.2g", data.fSizeMax);
-  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, cx + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0));
-  y += dlgLineH + 4;
-
-  trackRand(CreateLabel(hDlg, L"(min \x2265 0.01, max \x2264 100, 50 = normal)", cx + indent, y, cw, smallH, hFont));
-  y += dlgLineH + 2;
-
-  // Max on screen
-  int maxLblW = MulDiv(170, dlgLineH, 20);
-  trackRand(CreateLabel(hDlg, L"Max messages on screen:", cx, y + 2, maxLblW, smallH, hFont));
-  swprintf(buf, 32, L"%d", data.nMaxOnScreen);
-  trackRand(CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, cx + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0));
-  trackRand(CreateLabel(hDlg, L"(1-10)", cx + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont));
-  y += dlgLineH + 8;
-
-  // Animations section
-  trackRand(CreateLabel(hDlg, L"Animations:", cx, y, cw, smallH, hFont));
-  y += dlgLineH;
-  trackRand(CreateCheck(hDlg, L"Random position", IDC_MSGOVERRIDE_RAND_POS, cx, y, cw, editH, hFont, data.bRandomPos, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Random growth (text scales over time)", IDC_MSGOVERRIDE_RAND_GROWTH, cx, y, cw, editH, hFont, data.bRandomGrowth, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Slide in from edge", IDC_MSGOVERRIDE_SLIDE_IN, cx, y, cw, editH, hFont, data.bSlideIn, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Random duration (2\x2013" L"10 seconds)", IDC_MSGOVERRIDE_RAND_DURATION, cx, y, cw, editH, hFont, data.bRandomDuration, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Drop shadow", IDC_MSGOVERRIDE_SHADOW, cx, y, cw, editH, hFont, data.bShadow, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Background box", IDC_MSGOVERRIDE_BOX, cx, y, cw, editH, hFont, data.bBox, true));
-  y += dlgLineH + 8;
-
-  // Color Shifting section
-  trackRand(CreateLabel(hDlg, L"Color Shifting:", cx, y, cw, smallH, hFont));
-  y += dlgLineH;
-  trackRand(CreateCheck(hDlg, L"Apply current hue shift", IDC_MSGOVERRIDE_APPLY_HUE, cx, y, cw, editH, hFont, data.bApplyHueShift, true));
-  y += dlgLineH + 2;
-  trackRand(CreateCheck(hDlg, L"Random hue per message", IDC_MSGOVERRIDE_RAND_HUE, cx, y, cw, editH, hFont, data.bRandomHue, true));
-  y += dlgLineH + 8;
-
-  // Per-message section
-  trackRand(CreateLabel(hDlg, L"Per-Message:", cx, y, cw, smallH, hFont));
-  y += dlgLineH;
-  trackRand(CreateCheck(hDlg, L"Ignore per-message randomization", IDC_MSGOVERRIDE_IGNORE_PERMSG, cx, y, cw, editH, hFont, data.bIgnorePerMsg, true));
-
-  // ═══ Animations Tab Controls ═══
-  {
-    int listY = cy;
-    int listH = tabH - (cy - tabY) - btnH - MulDiv(16, dlgLineH, 20);
-
-    data.hAnimList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, NULL,
-      WS_CHILD | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
-      cx, listY, cw, listH, hDlg,
-      (HMENU)(INT_PTR)IDC_MSGOVERRIDE_ANIM_LIST, GetModuleHandle(NULL), NULL);
-    if (data.hAnimList) {
-      if (hFont) SendMessage(data.hAnimList, WM_SETFONT, (WPARAM)hFont, TRUE);
-      ListView_SetExtendedListViewStyle(data.hAnimList, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-
-      // Dark theme for ListView
-      if (IsDarkTheme()) {
-        ListView_SetBkColor(data.hAnimList, m_colSettingsCtrlBg);
-        ListView_SetTextBkColor(data.hAnimList, m_colSettingsCtrlBg);
-        ListView_SetTextColor(data.hAnimList, m_colSettingsText);
-      }
-
-      // Columns
-      int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
-      int colName = MulDiv(cw, 40, 100);
-      int colDur = MulDiv(cw, 18, 100);
-      int colFx = cw - colName - colDur - scrollW;
-
-      LVCOLUMNW col = {};
-      col.mask = LVCF_TEXT | LVCF_WIDTH;
-      col.pszText = (LPWSTR)L"Name";
-      col.cx = colName;
-      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_NAME, (LPARAM)&col);
-      col.pszText = (LPWSTR)L"Duration";
-      col.cx = colDur;
-      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_DURATION, (LPARAM)&col);
-      col.pszText = (LPWSTR)L"Effects";
-      col.cx = colFx;
-      SendMessageW(data.hAnimList, LVM_INSERTCOLUMNW, ANIMCOL_EFFECTS, (LPARAM)&col);
-
-      MsgOverridesRefreshAnimList(&data);
-    }
-
-    // Select All / Select None buttons below list
-    int abtnY = listY + listH + 4;
-    int abtnW = MulDiv(80, dlgLineH, 20);
-    data.hAnimAll = CreateBtn(hDlg, L"Select All", IDC_MSGOVERRIDE_ANIM_ALL, cx, abtnY, abtnW, btnH, hFont);
-    data.hAnimNone = CreateBtn(hDlg, L"Select None", IDC_MSGOVERRIDE_ANIM_NONE, cx + abtnW + 8, abtnY, abtnW, btnH, hFont);
-  }
-
-  // Show Randomize tab by default, hide Animations tab
-  MsgOverridesShowTab(&data, 0);
-
-  // ── OK / Cancel ──
-  int okY = tabY + tabH + MulDiv(8, dlgLineH, 20);
-  int okBtnW = MulDiv(80, dlgLineH, 20);
-  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, okY, okBtnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, okY, okBtnW, btnH, hFont);
-
-  // Show dialog and make parent modal
-  ShowWindow(hDlg, SW_SHOW);
-  UpdateWindow(hDlg);
-  EnableWindow(hParent, FALSE);
-
-  // Local message loop
-  MSG msg2;
-  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
-      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
-      if (hNext) SetFocus(hNext);
-      continue;
-    }
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
-      data.bResult = false;
-      data.bDone = true;
-      break;
-    }
-    TranslateMessage(&msg2);
-    DispatchMessage(&msg2);
-  }
-
-  // Cleanup
-  EnableWindow(hParent, TRUE);
-  SetForegroundWindow(hParent);
-  DestroyWindow(hDlg);
-  if (hFont) DeleteObject(hFont);
-
-  // Apply if OK
-  if (data.bResult) {
-    m_bMsgOverrideRandomFont = data.bRandomFont;
-    m_bMsgOverrideRandomColor = data.bRandomColor;
-    m_bMsgOverrideRandomSize = data.bRandomSize;
-    m_bMsgOverrideRandomEffects = data.bRandomEffects;
-    m_fMsgOverrideSizeMin = data.fSizeMin;
-    m_fMsgOverrideSizeMax = data.fSizeMax;
-    m_nMsgMaxOnScreen = data.nMaxOnScreen;
-    m_bMsgOverrideRandomPos = data.bRandomPos;
-    m_bMsgOverrideRandomGrowth = data.bRandomGrowth;
-    m_bMsgOverrideSlideIn = data.bSlideIn;
-    m_bMsgOverrideRandomDuration = data.bRandomDuration;
-    m_bMsgOverrideShadow = data.bShadow;
-    m_bMsgOverrideBox = data.bBox;
-    m_bMsgOverrideApplyHueShift = data.bApplyHueShift;
-    m_bMsgOverrideRandomHue = data.bRandomHue;
-    m_bMsgIgnorePerMsgRandom = data.bIgnorePerMsg;
-
-    // Apply animation profile enabled flags
-    for (int i = 0; i < data.nAnimCount; i++)
-      m_AnimProfiles[i].bEnabled = data.animEnabled[i];
-    WriteAnimProfiles();
-
-    SaveMsgAutoplaySettings();
-  }
-
-  return data.bResult;
+  return true;
 }
 
 void Engine::ReadCustomMessages() {

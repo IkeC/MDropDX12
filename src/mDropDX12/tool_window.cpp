@@ -262,51 +262,429 @@ void ToolWindow::CreateOnThread() {
 
 void ToolWindow::ApplyDarkTheme() {
   if (!m_hWnd) return;
-
   m_pEngine->LoadSettingsThemeFromINI();
+  ApplyDarkThemeToWindow(m_pEngine, m_hWnd);
+  ApplyDarkThemeToChildren(m_pEngine, m_childCtrls);
+  RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+}
 
-  bool bDark = m_pEngine->IsDarkTheme();
-  BOOL bDarkDWM = bDark ? TRUE : FALSE;
-  DwmSetWindowAttribute(m_hWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDarkDWM, sizeof(bDarkDWM));
-  if (bDark) {
-    DwmSetWindowAttribute(m_hWnd, 35 /* DWMWA_CAPTION_COLOR */, &m_pEngine->m_colSettingsBg, sizeof(COLORREF));
-    DwmSetWindowAttribute(m_hWnd, 34 /* DWMWA_BORDER_COLOR */, &m_pEngine->m_colSettingsBorder, sizeof(COLORREF));
-    DwmSetWindowAttribute(m_hWnd, 36 /* DWMWA_TEXT_COLOR */, &m_pEngine->m_colSettingsText, sizeof(COLORREF));
-  } else {
-    COLORREF reset = 0xFFFFFFFF;  // DWMWA_COLOR_DEFAULT
-    DwmSetWindowAttribute(m_hWnd, 35, &reset, sizeof(reset));
-    DwmSetWindowAttribute(m_hWnd, 34, &reset, sizeof(reset));
-    DwmSetWindowAttribute(m_hWnd, 36, &reset, sizeof(reset));
+//----------------------------------------------------------------------
+// ModalDialog — lightweight modal popup base class
+//----------------------------------------------------------------------
+
+bool ModalDialog::Show(HWND hParent, int clientW, int clientH) {
+  m_hParent = hParent;
+
+  // Register window class once
+  WNDCLASSEXW wc = { sizeof(wc) };
+  if (!GetClassInfoExW(GetModuleHandle(NULL), GetDialogClass(), &wc)) {
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = ModalWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = m_pEngine->IsDarkTheme()
+      ? CreateSolidBrush(m_pEngine->m_colSettingsBg)
+      : (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = GetDialogClass();
+    RegisterClassExW(&wc);
   }
 
-  for (HWND hChild : m_childCtrls) {
-    if (hChild && IsWindow(hChild)) {
-      wchar_t szClass[32];
-      GetClassNameW(hChild, szClass, 32);
-      if (_wcsicmp(szClass, WC_TABCONTROLW) == 0)
-        SetWindowTheme(hChild, bDark ? L"" : NULL, bDark ? L"" : NULL);
-      else if (_wcsicmp(szClass, HOTKEY_CLASSW) == 0)
-        SetWindowTheme(hChild, bDark ? L"DarkMode_CFD" : NULL, NULL);
-      else if (_wcsicmp(szClass, WC_LISTVIEWW) == 0) {
-        // Strip visual styles first so our NM_CUSTOMDRAW header painting takes full control,
-        // then set colors (SetWindowTheme can reset them if called after)
-        SetWindowTheme(hChild, bDark ? L"" : NULL, bDark ? L"" : NULL);
-        if (bDark) {
-          ListView_SetBkColor(hChild, m_pEngine->m_colSettingsCtrlBg);
-          ListView_SetTextBkColor(hChild, m_pEngine->m_colSettingsCtrlBg);
-          ListView_SetTextColor(hChild, m_pEngine->m_colSettingsText);
-        } else {
-          ListView_SetBkColor(hChild, CLR_DEFAULT);
-          ListView_SetTextBkColor(hChild, CLR_DEFAULT);
-          ListView_SetTextColor(hChild, CLR_DEFAULT);
+  // Create font
+  m_hFont = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute window rect from desired client area
+  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
+  RECT rc = { 0, 0, clientW, clientH };
+  AdjustWindowRectEx(&rc, dwStyle, FALSE, dwExStyle);
+  int wndW = rc.right - rc.left;
+  int wndH = rc.bottom - rc.top;
+
+  // Center on parent's monitor
+  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  GetMonitorInfo(hMon, &mi);
+  int cx = (mi.rcWork.left + mi.rcWork.right - wndW) / 2;
+  int cy = (mi.rcWork.top + mi.rcWork.bottom - wndH) / 2;
+
+  m_hWnd = CreateWindowExW(dwExStyle, GetDialogClass(), GetDialogTitle(),
+    dwStyle, cx, cy, wndW, wndH, hParent, NULL, GetModuleHandle(NULL), this);
+  if (!m_hWnd) {
+    if (m_hFont) { DeleteObject(m_hFont); m_hFont = NULL; }
+    return false;
+  }
+
+  // Build controls
+  DoBuildControls(clientW, clientH);
+
+  // Apply dark theme
+  m_pEngine->LoadSettingsThemeFromINI();
+  ApplyDarkThemeToWindow(m_pEngine, m_hWnd);
+  ApplyDarkThemeToChildren(m_pEngine, m_childCtrls);
+
+  // Show and make modal
+  ShowWindow(m_hWnd, SW_SHOW);
+  RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+  EnableWindow(hParent, FALSE);
+
+  // Local message loop
+  MSG msg;
+  while (!m_bDone && GetMessage(&msg, NULL, 0, 0)) {
+    if (msg.message == WM_KEYDOWN && msg.wParam == VK_TAB) {
+      HWND hNext = GetNextDlgTabItem(m_hWnd, GetFocus(), GetKeyState(VK_SHIFT) < 0);
+      if (hNext) SetFocus(hNext);
+      continue;
+    }
+    if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
+      m_bResult = false;
+      m_bDone = true;
+      break;
+    }
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
+  }
+
+  // Cleanup
+  EnableWindow(hParent, TRUE);
+  SetForegroundWindow(hParent);
+  DestroyWindow(m_hWnd);
+  m_hWnd = NULL;
+  m_childCtrls.clear();
+  if (m_hFont) { DeleteObject(m_hFont); m_hFont = NULL; }
+
+  return m_bResult;
+}
+
+bool ModalDialog::IsChecked(int id) const {
+  HWND h = GetDlgItem(m_hWnd, id);
+  return h ? (bool)(intptr_t)GetPropW(h, L"Checked") : false;
+}
+
+void ModalDialog::SetChecked(int id, bool checked) {
+  HWND h = GetDlgItem(m_hWnd, id);
+  if (h) {
+    SetPropW(h, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
+    InvalidateRect(h, NULL, TRUE);
+  }
+}
+
+int ModalDialog::GetLineHeight() {
+  if (!m_hFont) return 18;
+  HDC hdc = GetDC(m_hWnd);
+  HFONT hOld = (HFONT)SelectObject(hdc, m_hFont);
+  TEXTMETRIC tm;
+  GetTextMetrics(hdc, &tm);
+  SelectObject(hdc, hOld);
+  ReleaseDC(m_hWnd, hdc);
+  return tm.tmHeight + tm.tmExternalLeading + 4;
+}
+
+LRESULT CALLBACK ModalDialog::ModalWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  if (uMsg == WM_NCCREATE) {
+    CREATESTRUCTW* pcs = (CREATESTRUCTW*)lParam;
+    if (pcs && pcs->lpCreateParams)
+      SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)pcs->lpCreateParams);
+  }
+  ModalDialog* dlg = (ModalDialog*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+  if (!dlg) return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+
+  Engine* p = dlg->m_pEngine;
+
+  switch (uMsg) {
+  case WM_CLOSE:
+    dlg->EndDialog(false);
+    return 0;
+
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+  case WM_CTLCOLORSTATIC:
+  case WM_CTLCOLORBTN:
+  case WM_CTLCOLORDLG:
+  {
+    LRESULT lr = HandleDarkCtlColor(p, uMsg, wParam, lParam);
+    if (lr) return lr;
+    break;
+  }
+
+  case WM_DRAWITEM:
+  {
+    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    LRESULT lr = HandleDarkDrawItem(p, pDIS);
+    if (lr) return lr;
+    break;
+  }
+
+  case WM_ERASEBKGND:
+    return HandleDarkEraseBkgnd(p, hWnd, (HDC)wParam);
+
+  case WM_COMMAND:
+  {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    // Auto-toggle owner-draw checkboxes/radios
+    if (code == BN_CLICKED) {
+      HWND hCtrl = (HWND)lParam;
+      if ((bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox")) {
+        bool was = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(was ? 0 : 1));
+        InvalidateRect(hCtrl, NULL, TRUE);
+      }
+      if ((bool)(intptr_t)GetPropW(hCtrl, L"IsRadio")) {
+        int group = (int)(intptr_t)GetPropW(hCtrl, L"RadioGroup");
+        if (group != 0) {
+          for (HWND hChild : dlg->m_childCtrls) {
+            if ((bool)(intptr_t)GetPropW(hChild, L"IsRadio") &&
+                (int)(intptr_t)GetPropW(hChild, L"RadioGroup") == group) {
+              SetPropW(hChild, L"Checked", (HANDLE)(intptr_t)(hChild == hCtrl ? 1 : 0));
+              InvalidateRect(hChild, NULL, TRUE);
+            }
+          }
         }
       }
-      else
-        SetWindowTheme(hChild, bDark ? L"DarkMode_Explorer" : NULL, NULL);
     }
+    LRESULT r = dlg->DoCommand(id, code, lParam);
+    if (r != -1) return r;
+    break;
   }
 
-  RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+  case WM_NOTIFY:
+  {
+    NMHDR* pnm = (NMHDR*)lParam;
+    // ListView header dark theme custom draw
+    if (p->IsDarkTheme() && pnm->code == NM_CUSTOMDRAW) {
+      HWND hParent = GetParent(pnm->hwndFrom);
+      if (hParent) {
+        wchar_t szClass[32];
+        GetClassNameW(hParent, szClass, 32);
+        if (_wcsicmp(szClass, WC_LISTVIEWW) == 0) {
+          bool handled = false;
+          LRESULT result = PaintDarkListViewHeader(pnm, lParam, hParent,
+            p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText, &handled);
+          if (handled) return result;
+        }
+      }
+    }
+    LRESULT r = dlg->DoNotify(pnm);
+    if (r != -1) return r;
+    break;
+  }
+
+  case WM_SETTINGCHANGE:
+    if (p->m_nThemeMode == Engine::THEME_SYSTEM && lParam &&
+        _wcsicmp((LPCWSTR)lParam, L"ImmersiveColorSet") == 0) {
+      p->LoadSettingsThemeFromINI();
+      ApplyDarkThemeToWindow(p, hWnd);
+      ApplyDarkThemeToChildren(p, dlg->m_childCtrls);
+      RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+    }
+    break;
+
+  default:
+  {
+    LRESULT r = dlg->DoMessage(uMsg, wParam, lParam);
+    if (r != -1) return r;
+    break;
+  }
+  }
+
+  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
+//----------------------------------------------------------------------
+// Shared dark theme helpers (used by ToolWindow + ModalDialog + popups)
+//----------------------------------------------------------------------
+
+LRESULT HandleDarkCtlColor(Engine* p, UINT msg, WPARAM wParam, LPARAM lParam) {
+  if (!p->IsDarkTheme()) return 0;
+
+  HDC hdc = (HDC)wParam;
+  switch (msg) {
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+    if (p->m_hBrSettingsCtrlBg) {
+      SetTextColor(hdc, p->m_colSettingsText);
+      SetBkColor(hdc, p->m_colSettingsCtrlBg);
+      return (LRESULT)p->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (p->m_hBrSettingsBg) {
+      HWND hCtrl = (HWND)lParam;
+      wchar_t szClass[32];
+      GetClassNameW(hCtrl, szClass, 32);
+      if (_wcsicmp(szClass, L"Edit") == 0) {
+        SetTextColor(hdc, p->m_colSettingsText);
+        SetBkColor(hdc, p->m_colSettingsCtrlBg);
+        return (LRESULT)p->m_hBrSettingsCtrlBg;
+      }
+      SetTextColor(hdc, p->m_colSettingsText);
+      SetBkColor(hdc, p->m_colSettingsBg);
+      SetBkMode(hdc, TRANSPARENT);
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORBTN:
+    if (p->m_hBrSettingsBg) {
+      SetTextColor(hdc, p->m_colSettingsText);
+      SetBkColor(hdc, p->m_colSettingsBg);
+      return (LRESULT)p->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORDLG:
+    if (p->m_hBrSettingsBg)
+      return (LRESULT)p->m_hBrSettingsBg;
+    break;
+  }
+  return 0;
+}
+
+LRESULT HandleDarkDrawItem(Engine* p, DRAWITEMSTRUCT* pDIS) {
+  if (!pDIS) return FALSE;
+
+  if (pDIS->CtlType == ODT_TAB) {
+    bool bSelected = (pDIS->itemState & ODS_SELECTED) != 0;
+    HDC hdc = pDIS->hDC;
+    RECT rc = pDIS->rcItem;
+    if (p->IsDarkTheme()) {
+      COLORREF bg = bSelected ? p->m_colSettingsCtrlBg : p->m_colSettingsBtnFace;
+      HBRUSH hBr = CreateSolidBrush(bg);
+      FillRect(hdc, &rc, hBr);
+      DeleteObject(hBr);
+      if (bSelected) {
+        HPEN hiPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnHi);
+        HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+        HPEN oldPen = (HPEN)SelectObject(hdc, hiPen);
+        MoveToEx(hdc, rc.left, rc.top, NULL);
+        LineTo(hdc, rc.right - 1, rc.top);
+        MoveToEx(hdc, rc.left, rc.top, NULL);
+        LineTo(hdc, rc.left, rc.bottom);
+        SelectObject(hdc, shPen);
+        MoveToEx(hdc, rc.right - 1, rc.top, NULL);
+        LineTo(hdc, rc.right - 1, rc.bottom);
+        SelectObject(hdc, oldPen);
+        DeleteObject(hiPen);
+        DeleteObject(shPen);
+      } else {
+        HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
+        HPEN oldPen = (HPEN)SelectObject(hdc, shPen);
+        MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+        LineTo(hdc, rc.right, rc.bottom - 1);
+        SelectObject(hdc, oldPen);
+        DeleteObject(shPen);
+      }
+      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(hdc, bSelected ? p->m_colSettingsHighlightText : p->m_colSettingsText);
+    } else {
+      FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
+      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+    }
+    wchar_t szText[64] = {};
+    TCITEMW tci = {};
+    tci.mask = TCIF_TEXT;
+    tci.pszText = szText;
+    tci.cchTextMax = 64;
+    SendMessageW(pDIS->hwndItem, TCM_GETITEMW, pDIS->itemID, (LPARAM)&tci);
+    DrawTextW(pDIS->hDC, szText, -1, &pDIS->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return TRUE;
+  }
+
+  if (pDIS->CtlType == ODT_BUTTON) {
+    // Skip pin button — ToolWindow handles that itself
+    if ((bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn"))
+      return FALSE;
+
+    bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+    bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
+    if (bIsCheckbox) {
+      DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
+        p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+    } else if (bIsRadio) {
+      DrawOwnerRadio(pDIS, p->IsDarkTheme(),
+        p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+    } else {
+      DrawOwnerButton(pDIS, p->IsDarkTheme(),
+        p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+    }
+    return TRUE;
+  }
+
+  // Static swatch controls (SS_OWNERDRAW)
+  if (pDIS->CtlType == ODT_STATIC) {
+    COLORREF col = (COLORREF)(intptr_t)GetPropW(pDIS->hwndItem, L"SwatchColor");
+    HDC hdc = pDIS->hDC;
+    RECT rc = pDIS->rcItem;
+    HBRUSH hBr = CreateSolidBrush(col);
+    FillRect(hdc, &rc, hBr);
+    DeleteObject(hBr);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+LRESULT HandleDarkEraseBkgnd(Engine* p, HWND hWnd, HDC hdc) {
+  RECT rc;
+  GetClientRect(hWnd, &rc);
+  if (p->IsDarkTheme() && p->m_hBrSettingsBg)
+    FillRect(hdc, &rc, p->m_hBrSettingsBg);
+  else
+    FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
+  return 1;
+}
+
+void ApplyDarkThemeToWindow(Engine* p, HWND hWnd) {
+  if (!hWnd) return;
+  bool bDark = p->IsDarkTheme();
+  BOOL bDarkDWM = bDark ? TRUE : FALSE;
+  DwmSetWindowAttribute(hWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDarkDWM, sizeof(bDarkDWM));
+  if (bDark) {
+    DwmSetWindowAttribute(hWnd, 35, &p->m_colSettingsBg, sizeof(COLORREF));
+    DwmSetWindowAttribute(hWnd, 34, &p->m_colSettingsBorder, sizeof(COLORREF));
+    DwmSetWindowAttribute(hWnd, 36, &p->m_colSettingsText, sizeof(COLORREF));
+  } else {
+    COLORREF reset = 0xFFFFFFFF;
+    DwmSetWindowAttribute(hWnd, 35, &reset, sizeof(reset));
+    DwmSetWindowAttribute(hWnd, 34, &reset, sizeof(reset));
+    DwmSetWindowAttribute(hWnd, 36, &reset, sizeof(reset));
+  }
+}
+
+void ApplyDarkThemeToChildren(Engine* p, const std::vector<HWND>& ctrls) {
+  bool bDark = p->IsDarkTheme();
+  for (HWND hChild : ctrls) {
+    if (!hChild || !IsWindow(hChild)) continue;
+    wchar_t szClass[32];
+    GetClassNameW(hChild, szClass, 32);
+    if (_wcsicmp(szClass, WC_TABCONTROLW) == 0)
+      SetWindowTheme(hChild, bDark ? L"" : NULL, bDark ? L"" : NULL);
+    else if (_wcsicmp(szClass, HOTKEY_CLASSW) == 0)
+      SetWindowTheme(hChild, bDark ? L"DarkMode_CFD" : NULL, NULL);
+    else if (_wcsicmp(szClass, WC_LISTVIEWW) == 0) {
+      SetWindowTheme(hChild, bDark ? L"DarkMode_Explorer" : NULL, NULL);
+      if (bDark) {
+        ListView_SetBkColor(hChild, p->m_colSettingsCtrlBg);
+        ListView_SetTextBkColor(hChild, p->m_colSettingsCtrlBg);
+        ListView_SetTextColor(hChild, p->m_colSettingsText);
+      } else {
+        ListView_SetBkColor(hChild, CLR_DEFAULT);
+        ListView_SetTextBkColor(hChild, CLR_DEFAULT);
+        ListView_SetTextColor(hChild, CLR_DEFAULT);
+      }
+    }
+    else {
+      // Strip visual styles — dark painting handled by WM_CTLCOLOR*,
+      // WM_DRAWITEM, and WM_ERASEBKGND in the parent WndProc.
+      // DarkMode_Explorer on EDIT controls overrides WM_CTLCOLOREDIT brush.
+      SetWindowTheme(hChild, bDark ? L"" : NULL, bDark ? L"" : NULL);
+    }
+  }
 }
 
 //----------------------------------------------------------------------
@@ -467,7 +845,8 @@ ToolWindow::BaseLayout ToolWindow::BuildBaseControls() {
 // Tab control support
 //----------------------------------------------------------------------
 
-LRESULT CALLBACK ToolWindow::TabSubclassProc(
+// Shared tab subclass for dark background — used by ToolWindow and ModalDialog
+LRESULT CALLBACK DarkTabSubclassProc(
   HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
   UINT_PTR /*subclassId*/, DWORD_PTR refData)
 {
@@ -482,11 +861,33 @@ LRESULT CALLBACK ToolWindow::TabSubclassProc(
     }
     break;
   }
+  case WM_PAINT: {
+    // Default tab WM_PAINT repaints the display area with system theme colors,
+    // overriding our dark WM_ERASEBKGND. Let default paint, then repaint display area dark.
+    Engine* p = (Engine*)refData;
+    LRESULT lr = DefSubclassProc(hwnd, msg, wParam, lParam);
+    if (p && p->IsDarkTheme() && p->m_hBrSettingsBg) {
+      RECT rcDisplay;
+      GetClientRect(hwnd, &rcDisplay);
+      SendMessage(hwnd, TCM_ADJUSTRECT, FALSE, (LPARAM)&rcDisplay);
+      HDC hdc = GetDC(hwnd);
+      FillRect(hdc, &rcDisplay, p->m_hBrSettingsBg);
+      ReleaseDC(hwnd, hdc);
+    }
+    return lr;
+  }
   case WM_NCDESTROY:
-    RemoveWindowSubclass(hwnd, TabSubclassProc, 1);
+    RemoveWindowSubclass(hwnd, DarkTabSubclassProc, 1);
     break;
   }
   return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+LRESULT CALLBACK ToolWindow::TabSubclassProc(
+  HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+  UINT_PTR subclassId, DWORD_PTR refData)
+{
+  return DarkTabSubclassProc(hwnd, msg, wParam, lParam, subclassId, refData);
 }
 
 RECT ToolWindow::BuildTabControl(int tabCtrlID, const wchar_t* const* tabNames, int numPages,
@@ -780,161 +1181,51 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     break;
   }
 
-  // ── Dark theme painting ──
+  // ── Dark theme painting (delegated to shared helpers) ──
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (p->IsDarkTheme() && p->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, p->m_colSettingsText);
-      SetBkColor((HDC)wParam, p->m_colSettingsCtrlBg);
-      return (LRESULT)p->m_hBrSettingsCtrlBg;
-    }
-    break;
-
   case WM_CTLCOLORSTATIC:
-    if (p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      HWND hCtrl = (HWND)lParam;
-      wchar_t szClass[32];
-      GetClassNameW(hCtrl, szClass, 32);
-      if (_wcsicmp(szClass, L"Edit") == 0) {
-        SetTextColor(hdc, p->m_colSettingsText);
-        SetBkColor(hdc, p->m_colSettingsCtrlBg);
-        return (LRESULT)p->m_hBrSettingsCtrlBg;
-      }
-      SetTextColor(hdc, p->m_colSettingsText);
-      SetBkColor(hdc, p->m_colSettingsBg);
-      SetBkMode(hdc, TRANSPARENT);
-      return (LRESULT)p->m_hBrSettingsBg;
-    }
-    break;
-
   case WM_CTLCOLORBTN:
-    if (p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, p->m_colSettingsText);
-      SetBkColor((HDC)wParam, p->m_colSettingsBg);
-      return (LRESULT)p->m_hBrSettingsBg;
-    }
-    break;
-
   case WM_CTLCOLORDLG:
-    if (p->IsDarkTheme() && p->m_hBrSettingsBg)
-      return (LRESULT)p->m_hBrSettingsBg;
+  {
+    LRESULT lr = HandleDarkCtlColor(p, uMsg, wParam, lParam);
+    if (lr) return lr;
     break;
+  }
 
   case WM_DRAWITEM:
   {
     DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-    if (pDIS && pDIS->CtlType == ODT_TAB) {
-      bool bSelected = (pDIS->itemState & ODS_SELECTED) != 0;
+    // Pin button — ToolWindow-specific (accesses tw->m_bOnTop, tw->m_hPinFont)
+    if (pDIS && pDIS->CtlType == ODT_BUTTON && (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn")) {
       HDC hdc = pDIS->hDC;
       RECT rc = pDIS->rcItem;
-      if (p->IsDarkTheme()) {
-        COLORREF bg = bSelected ? p->m_colSettingsCtrlBg : p->m_colSettingsBtnFace;
-        HBRUSH hBr = CreateSolidBrush(bg);
-        FillRect(hdc, &rc, hBr);
-        DeleteObject(hBr);
-        if (bSelected) {
-          HPEN hiPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnHi);
-          HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
-          HPEN oldPen = (HPEN)SelectObject(hdc, hiPen);
-          MoveToEx(hdc, rc.left, rc.top, NULL);
-          LineTo(hdc, rc.right - 1, rc.top);
-          MoveToEx(hdc, rc.left, rc.top, NULL);
-          LineTo(hdc, rc.left, rc.bottom);
-          SelectObject(hdc, shPen);
-          MoveToEx(hdc, rc.right - 1, rc.top, NULL);
-          LineTo(hdc, rc.right - 1, rc.bottom);
-          SelectObject(hdc, oldPen);
-          DeleteObject(hiPen);
-          DeleteObject(shPen);
-        } else {
-          HPEN shPen = CreatePen(PS_SOLID, 1, p->m_colSettingsBtnShadow);
-          HPEN oldPen = (HPEN)SelectObject(hdc, shPen);
-          MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
-          LineTo(hdc, rc.right, rc.bottom - 1);
-          SelectObject(hdc, oldPen);
-          DeleteObject(shPen);
-        }
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, bSelected ? p->m_colSettingsHighlightText : p->m_colSettingsText);
-      } else {
-        FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
-      }
-      wchar_t szText[64] = {};
-      TCITEMW tci = {};
-      tci.mask = TCIF_TEXT;
-      tci.pszText = szText;
-      tci.cchTextMax = 64;
-      SendMessageW(pDIS->hwndItem, TCM_GETITEMW, pDIS->itemID, (LPARAM)&tci);
-      DrawTextW(hdc, szText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-      return TRUE;
-    }
-    if (pDIS && pDIS->CtlType == ODT_BUTTON) {
-      // Pin button
-      bool bIsPinBtn = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn");
-      if (bIsPinBtn) {
-        HDC hdc = pDIS->hDC;
-        RECT rc = pDIS->rcItem;
-        bool pressed = (pDIS->itemState & ODS_SELECTED) != 0;
-        bool pinned = tw->m_bOnTop;
-        COLORREF bg = p->IsDarkTheme() ? p->m_colSettingsBg : GetSysColor(COLOR_BTNFACE);
-        HBRUSH hBr = CreateSolidBrush(bg);
-        FillRect(hdc, &rc, hBr);
-        DeleteObject(hBr);
-        SetBkMode(hdc, TRANSPARENT);
-        COLORREF pinCol = pinned
-          ? (p->IsDarkTheme() ? RGB(100, 180, 255) : RGB(0, 100, 200))
-          : (p->IsDarkTheme() ? RGB(120, 120, 120) : RGB(160, 160, 160));
-        SetTextColor(hdc, pinCol);
-        HFONT hOld = tw->m_hPinFont ? (HFONT)SelectObject(hdc, tw->m_hPinFont) : NULL;
-        RECT textRc = rc;
-        if (pressed) OffsetRect(&textRc, 1, 1);
-        DrawTextW(hdc, L"\xE718", 1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        if (hOld) SelectObject(hdc, hOld);
-        return TRUE;
-      }
-      // Checkbox, radio, regular button
-      bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
-      bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
-      if (bIsCheckbox) {
-        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      } else if (bIsRadio) {
-        DrawOwnerRadio(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      } else {
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-      }
-      return TRUE;
-    }
-    // Static swatch controls (SS_OWNERDRAW) — paint with stored SwatchColor property
-    if (pDIS && pDIS->CtlType == ODT_STATIC) {
-      COLORREF col = (COLORREF)(intptr_t)GetPropW(pDIS->hwndItem, L"SwatchColor");
-      HDC hdc = pDIS->hDC;
-      RECT rc = pDIS->rcItem;
-      HBRUSH hBr = CreateSolidBrush(col);
+      bool pressed = (pDIS->itemState & ODS_SELECTED) != 0;
+      bool pinned = tw->m_bOnTop;
+      COLORREF bg = p->IsDarkTheme() ? p->m_colSettingsBg : GetSysColor(COLOR_BTNFACE);
+      HBRUSH hBr = CreateSolidBrush(bg);
       FillRect(hdc, &rc, hBr);
       DeleteObject(hBr);
+      SetBkMode(hdc, TRANSPARENT);
+      COLORREF pinCol = pinned
+        ? (p->IsDarkTheme() ? RGB(100, 180, 255) : RGB(0, 100, 200))
+        : (p->IsDarkTheme() ? RGB(120, 120, 120) : RGB(160, 160, 160));
+      SetTextColor(hdc, pinCol);
+      HFONT hOld = tw->m_hPinFont ? (HFONT)SelectObject(hdc, tw->m_hPinFont) : NULL;
+      RECT textRc = rc;
+      if (pressed) OffsetRect(&textRc, 1, 1);
+      DrawTextW(hdc, L"\xE718", 1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      if (hOld) SelectObject(hdc, hOld);
       return TRUE;
     }
+    // Everything else: tabs, checkboxes, radios, buttons, swatches
+    LRESULT lr = HandleDarkDrawItem(p, pDIS);
+    if (lr) return lr;
     break;
   }
 
   case WM_ERASEBKGND:
-  {
-    HDC hdc = (HDC)wParam;
-    RECT rc;
-    GetClientRect(hWnd, &rc);
-    if (p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      FillRect(hdc, &rc, p->m_hBrSettingsBg);
-    } else {
-      FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
-    }
-    return 1;
-  }
+    return HandleDarkEraseBkgnd(p, hWnd, (HDC)wParam);
 
   case WM_SETTINGCHANGE:
     if (p->m_nThemeMode == Engine::THEME_SYSTEM && lParam &&

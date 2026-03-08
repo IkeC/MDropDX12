@@ -433,351 +433,213 @@ void Engine::OpenFolderPickerForPresetDir() {
 // If the file lives under one of those directories, returns the relative portion.
 // Otherwise returns the absolute path unchanged.
 //----------------------------------------------------------------------
-// Sprite Import Settings Dialog
+// Sprite Import Settings Dialog (ModalDialog subclass)
 //----------------------------------------------------------------------
-struct SpriteImportDlgData {
-  Engine* plugin;
-  bool bResult;
-  bool bDone;
-  bool bReplace;     // true = replace all, false = add to existing
-  int  nMaxSprites;  // max to import
-  int  nBlendMode;
-  int  nLayer;       // 0 = behind text, 1 = on top
-  double x, y, sx, sy, rot;
-  double r, g, b, a;
-  HWND hDlgWnd;
-};
+class SpriteImportDialog : public mdrop::ModalDialog {
+public:
+  SpriteImportDialog(Engine* pEngine) : ModalDialog(pEngine) {}
+  ~SpriteImportDialog() override { if (m_hFontBold) DeleteObject(m_hFontBold); }
 
-static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-  SpriteImportDlgData* data = (SpriteImportDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+  // Working copies (populated before Show, read back after)
+  bool   bReplace = false;     // true = replace all, false = add to existing
+  int    nMaxSprites = 100;    // max to import
+  int    nBlendMode = 0;
+  int    nLayer = 0;           // 0 = behind text, 1 = on top
+  double x = 0.5, y = 0.5, sx = 0.5, sy = 0.5, rot = 0;
+  double r = 1, g = 1, b = 1, a = 1;
 
-  switch (msg) {
-  case WM_COMMAND: {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
+protected:
+  const wchar_t* GetDialogTitle() const override { return L"Import Sprites from Folder"; }
+  const wchar_t* GetDialogClass() const override { return L"MDropDX12SprImp"; }
 
+  void DoBuildControls(int clientW, int clientH) override {
+    HFONT hFont = GetFont();
+    int lineH = GetLineHeight();
+
+    // Create bold font for section headers
+    m_hFontBold = CreateFontW(m_pEngine->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+      DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    int margin = MulDiv(12, lineH, 20);
+    int rw = clientW - margin * 2;
+    int cy = MulDiv(10, lineH, 20);
+    int gap = 4;
+    int lblW = MulDiv(80, lineH, 20);
+    int editW = MulDiv(60, lineH, 20);
+    wchar_t buf[64];
+
+    // --- Import Mode ---
+    TrackControl(CreateLabel(m_hWnd, L"Import Mode:", margin, cy, rw, lineH, m_hFontBold));
+    cy += lineH + gap;
+    TrackControl(CreateRadio(m_hWnd, L"Add to existing sprites", IDC_SPRIMP_MODE_ADD, margin + 10, cy, rw - 10, lineH, hFont, !bReplace, true, true, 1));
+    cy += lineH + 2;
+    TrackControl(CreateRadio(m_hWnd, L"Replace all sprites", IDC_SPRIMP_MODE_REPLACE, margin + 10, cy, rw - 10, lineH, hFont, bReplace, false, true, 1));
+    cy += lineH + gap + 4;
+
+    // --- Max sprites ---
+    TrackControl(CreateLabel(m_hWnd, L"Max sprites to import:", margin, cy, MulDiv(150, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%d", nMaxSprites);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_MAX_EDIT, margin + MulDiv(155, lineH, 20), cy, editW, lineH, hFont, ES_NUMBER));
+    cy += lineH + gap + 6;
+
+    // --- Default Properties ---
+    TrackControl(CreateLabel(m_hWnd, L"Default Properties for Imported Sprites:", margin, cy, rw, lineH, m_hFontBold));
+    cy += lineH + gap + 2;
+
+    // Blend mode
+    int col1 = margin;
+    TrackControl(CreateLabel(m_hWnd, L"Blend:", col1, cy, lblW, lineH, hFont));
+    HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
+      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+      col1 + lblW, cy, MulDiv(120, lineH, 20), 200, m_hWnd, (HMENU)(INT_PTR)IDC_SPRIMP_BLEND,
+      GetModuleHandle(NULL), NULL);
+    if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
+    const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
+    for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
+    SendMessageW(hBlend, CB_SETCURSEL, nBlendMode, 0);
+    TrackControl(hBlend);
+    cy += lineH + gap;
+
+    // Layer
+    TrackControl(CreateLabel(m_hWnd, L"Layer:", col1, cy, lblW, lineH, hFont));
+    HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
+      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+      col1 + lblW, cy, MulDiv(140, lineH, 20), 200, m_hWnd, (HMENU)(INT_PTR)IDC_SPRIMP_LAYER,
+      GetModuleHandle(NULL), NULL);
+    if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
+    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
+    SendMessageW(hLayer, CB_SETCURSEL, nLayer, 0);
+    TrackControl(hLayer);
+    cy += lineH + gap;
+
+    // Position: X, Y
+    int col2 = col1 + lblW + editW + MulDiv(20, lineH, 20);
+    TrackControl(CreateLabel(m_hWnd, L"X:", col1, cy, MulDiv(24, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%.3g", x);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_X, col1 + MulDiv(24, lineH, 20), cy, editW, lineH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"Y:", col2, cy, MulDiv(24, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%.3g", y);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_Y, col2 + MulDiv(24, lineH, 20), cy, editW, lineH, hFont));
+    cy += lineH + gap;
+
+    // Scale: SX, SY
+    TrackControl(CreateLabel(m_hWnd, L"SX:", col1, cy, MulDiv(24, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%.3g", sx);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_SX, col1 + MulDiv(24, lineH, 20), cy, editW, lineH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"SY:", col2, cy, MulDiv(24, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%.3g", sy);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_SY, col2 + MulDiv(24, lineH, 20), cy, editW, lineH, hFont));
+    cy += lineH + gap;
+
+    // Rotation
+    TrackControl(CreateLabel(m_hWnd, L"Rot:", col1, cy, MulDiv(30, lineH, 20), lineH, hFont));
+    swprintf(buf, 64, L"%.3g", rot);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_ROT, col1 + MulDiv(30, lineH, 20), cy, editW, lineH, hFont));
+    cy += lineH + gap;
+
+    // Color: R, G, B, A
+    int col3 = col1 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+    int col4 = col3 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+    int col5 = col4 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
+    int smallLblW = MulDiv(18, lineH, 20);
+    TrackControl(CreateLabel(m_hWnd, L"R:", col1, cy, smallLblW, lineH, hFont));
+    swprintf(buf, 64, L"%.3g", r);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_R, col1 + smallLblW, cy, editW, lineH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"G:", col3, cy, smallLblW, lineH, hFont));
+    swprintf(buf, 64, L"%.3g", g);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_G, col3 + smallLblW, cy, editW, lineH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"B:", col4, cy, smallLblW, lineH, hFont));
+    swprintf(buf, 64, L"%.3g", b);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_B, col4 + smallLblW, cy, editW, lineH, hFont));
+    TrackControl(CreateLabel(m_hWnd, L"A:", col5, cy, smallLblW, lineH, hFont));
+    swprintf(buf, 64, L"%.3g", a);
+    TrackControl(CreateEdit(m_hWnd, buf, IDC_SPRIMP_A, col5 + smallLblW, cy, editW, lineH, hFont));
+    cy += lineH + gap + 8;
+
+    // --- OK / Cancel ---
+    int btnW = MulDiv(80, lineH, 20);
+    int btnH = lineH + 4;
+    int btnGap = MulDiv(10, lineH, 20);
+    int btnX = clientW / 2 - btnW - btnGap / 2;
+    TrackControl(CreateBtn(m_hWnd, L"OK", IDC_SPRIMP_OK, btnX, cy, btnW, btnH, hFont));
+    TrackControl(CreateBtn(m_hWnd, L"Cancel", IDC_SPRIMP_CANCEL, btnX + btnW + btnGap, cy, btnW, btnH, hFont));
+  }
+
+  LRESULT DoCommand(int id, int code, LPARAM lParam) override {
     if (code == BN_CLICKED) {
-      HWND hCtrl = (HWND)lParam;
-      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-      if (bIsRadio) {
-        // Toggle radio group: Add vs Replace
-        HWND hAdd = GetDlgItem(hWnd, IDC_SPRIMP_MODE_ADD);
-        HWND hRep = GetDlgItem(hWnd, IDC_SPRIMP_MODE_REPLACE);
-        SetPropW(hAdd, L"Checked", (HANDLE)(intptr_t)(id == IDC_SPRIMP_MODE_ADD ? 1 : 0));
-        SetPropW(hRep, L"Checked", (HANDLE)(intptr_t)(id == IDC_SPRIMP_MODE_REPLACE ? 1 : 0));
-        InvalidateRect(hAdd, NULL, TRUE);
-        InvalidateRect(hRep, NULL, TRUE);
+      if (id == IDC_SPRIMP_OK) {
+        ReadBackFields();
+        EndDialog(true);
         return 0;
       }
-
-      if (id == IDC_SPRIMP_OK && data) {
-        wchar_t buf[64];
-        // Read max sprites
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_MAX_EDIT, buf, 64);
-        data->nMaxSprites = _wtoi(buf);
-        if (data->nMaxSprites < 1) data->nMaxSprites = 1;
-        // Read blend mode
-        int sel = (int)SendDlgItemMessageW(hWnd, IDC_SPRIMP_BLEND, CB_GETCURSEL, 0, 0);
-        data->nBlendMode = (sel == CB_ERR) ? 0 : sel;
-        // Read layer
-        int lsel = (int)SendDlgItemMessageW(hWnd, IDC_SPRIMP_LAYER, CB_GETCURSEL, 0, 0);
-        data->nLayer = (lsel == CB_ERR) ? 0 : lsel;
-        // Read property values
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_X, buf, 64);   data->x  = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_Y, buf, 64);   data->y  = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_SX, buf, 64);  data->sx = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_SY, buf, 64);  data->sy = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_ROT, buf, 64); data->rot = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_R, buf, 64);   data->r  = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_G, buf, 64);   data->g  = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_B, buf, 64);   data->b  = _wtof(buf);
-        GetDlgItemTextW(hWnd, IDC_SPRIMP_A, buf, 64);   data->a  = _wtof(buf);
-        // Read radio state
-        data->bReplace = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_SPRIMP_MODE_REPLACE), L"Checked");
-        data->bResult = true;
-        data->bDone = true;
-        return 0;
-      }
-      if (id == IDC_SPRIMP_CANCEL && data) {
-        data->bResult = false;
-        data->bDone = true;
+      if (id == IDC_SPRIMP_CANCEL) {
+        EndDialog(false);
         return 0;
       }
     }
-    break;
+    return -1;
   }
 
-  case WM_DRAWITEM: {
-    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-    if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
-      Engine* p = data->plugin;
-      bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
-      if (bIsRadio) {
-        DrawOwnerRadio(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      } else {
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-      }
-      return TRUE;
-    }
-    break;
-  }
-
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORLISTBOX:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
-      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
-    }
-    break;
-
-  case WM_CTLCOLORSTATIC:
-    if (data && data->plugin && data->plugin->IsDarkTheme() && data->plugin->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
-      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
-      return (LRESULT)data->plugin->m_hBrSettingsBg;
-    }
-    break;
-
-  case WM_ERASEBKGND:
-    if (data && data->plugin && data->plugin->IsDarkTheme()) {
-      RECT rc; GetClientRect(hWnd, &rc);
-      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
-      FillRect((HDC)wParam, &rc, hBr);
-      DeleteObject(hBr);
-      return 1;
-    }
-    break;
-
-  case WM_CLOSE:
-    if (data) { data->bResult = false; data->bDone = true; }
-    return 0;
-
-  case WM_KEYDOWN:
-    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
-    if (wParam == VK_RETURN && data) {
-      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_SPRIMP_OK, BN_CLICKED), 0);
+  LRESULT DoMessage(UINT msg, WPARAM wParam, LPARAM lParam) override {
+    if (msg == WM_KEYDOWN && wParam == VK_RETURN) {
+      SendMessage(m_hWnd, WM_COMMAND, MAKEWPARAM(IDC_SPRIMP_OK, BN_CLICKED), 0);
       return 0;
     }
-    break;
-  }
-  return DefWindowProcW(hWnd, msg, wParam, lParam);
-}
-
-static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlgData& data) {
-  // Register window class (once)
-  static bool registered = false;
-  static const wchar_t* WND_CLASS = L"MDropDX12SprImp";
-  if (!registered) {
-    WNDCLASSEXW wc = { sizeof(wc) };
-    wc.lpfnWndProc = SpriteImportWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.lpszClassName = WND_CLASS;
-    RegisterClassExW(&wc);
-    registered = true;
+    return -1;
   }
 
-  // Initialize defaults
-  data.plugin = plugin;
-  data.bResult = false;
-  data.bDone = false;
-  data.bReplace = false;
-  data.nMaxSprites = 100;
-  data.nBlendMode = 0;
-  data.nLayer = 0;
-  data.x = 0.5; data.y = 0.5;
-  data.sx = 0.5; data.sy = 0.5;
-  data.rot = 0;
-  data.r = 1; data.g = 1; data.b = 1; data.a = 1;
+private:
+  HFONT m_hFontBold = NULL;
 
-  // Create font for controls
-  HFONT hFont = CreateFontW(plugin->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  void ReadBackFields() {
+    wchar_t buf[64];
+    // Read max sprites
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_MAX_EDIT, buf, 64);
+    nMaxSprites = _wtoi(buf);
+    if (nMaxSprites < 1) nMaxSprites = 1;
+    // Read blend mode
+    int sel = (int)SendDlgItemMessageW(m_hWnd, IDC_SPRIMP_BLEND, CB_GETCURSEL, 0, 0);
+    nBlendMode = (sel == CB_ERR) ? 0 : sel;
+    // Read layer
+    int lsel = (int)SendDlgItemMessageW(m_hWnd, IDC_SPRIMP_LAYER, CB_GETCURSEL, 0, 0);
+    nLayer = (lsel == CB_ERR) ? 0 : lsel;
+    // Read property values
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_X, buf, 64);   x   = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_Y, buf, 64);   y   = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_SX, buf, 64);  sx  = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_SY, buf, 64);  sy  = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_ROT, buf, 64); rot = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_R, buf, 64);   r   = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_G, buf, 64);   g   = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_B, buf, 64);   b   = _wtof(buf);
+    GetDlgItemTextW(m_hWnd, IDC_SPRIMP_A, buf, 64);   a   = _wtof(buf);
+    // Read radio state
+    bReplace = IsChecked(IDC_SPRIMP_MODE_REPLACE);
+  }
+};
+
+static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDialog& dlg) {
+  // Compute line height from font size for proportional layout
+  // (font not yet created — use a temporary font to measure)
+  HFONT hTmp = CreateFontW(plugin->m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-  HFONT hFontBold = CreateFontW(plugin->m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  // Compute line height
   HDC hdcTmp = GetDC(hParent);
-  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
-  TEXTMETRIC tmDlg = {};
-  GetTextMetrics(hdcTmp, &tmDlg);
-  SelectObject(hdcTmp, hOldTmp);
+  HFONT hOld = (HFONT)SelectObject(hdcTmp, hTmp);
+  TEXTMETRIC tm = {};
+  GetTextMetrics(hdcTmp, &tm);
+  SelectObject(hdcTmp, hOld);
   ReleaseDC(hParent, hdcTmp);
-  int lineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  DeleteObject(hTmp);
+  int lineH = tm.tmHeight + tm.tmExternalLeading + 6;
   if (lineH < 20) lineH = 20;
 
-  // Scale dialog dimensions
   int clientW = MulDiv(420, lineH, 20);
   int clientH = MulDiv(380, lineH, 20);
-  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
-  RECT rcSize = { 0, 0, clientW, clientH };
-  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
-  int dlgW = rcSize.right - rcSize.left;
-  int dlgH = rcSize.bottom - rcSize.top;
 
-  // Center on parent monitor
-  RECT rcParent;
-  GetWindowRect(hParent, &rcParent);
-  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = { sizeof(mi) };
-  GetMonitorInfo(hMon, &mi);
-  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
-  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
-  if (px < mi.rcWork.left) px = mi.rcWork.left;
-  if (py < mi.rcWork.top) py = mi.rcWork.top;
-  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
-  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
-
-  HWND hDlg = CreateWindowExW(dwExStyle, WND_CLASS, L"Import Sprites from Folder", dwStyle,
-    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) { DeleteObject(hFont); DeleteObject(hFontBold); return false; }
-
-  data.hDlgWnd = hDlg;
-  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
-
-  // Layout
-  int margin = MulDiv(12, lineH, 20);
-  int rw = clientW - margin * 2;
-  int y = MulDiv(10, lineH, 20);
-  int gap = 4;
-  int lblW = MulDiv(80, lineH, 20);
-  int editW = MulDiv(60, lineH, 20);
-  wchar_t buf[64];
-
-  // --- Import Mode ---
-  CreateLabel(hDlg, L"Import Mode:", margin, y, rw, lineH, hFontBold);
-  y += lineH + gap;
-  CreateRadio(hDlg, L"Add to existing sprites", IDC_SPRIMP_MODE_ADD, margin + 10, y, rw - 10, lineH, hFont, true, true);
-  y += lineH + 2;
-  CreateRadio(hDlg, L"Replace all sprites", IDC_SPRIMP_MODE_REPLACE, margin + 10, y, rw - 10, lineH, hFont, false);
-  y += lineH + gap + 4;
-
-  // --- Max sprites ---
-  CreateLabel(hDlg, L"Max sprites to import:", margin, y, MulDiv(150, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%d", data.nMaxSprites);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_MAX_EDIT, margin + MulDiv(155, lineH, 20), y, editW, lineH, hFont, ES_NUMBER);
-  y += lineH + gap + 6;
-
-  // --- Default Properties ---
-  CreateLabel(hDlg, L"Default Properties for Imported Sprites:", margin, y, rw, lineH, hFontBold);
-  y += lineH + gap + 2;
-
-  // Blend mode
-  int col1 = margin;
-  CreateLabel(hDlg, L"Blend:", col1, y, lblW, lineH, hFont);
-  HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
-    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-    col1 + lblW, y, MulDiv(120, lineH, 20), 200, hDlg, (HMENU)(INT_PTR)IDC_SPRIMP_BLEND,
-    GetModuleHandle(NULL), NULL);
-  if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
-  const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
-  for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
-  SendMessageW(hBlend, CB_SETCURSEL, data.nBlendMode, 0);
-  if (plugin->IsDarkTheme()) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
-  y += lineH + gap;
-
-  // Layer
-  CreateLabel(hDlg, L"Layer:", col1, y, lblW, lineH, hFont);
-  HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
-    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-    col1 + lblW, y, MulDiv(140, lineH, 20), 200, hDlg, (HMENU)(INT_PTR)IDC_SPRIMP_LAYER,
-    GetModuleHandle(NULL), NULL);
-  if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
-  SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
-  SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
-  SendMessageW(hLayer, CB_SETCURSEL, data.nLayer, 0);
-  if (plugin->IsDarkTheme()) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
-  y += lineH + gap;
-
-  // Position: X, Y
-  int col2 = col1 + lblW + editW + MulDiv(20, lineH, 20);
-  CreateLabel(hDlg, L"X:", col1, y, MulDiv(24, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.x);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_X, col1 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
-  CreateLabel(hDlg, L"Y:", col2, y, MulDiv(24, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.y);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_Y, col2 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
-  y += lineH + gap;
-
-  // Scale: SX, SY
-  CreateLabel(hDlg, L"SX:", col1, y, MulDiv(24, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.sx);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_SX, col1 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
-  CreateLabel(hDlg, L"SY:", col2, y, MulDiv(24, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.sy);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_SY, col2 + MulDiv(24, lineH, 20), y, editW, lineH, hFont);
-  y += lineH + gap;
-
-  // Rotation
-  CreateLabel(hDlg, L"Rot:", col1, y, MulDiv(30, lineH, 20), lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.rot);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_ROT, col1 + MulDiv(30, lineH, 20), y, editW, lineH, hFont);
-  y += lineH + gap;
-
-  // Color: R, G, B, A
-  int col3 = col1 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
-  int col4 = col3 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
-  int col5 = col4 + (MulDiv(24, lineH, 20) + editW + MulDiv(10, lineH, 20));
-  int smallLblW = MulDiv(18, lineH, 20);
-  CreateLabel(hDlg, L"R:", col1, y, smallLblW, lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.r);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_R, col1 + smallLblW, y, editW, lineH, hFont);
-  CreateLabel(hDlg, L"G:", col3, y, smallLblW, lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.g);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_G, col3 + smallLblW, y, editW, lineH, hFont);
-  CreateLabel(hDlg, L"B:", col4, y, smallLblW, lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.b);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_B, col4 + smallLblW, y, editW, lineH, hFont);
-  CreateLabel(hDlg, L"A:", col5, y, smallLblW, lineH, hFont);
-  swprintf(buf, 64, L"%.3g", data.a);
-  CreateEdit(hDlg, buf, IDC_SPRIMP_A, col5 + smallLblW, y, editW, lineH, hFont);
-  y += lineH + gap + 8;
-
-  // --- OK / Cancel ---
-  int btnW = MulDiv(80, lineH, 20);
-  int btnH = lineH + 4;
-  int btnGap = MulDiv(10, lineH, 20);
-  int btnX = clientW / 2 - btnW - btnGap / 2;
-  CreateBtn(hDlg, L"OK", IDC_SPRIMP_OK, btnX, y, btnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_SPRIMP_CANCEL, btnX + btnW + btnGap, y, btnW, btnH, hFont);
-
-  // Show dialog and make parent modal
-  ShowWindow(hDlg, SW_SHOW);
-  UpdateWindow(hDlg);
-  EnableWindow(hParent, FALSE);
-
-  // Local message loop
-  MSG msg2;
-  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
-      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
-      if (hNext) SetFocus(hNext);
-      continue;
-    }
-    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
-      data.bResult = false;
-      data.bDone = true;
-      break;
-    }
-    TranslateMessage(&msg2);
-    DispatchMessage(&msg2);
-  }
-
-  // Cleanup
-  EnableWindow(hParent, TRUE);
-  SetForegroundWindow(hParent);
-  DestroyWindow(hDlg);
-  if (hFont) DeleteObject(hFont);
-  if (hFontBold) DeleteObject(hFontBold);
-
-  return data.bResult;
+  return dlg.Show(hParent, clientW, clientH);
 }
 
 //----------------------------------------------------------------------

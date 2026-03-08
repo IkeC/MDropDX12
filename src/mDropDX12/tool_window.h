@@ -756,6 +756,67 @@ protected:
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
 };
 
+// ── ModalDialog — lightweight base class for modal popup dialogs ──────
+// No thread, no INI persistence, no pin/font buttons.  Shares the same
+// dark theme helpers as ToolWindow so popups get correct theming for free.
+
+class ModalDialog {
+protected:
+    Engine*     m_pEngine;
+    HWND        m_hWnd = NULL;
+    HWND        m_hParent = NULL;
+    HFONT       m_hFont = NULL;
+    std::vector<HWND> m_childCtrls;
+    bool        m_bDone = false;
+    bool        m_bResult = false;
+
+    virtual const wchar_t* GetDialogTitle() const = 0;
+    virtual const wchar_t* GetDialogClass() const = 0;
+    virtual void DoBuildControls(int clientW, int clientH) = 0;
+    virtual LRESULT DoCommand(int id, int code, LPARAM lParam) { return -1; }
+    virtual LRESULT DoNotify(NMHDR* pnm) { return -1; }
+    virtual LRESULT DoMessage(UINT msg, WPARAM wParam, LPARAM lParam) { return -1; }
+
+public:
+    ModalDialog(Engine* pEngine) : m_pEngine(pEngine) {}
+    virtual ~ModalDialog() {}
+
+    bool Show(HWND hParent, int clientW, int clientH);
+    void EndDialog(bool result) { m_bResult = result; m_bDone = true; }
+    void TrackControl(HWND h) { if (h) m_childCtrls.push_back(h); }
+    bool IsChecked(int id) const;
+    void SetChecked(int id, bool checked);
+    int  GetLineHeight();
+    HFONT GetFont() const { return m_hFont; }
+    HWND GetHWND() const { return m_hWnd; }
+
+private:
+    static LRESULT CALLBACK ModalWndProc(HWND, UINT, WPARAM, LPARAM);
+};
+
+// ── Shared dark theme helpers ─────────────────────────────────────────
+// Used by both ToolWindow::BaseWndProc and ModalDialog::ModalWndProc
+// to avoid duplicating theme painting across popup dialogs.
+
+// Handle WM_CTLCOLOREDIT/LISTBOX/STATIC/BTN/DLG. Returns brush LRESULT if dark, 0 if not.
+LRESULT HandleDarkCtlColor(Engine* p, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Handle WM_DRAWITEM for ODT_TAB, ODT_BUTTON (checkbox/radio/button), ODT_STATIC (swatch).
+// Does NOT handle pin button (ToolWindow-specific). Returns TRUE if painted, FALSE if not.
+LRESULT HandleDarkDrawItem(Engine* p, DRAWITEMSTRUCT* pDIS);
+
+// Handle WM_ERASEBKGND — fills with dark or light bg. Returns 1.
+LRESULT HandleDarkEraseBkgnd(Engine* p, HWND hWnd, HDC hdc);
+
+// Apply DWM dark mode attributes to a window (title bar, border, caption color).
+void ApplyDarkThemeToWindow(Engine* p, HWND hWnd);
+
+// Apply SetWindowTheme to tracked child controls (tab, listview, hotkey, etc).
+void ApplyDarkThemeToChildren(Engine* p, const std::vector<HWND>& ctrls);
+
+// Dark tab background subclass — apply to tab controls for dark theme support.
+LRESULT CALLBACK DarkTabSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.
 // Returns LRESULT to return from WndProc; sets *pHandled=true if the notification was handled.
 LRESULT PaintDarkListViewHeader(NMHDR* pnm, LPARAM lParam, HWND hListView,
