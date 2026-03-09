@@ -306,8 +306,13 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
         int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
         if (sel >= 0 && sel < p->m_nPresets) {
-            if (p->m_presets[sel].szFilename.c_str()[0] == L'*')
-                return 0; // directory entry — skip
+            if (p->m_presets[sel].szFilename.c_str()[0] == L'*') {
+                if (wcscmp(p->m_presets[sel].szFilename.c_str(), L"*..") == 0)
+                    NavigatePresetDirUp();
+                else
+                    NavigatePresetDirInto(sel);
+                return 0;
+            }
             p->m_nCurrentPreset = sel;
             wchar_t szFile[MAX_PATH];
             swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());

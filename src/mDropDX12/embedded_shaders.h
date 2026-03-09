@@ -174,6 +174,7 @@ SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
 #define tex2Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xy, (v).w)
 #define tex2Dbias(t, v)   t.SampleBias(_samp_lw, (v).xy, (v).w)
 #define tex3D(t, uvw)     t.Sample(_samp_lw, uvw)
+#define tex3Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xyz, (v).w)
 #define tex2d(t, uv)      t.Sample(_samp_lw, uv)
 #define tex3d(t, uvw)     t.Sample(_samp_lw, uvw)
 

@@ -1116,7 +1116,7 @@ public:
   td_anim_profile      m_AnimProfiles[MAX_ANIM_PROFILES];
   int                  m_nAnimProfileCount = 0;
   int                  m_nSongTitleAnimProfile = -1;   // -1 = default hardcoded, -2 = random, 0+ = profile
-  int                  m_nPresetNameAnimProfile = -1;  // -1 = disabled, -2 = random, 0+ = profile
+  int                  m_nPresetNameAnimProfile = -3;  // -1 = disabled, -2 = random, -3 = simple, 0+ = profile
 
   texmgr      m_texmgr;		// for user sprites
   

@@ -1168,14 +1168,16 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Strip include's sampler_rand declarations if the preset declares its own
   // (presets use #define MYSAMP sampler_rand00 + sampler MYSAMP; which after
   //  macro expansion creates a second Texture2D declaration → redefinition error)
+  // Only strip if the preset actually declares the texture (contains "Texture2D sampler_randNN"),
+  // not if it merely references the sampler by name.
   for (int i = 0; i <= 3; i++) {
-    char sampName[20];
-    sprintf(sampName, "sampler_rand%02d", i);
-    if (strstr(szOrigShaderText, sampName)) {
-      char decl[40];
-      sprintf(decl, "Texture2D %s;", sampName);
-      char* pos = strstr(szShaderText, decl);
-      if (pos) memset(pos, ' ', strlen(decl));
+    char decl[40];
+    sprintf(decl, "Texture2D sampler_rand%02d", i);
+    if (strstr(szOrigShaderText, decl)) {
+      char fullDecl[44];
+      sprintf(fullDecl, "%s;", decl);
+      char* pos = strstr(szShaderText, fullDecl);
+      if (pos) memset(pos, ' ', strlen(fullDecl));
     }
   }
 

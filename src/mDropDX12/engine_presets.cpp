@@ -1809,25 +1809,49 @@ void Engine::OnFinishedLoadingPreset() {
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 
-  // Preset name animation (if profile assigned)
-  if (m_nPresetNameAnimProfile >= -1 && m_nPresetNameAnimProfile != -1) {
-    int profIdx = m_nPresetNameAnimProfile;
-    if (profIdx == -2) profIdx = PickRandomAnimProfile();
-    if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+  // Preset name display on render
+  if (m_nPresetNameAnimProfile != -1) {
+    // Extract preset filename without path/extension
+    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+    name = name ? name + 1 : m_szCurrentPresetFile;
+    wchar_t szName[512];
+    lstrcpynW(szName, name, 512);
+    wchar_t* dot = wcsrchr(szName, L'.');
+    if (dot) *dot = L'\0';
+
+    if (m_nPresetNameAnimProfile == -2 || m_nPresetNameAnimProfile >= 0) {
+      // Use animation profile
+      int profIdx = m_nPresetNameAnimProfile;
+      if (profIdx == -2) profIdx = PickRandomAnimProfile();
+      if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+        int slot = GetNextFreeSupertextIndex();
+        lstrcpyW(m_supertexts[slot].szTextW, szName);
+        m_supertexts[slot].bRedrawSuperText = true;
+        m_supertexts[slot].bIsSongTitle = false;
+        ApplyAnimProfileToSupertext(m_supertexts[slot], m_AnimProfiles[profIdx]);
+        m_supertexts[slot].fStartTime = GetTime();
+      }
+    } else {
+      // Simple fixed-size display — uses decorative font size and color
       int slot = GetNextFreeSupertextIndex();
-      // Extract preset filename without path/extension
-      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
-      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
-      name = name ? name + 1 : m_szCurrentPresetFile;
-      wchar_t szName[512];
-      lstrcpynW(szName, name, 512);
-      // Strip extension
-      wchar_t* dot = wcsrchr(szName, L'.');
-      if (dot) *dot = L'\0';
       lstrcpyW(m_supertexts[slot].szTextW, szName);
       m_supertexts[slot].bRedrawSuperText = true;
       m_supertexts[slot].bIsSongTitle = false;
-      ApplyAnimProfileToSupertext(m_supertexts[slot], m_AnimProfiles[profIdx]);
+      lstrcpyW(m_supertexts[slot].nFontFace, m_fontinfo[DECORATIVE_FONT].szFace);
+      m_supertexts[slot].fFontSize = (float)m_fontinfo[DECORATIVE_FONT].nSize;
+      m_supertexts[slot].bBold = m_fontinfo[DECORATIVE_FONT].bBold;
+      m_supertexts[slot].bItal = m_fontinfo[DECORATIVE_FONT].bItalic;
+      m_supertexts[slot].nColorR = m_fontinfo[DECORATIVE_FONT].R;
+      m_supertexts[slot].nColorG = m_fontinfo[DECORATIVE_FONT].G;
+      m_supertexts[slot].nColorB = m_fontinfo[DECORATIVE_FONT].B;
+      m_supertexts[slot].fX = 0.5f;
+      m_supertexts[slot].fY = 0.5f;
+      m_supertexts[slot].fGrowth = 1.0f;
+      m_supertexts[slot].fDuration = 3.5f;
+      m_supertexts[slot].fFadeInTime = 0.3f;
+      m_supertexts[slot].fFadeOutTime = 0.3f;
+      m_supertexts[slot].fBurnTime = 0.0f;
       m_supertexts[slot].fStartTime = GetTime();
     }
   }

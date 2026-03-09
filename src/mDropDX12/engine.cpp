@@ -1354,7 +1354,7 @@ void Engine::MyReadConfig() {
   m_fTimeBetweenRandomSongTitles = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenRandomSongTitles", m_fTimeBetweenRandomSongTitles, pIni);
   m_fTimeBetweenRandomCustomMsgs = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenRandomCustomMsgs", m_fTimeBetweenRandomCustomMsgs, pIni);
   m_nSongTitleAnimProfile = GetPrivateProfileIntW(L"Settings", L"SongTitleAnimProfile", -1, pIni);
-  m_nPresetNameAnimProfile = GetPrivateProfileIntW(L"Settings", L"PresetNameAnimProfile", -1, pIni);
+  m_nPresetNameAnimProfile = GetPrivateProfileIntW(L"Settings", L"PresetNameAnimProfile", -3, pIni);
   m_adapterId = GetPrivateProfileIntW(L"Settings", L"nVideoAdapterIndex", 0, pIni);
 
   // --------

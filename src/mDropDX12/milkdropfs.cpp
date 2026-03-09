@@ -2199,6 +2199,26 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
     }
   }
 
+  // ── Draw behind-text sprites (layer 0) on the backbuffer ──
+  if (SpritesEnabled())
+    DrawUserSprites(0);
+
+  // ── Display active supertexts on the backbuffer ──
+  if (MessagesEnabled()) {
+    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
+        float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
+        if (fProgress <= 1.0f) {
+          ShowSongTitleAnim(GetWidth(), GetHeight(), min(fProgress, 0.9999f), i);
+        }
+      }
+    }
+  }
+
+  // ── Draw front sprites (layer 1) on the backbuffer ──
+  if (SpritesEnabled())
+    DrawUserSprites(1);
+
   // Mark diagnostics as logged
   if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f)
     m_bPresetDiagLogged = true;

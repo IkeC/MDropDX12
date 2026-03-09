@@ -51,26 +51,36 @@ DWORD TextAnimWindow::GetCommonControlFlags() const {
 // Helper: populate the Song Title / Preset Name profile combo box
 //----------------------------------------------------------------------
 static void PopulateProfileCombo(HWND hCombo, Engine* p, int selectedIdx,
-                                 const wchar_t* firstEntry)
+                                 const wchar_t* firstEntry,
+                                 bool bIncludeSimple = false)
 {
   if (!hCombo) return;
   SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
-  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)firstEntry);
-  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random)");
+  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)firstEntry);       // 0: Disabled/Default
+  if (bIncludeSimple)
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Simple)");    // 1: Simple fixed-size
+  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random)");      // 1 or 2: Random
   for (int i = 0; i < p->m_nAnimProfileCount; i++)
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)p->m_AnimProfiles[i].szName);
 
-  // Map index: -1 → 0 (Default/Disabled), -2 → 1 (Random), 0+ → idx+2
+  int offset = bIncludeSimple ? 3 : 2;
+  // Map index: -1 → 0, -3 → 1 (Simple), -2 → 1 or 2 (Random), 0+ → idx+offset
   int sel = 0;
-  if (selectedIdx == -2) sel = 1;
-  else if (selectedIdx >= 0) sel = selectedIdx + 2;
+  if (selectedIdx == -3 && bIncludeSimple) sel = 1;
+  else if (selectedIdx == -2) sel = bIncludeSimple ? 2 : 1;
+  else if (selectedIdx >= 0) sel = selectedIdx + offset;
   SendMessage(hCombo, CB_SETCURSEL, sel, 0);
 }
 
 // Reverse: combo selection → profile index
-static int ComboToProfileIndex(HWND hCombo) {
+static int ComboToProfileIndex(HWND hCombo, bool bHasSimple = false) {
   int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
   if (sel <= 0) return -1;   // (Default) or (Disabled)
+  if (bHasSimple) {
+    if (sel == 1) return -3;  // (Simple)
+    if (sel == 2) return -2;  // (Random)
+    return sel - 3;            // profile index
+  }
   if (sel == 1) return -2;   // (Random)
   return sel - 2;             // profile index
 }
@@ -405,7 +415,7 @@ void TextAnimWindow::DoBuildControls()
     (HMENU)(INT_PTR)IDC_MW_TEXTANIM_PRESET_COMBO, GetModuleHandle(NULL), NULL);
   if (hPresetCombo && hFont) SendMessage(hPresetCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
   TrackControl(hPresetCombo);
-  PopulateProfileCombo(hPresetCombo, p, p->m_nPresetNameAnimProfile, L"(Disabled)");
+  PopulateProfileCombo(hPresetCombo, p, p->m_nPresetNameAnimProfile, L"(Disabled)", true);
   y += lineH + gap + 4;
 
   // ── ListView ──
@@ -857,7 +867,7 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
                            p, p->m_nSongTitleAnimProfile, L"(Default)");
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
-                           p, p->m_nPresetNameAnimProfile, L"(Disabled)");
+                           p, p->m_nPresetNameAnimProfile, L"(Disabled)", true);
     }
     return 0;
 
@@ -911,7 +921,7 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
                            p, p->m_nSongTitleAnimProfile, L"(Default)");
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
-                           p, p->m_nPresetNameAnimProfile, L"(Disabled)");
+                           p, p->m_nPresetNameAnimProfile, L"(Disabled)", true);
       wchar_t msg[MAX_PATH + 64];
       swprintf(msg, MAX_PATH + 64, L"Imported %d profiles (was %d).", p->m_nAnimProfileCount, oldCount);
       p->AddNotification(msg);
@@ -953,7 +963,7 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
 
   case IDC_MW_TEXTANIM_PRESET_COMBO:
     if (code == CBN_SELCHANGE) {
-      p->m_nPresetNameAnimProfile = ComboToProfileIndex(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO));
+      p->m_nPresetNameAnimProfile = ComboToProfileIndex(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO), true);
     }
     return 0;
 
@@ -1107,9 +1117,10 @@ LRESULT TextAnimWindow::DoNotify(HWND hWnd, NMHDR* pnm)
 
 void TextAnimWindow::DoDestroy()
 {
-  // Save current edits before closing
+  // Save current edits and persist to disk on close
   if (m_nSelectedRow >= 0 && m_nSelectedRow < m_pEngine->m_nAnimProfileCount)
     SaveEditControls();
+  m_pEngine->WriteAnimProfiles();
   m_hList = NULL;
   m_nSelectedRow = -1;
 }
