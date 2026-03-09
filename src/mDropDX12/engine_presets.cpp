@@ -25,9 +25,119 @@
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+
 namespace mdrop {
 
 extern Engine g_engine;
+
+// ---------------------------------------------------------------------------
+// SEH crash diagnostics — writes register state and stack trace to
+// diag_seh_crash.txt so JIT / EEL crashes can be analyzed post-mortem.
+// Called from the __except filter expression (GetExceptionInformation() is
+// only valid there).  Returns EXCEPTION_EXECUTE_HANDLER so the handler runs.
+// ---------------------------------------------------------------------------
+static LONG WriteSEHCrashDiag(EXCEPTION_POINTERS* ep, const wchar_t* presetPath)
+{
+    // Build output path in the base directory (same as debug.log)
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%sdiag_seh_crash.txt", g_engine.m_szBaseDir);
+
+    FILE* f = nullptr;
+    _wfopen_s(&f, path, L"a"); // append — accumulates across crashes
+    if (!f) return EXCEPTION_EXECUTE_HANDLER;
+
+    EXCEPTION_RECORD* er = ep->ExceptionRecord;
+    CONTEXT* ctx = ep->ContextRecord;
+
+    // Timestamp
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fwprintf(f, L"\n========== SEH CRASH %04d-%02d-%02d %02d:%02d:%02d ==========\n",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    fwprintf(f, L"Preset: %s\n", presetPath ? presetPath : L"<unknown>");
+    fwprintf(f, L"Exception Code:    0x%08X\n", er->ExceptionCode);
+    fwprintf(f, L"Exception Flags:   0x%08X\n", er->ExceptionFlags);
+    fwprintf(f, L"Exception Address: 0x%016llX\n", (DWORD64)er->ExceptionAddress);
+
+    // Access-violation specifics
+    if (er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && er->NumberParameters >= 2) {
+        const wchar_t* op = er->ExceptionInformation[0] == 0 ? L"READ"
+                          : er->ExceptionInformation[0] == 1 ? L"WRITE"
+                          : L"DEP";
+        fwprintf(f, L"Access Type:       %s\n", op);
+        fwprintf(f, L"Target Address:    0x%016llX\n", (DWORD64)er->ExceptionInformation[1]);
+    }
+
+    // x64 registers
+    fwprintf(f, L"\nRegisters:\n");
+    fwprintf(f, L"  RAX=%016llX  RBX=%016llX  RCX=%016llX  RDX=%016llX\n",
+             ctx->Rax, ctx->Rbx, ctx->Rcx, ctx->Rdx);
+    fwprintf(f, L"  RSI=%016llX  RDI=%016llX  RBP=%016llX  RSP=%016llX\n",
+             ctx->Rsi, ctx->Rdi, ctx->Rbp, ctx->Rsp);
+    fwprintf(f, L"  R8 =%016llX  R9 =%016llX  R10=%016llX  R11=%016llX\n",
+             ctx->R8, ctx->R9, ctx->R10, ctx->R11);
+    fwprintf(f, L"  R12=%016llX  R13=%016llX  R14=%016llX  R15=%016llX\n",
+             ctx->R12, ctx->R13, ctx->R14, ctx->R15);
+    fwprintf(f, L"  RIP=%016llX  EFLAGS=%08X\n", ctx->Rip, ctx->EFlags);
+
+    // Stack walk from the exception context
+    fwprintf(f, L"\nStack Trace:\n");
+    HANDLE process = GetCurrentProcess();
+    SymInitialize(process, NULL, TRUE);
+
+    CONTEXT ctxCopy = *ctx; // StackWalk64 may modify context
+    STACKFRAME64 sf = {};
+    sf.AddrPC.Offset    = ctx->Rip;    sf.AddrPC.Mode    = AddrModeFlat;
+    sf.AddrFrame.Offset = ctx->Rbp;    sf.AddrFrame.Mode = AddrModeFlat;
+    sf.AddrStack.Offset = ctx->Rsp;    sf.AddrStack.Mode = AddrModeFlat;
+
+    char symBuf[sizeof(SYMBOL_INFO) + 256];
+    SYMBOL_INFO* sym = (SYMBOL_INFO*)symBuf;
+    sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+    sym->MaxNameLen   = 255;
+
+    for (int i = 0; i < 32; i++) {
+        if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, GetCurrentThread(),
+                         &sf, &ctxCopy, NULL,
+                         SymFunctionTableAccess64, SymGetModuleBase64, NULL))
+            break;
+
+        DWORD64 addr = sf.AddrPC.Offset;
+        if (addr == 0) break;
+
+        // Module name
+        HMODULE hMod = NULL;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCWSTR)addr, &hMod);
+        wchar_t modName[MAX_PATH] = L"<jit>";
+        if (hMod) {
+            GetModuleFileNameW(hMod, modName, MAX_PATH);
+            wchar_t* slash = wcsrchr(modName, L'\\');
+            if (slash) wmemmove(modName, slash + 1, wcslen(slash + 1) + 1);
+        }
+
+        // Symbol name
+        DWORD64 displacement = 0;
+        if (SymFromAddr(process, addr, &displacement, sym))
+            fwprintf(f, L"  [%2d] 0x%016llX  %s!%hs +0x%llX\n",
+                     i, addr, modName, sym->Name, displacement);
+        else
+            fwprintf(f, L"  [%2d] 0x%016llX  %s+0x%llX\n",
+                     i, addr, modName, hMod ? (addr - (DWORD64)hMod) : addr);
+    }
+
+    SymCleanup(process);
+    fwprintf(f, L"\n");
+    fclose(f);
+
+    // Also log to debug.log that a diag was written
+    DLOG_ERROR("SEH crash diagnostics written to diag_seh_crash.txt");
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 extern int NumTotalPresetsLoaded;
 extern std::chrono::steady_clock::time_point LastSentMDropDX12Message;
 
@@ -1548,7 +1658,7 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   m_nLoadingPreset = 0;  // synchronous load complete — clear async flag
   OnFinishedLoadingPreset();
 
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  } __except (WriteSEHCrashDiag(GetExceptionInformation(), szPresetFilename)) {
     DLOG_ERROR("LoadMilk2Preset: CRASH during import/compile of %ls (code 0x%08X)",
                szPresetFilename, GetExceptionCode());
     wchar_t buf[512];
@@ -1779,7 +1889,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       // (a newer load may have started and detached us)
       if (m_nLoadGeneration.load() == myGeneration)
         m_bPresetLoadReady.store(true);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (WriteSEHCrashDiag(GetExceptionInformation(), m_szLoadingPreset)) {
       DLOG_ERROR("LoadPreset: CRASH during async import/compile of %ls (code 0x%08X)",
                  m_szLoadingPreset, GetExceptionCode());
     }
