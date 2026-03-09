@@ -2603,16 +2603,41 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Bind VS1 via per-frame binding block (main tex at correct t-register, null elsewhere)
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
 
+    // Compute hue_shader corner colors (matches ShowToUser_Shaders comp grid logic).
+    // hue_shader is bilinearly interpolated from 4 animated corner colors; the GPU's
+    // vertex interpolation across the quad produces the exact same result.
+    float shade[4][3];
+    for (int i = 0; i < 4; i++) {
+      shade[i][0] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0143f + 3 + i * 21 + m_fRandStart[3]);
+      shade[i][1] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0107f + 1 + i * 13 + m_fRandStart[1]);
+      shade[i][2] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0129f + 6 + i * 9 + m_fRandStart[2]);
+      float mx = ((shade[i][0] > shade[i][1]) ? shade[i][0] : shade[i][1]);
+      if (shade[i][2] > mx) mx = shade[i][2];
+      for (int k = 0; k < 3; k++) {
+        shade[i][k] /= mx;
+        shade[i][k] = 0.5f + 0.5f * shade[i][k];
+      }
+    }
+    // Bilinear mapping: shade[0]=x*y, shade[1]=(1-x)*y, shade[2]=x*(1-y), shade[3]=(1-x)*(1-y)
+    // quad[0]=(-1,1) → uv(0,0) → shade[1]; quad[1]=(1,1) → uv(1,0) → shade[0]
+    // quad[2]=(-1,-1)→ uv(0,1) → shade[3]; quad[3]=(1,-1)→ uv(1,1) → shade[2]
+    DWORD cShade[4] = {
+      D3DCOLOR_RGBA_01(shade[1][0], shade[1][1], shade[1][2], 1),  // top-left
+      D3DCOLOR_RGBA_01(shade[0][0], shade[0][1], shade[0][2], 1),  // top-right
+      D3DCOLOR_RGBA_01(shade[3][0], shade[3][1], shade[3][2], 1),  // bottom-left
+      D3DCOLOR_RGBA_01(shade[2][0], shade[2][1], shade[2][2], 1),  // bottom-right
+    };
+
     // Fullscreen quad using MYVERTEX for proper UV/rad/ang passthrough
     MYVERTEX quad[4];
     ZeroMemory(quad, sizeof(quad));
-    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = 0xFFFFFFFF;
+    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = cShade[0];
     quad[0].tu = 0.f; quad[0].tv = 0.f; quad[0].tu_orig = 0.f; quad[0].tv_orig = 0.f; quad[0].rad = 1.f; quad[0].ang = 3.14159f;
-    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = 0xFFFFFFFF;
+    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = cShade[1];
     quad[1].tu = 1.f; quad[1].tv = 0.f; quad[1].tu_orig = 1.f; quad[1].tv_orig = 0.f; quad[1].rad = 1.f; quad[1].ang = 0.f;
-    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = 0xFFFFFFFF;
+    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = cShade[2];
     quad[2].tu = 0.f; quad[2].tv = 1.f; quad[2].tu_orig = 0.f; quad[2].tv_orig = 1.f; quad[2].rad = 1.f; quad[2].ang = 3.14159f;
-    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = 0xFFFFFFFF;
+    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = cShade[3];
     quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
   }
