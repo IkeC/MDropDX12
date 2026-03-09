@@ -1134,6 +1134,9 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
         // --- Pattern 1: Audio texture (texelFetch with ivec2(expr, 0) or ivec2(expr, 1)) ---
         // Audio textures are 512x2: row 0=FFT, row 1=waveform.
         // Distinguish from buffer reads which use ivec2(fragCoord) or ivec2(x, y).
+        // Skip if JSON explicitly assigned CHAN_FEEDBACK — small-coord texelFetch reads
+        // (e.g. ivec2(0,0)) are ambiguous between audio and stored pixel data in feedback.
+        if (!(jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK))
         {
             char pat[64];
             sprintf_s(pat, "texelFetch(iChannel%d", ch);
@@ -1411,7 +1414,7 @@ void ShaderImportWindow::OnPasteGLSL(const std::string& glsl) {
     if (m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size()) {
         ShaderPass& pass = m_passes[m_nSelectedPass];
         pass.glslSource = glsl;
-        AnalyzeChannels(pass);
+        AnalyzeChannels(pass, pass.channelsFromJSON);
         SyncChannelCombos();
     }
 }
@@ -1434,7 +1437,7 @@ void ShaderImportWindow::ConvertAndApply() {
     // Tier 2: Auto-detect channel types from GLSL source
     for (auto& p : m_passes) {
         if (p.name == L"Common") continue;
-        AnalyzeChannels(p);
+        AnalyzeChannels(p, p.channelsFromJSON);
     }
     SyncChannelCombos();  // Update UI to reflect auto-detected channels
 
