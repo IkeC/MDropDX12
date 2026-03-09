@@ -36,7 +36,9 @@ ToolWindow::~ToolWindow() {
 //----------------------------------------------------------------------
 
 void ToolWindow::OnAlreadyOpen() {
-  SetForegroundWindow(m_hWnd);
+  // Post to the tool window's own thread so SetWindowPos runs on the owning thread.
+  // Cross-thread SetWindowPos/SetForegroundWindow can silently fail.
+  PostMessage(m_hWnd, WM_MW_BRING_TO_TOP, 0, 0);
 }
 
 DWORD ToolWindow::GetCommonControlFlags() const {
@@ -1097,6 +1099,22 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
   case WM_MW_REBUILD_FONTS:
     tw->RebuildFonts();
     return 0;
+
+  case WM_MW_BRING_TO_TOP:
+  {
+    if (IsIconic(hWnd))
+      ShowWindow(hWnd, SW_RESTORE);
+    // Check if the render window is TOPMOST (fullscreen/borderless mode).
+    // If so, keep the tool window TOPMOST too, otherwise it stays behind.
+    HWND hRender = tw->m_pEngine->GetPluginWindow();
+    bool renderIsTopmost = hRender &&
+        (GetWindowLongW(hRender, GWL_EXSTYLE) & WS_EX_TOPMOST);
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (!tw->m_bOnTop && !renderIsTopmost)
+      SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetForegroundWindow(hWnd);
+    return 0;
+  }
 
   case WM_MW_RESET_WINDOW:
     tw->ResetPosition();

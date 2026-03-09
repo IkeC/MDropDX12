@@ -901,6 +901,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_HOTKEY_ACTION       (WM_APP + 22) // wParam = HotkeyAction ID (dispatch to App.cpp)
 #define WM_MW_MIDI_DATA           (WM_APP + 23) // lParam = packed MIDI bytes from MidiInput callback
 #define WM_MW_NO_PRESETS_PROMPT   (WM_APP + 24) // show "no presets" dialog on UI thread
+#define WM_MW_BRING_TO_TOP        (WM_APP + 26) // raise tool window above fullscreen render
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
