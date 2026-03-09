@@ -6970,6 +6970,12 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (h[16]) pCT->SetVector(lpDevice, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
   if (h[17]) pCT->SetVector(lpDevice, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));
   if (h[18]) pCT->SetVector(lpDevice, h[18], &D3DXVECTOR4((float)(*pState->var_pf_gamma), 0, 0, 0));
+  if (h[19]) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    float secsSinceMidnight = (float)st.wHour * 3600.0f + (float)st.wMinute * 60.0f + (float)st.wSecond + (float)st.wMilliseconds * 0.001f;
+    pCT->SetVector(lpDevice, h[19], &D3DXVECTOR4((float)st.wYear, (float)(st.wMonth - 1), (float)st.wDay, secsSinceMidnight));
+  }
 
   // write q vars
   int num_q_float4s = sizeof(p->q_const_handles) / sizeof(p->q_const_handles[0]);

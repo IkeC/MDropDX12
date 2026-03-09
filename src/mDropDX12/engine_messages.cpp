@@ -2882,6 +2882,12 @@ void Engine::DoCustomSoundAnalysis() {
   myfft.time_to_frequency_domain(fWaveRight, mysound.fSpecRight);
   //for (i=0; i<MY_FFT_SAMPLES; i++) fSpecLeft[i] = sqrtf(fSpecLeft[i]*fSpecLeft[i] + fSpecTemp[i]*fSpecTemp[i]);
 
+  // Compute clean (un-equalized) FFT for get_fft()/get_fft_hz() shader functions
+  memset(mysound.fShaderSpecLeft, 0, sizeof(float) * MY_FFT_SAMPLES);
+  memset(mysound.fShaderSpecRight, 0, sizeof(float) * MY_FFT_SAMPLES);
+  m_fftShader.time_to_frequency_domain(fWaveLeft, mysound.fShaderSpecLeft);
+  m_fftShader.time_to_frequency_domain(fWaveRight, mysound.fShaderSpecRight);
+
   // Update the sample rate (we don't need to check HRESULT every frame)
   using namespace std::chrono;
   static steady_clock::time_point lastCheck = steady_clock::now();

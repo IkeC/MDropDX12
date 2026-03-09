@@ -104,6 +104,8 @@ struct td_mysounddata {
   float   fWave[2][576];
   float   fSpecLeft[MY_FFT_SAMPLES];
   float   fSpecRight[MY_FFT_SAMPLES];
+  float   fShaderSpecLeft[MY_FFT_SAMPLES];   // clean FFT for shader texture (no equalization)
+  float   fShaderSpecRight[MY_FFT_SAMPLES];
   static const int RECENT_BUF_MAX = 4096;
   float   recent_buf[3][RECENT_BUF_MAX];
   int     recent_pos[3];
@@ -774,6 +776,7 @@ public:
 #define WM_USER_MESSAGE_MODE WM_USER + 104
 
   FFT            myfft;
+  FFT            m_fftShader;  // separate clean FFT for shader texture — no equalization, Hann³ window
   td_mysounddata mysound;
 
   // stuff for displaying text to user:

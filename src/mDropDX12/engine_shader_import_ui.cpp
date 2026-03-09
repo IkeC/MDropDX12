@@ -2274,6 +2274,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
 
         replaceAll(inp, "iFrame", "frame");
         replaceAll(inp, "iMouse", "_c14");  // Direct ref to avoid local 'mouse' shadowing #define
+        replaceAll(inp, "iDate", "_c19");   // float4(year, month 0-11, day, seconds since midnight)
         // ZERO/ZEROU: Shadertoy anti-optimization trick (#define ZERO min(iFrame,0)).
         // Always 0 at runtime but prevents GLSL compiler constant-folding.
         // HLSL fxc needs literal 0 to unroll loops, so remove the #defines and replace usage.
@@ -2942,11 +2943,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 if (!line.empty() && line.back() == '\r') line.pop_back();
                 std::string currentLine = line;
 
-                if (line.find("iDate") != std::string::npos) {
-                    errors += "iDate unsupported\r\n";
-                    sb << "// CONV: iDate unsupported\n";
-                    currentLine = "// " + line;
-                } else if (line.find("xTimeDelta") != std::string::npos) {
+                if (line.find("xTimeDelta") != std::string::npos) {
                     errors += "iTimeDelta unsupported\r\n";
                     sb << "// CONV: iTimeDelta unsupported\n";
                     replaceAll(currentLine, "xTimeDelta", "iTimeDelta");

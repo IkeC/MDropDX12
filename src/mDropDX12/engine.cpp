@@ -1131,6 +1131,7 @@ void Engine::MyPreInitialize() {
   //m_nRatingReadProgress = -1;
 
   myfft.Init(576, MY_FFT_SAMPLES, -1);
+  m_fftShader.Init(576, MY_FFT_SAMPLES, 0, 3.0f);  // Hann³ window, no equalization — for shader texture
   memset(&mysound, 0, sizeof(mysound));
   memset(m_fFFTSmoothed, 0, sizeof(m_fFFTSmoothed));
   memset(m_fFFTPeak, 0, sizeof(m_fFFTPeak));
@@ -4155,14 +4156,13 @@ void Engine::UpdateAudioTexture()
     {
         float attack = m_fFFTAttackGlobal;
         float decay  = m_fFFTDecayGlobal;
-        const float kNoiseGate    = 1e-4f;
-        const float kVisibleFloor = 5e-4f;
+        const float kNoiseGate    = 5e-5f;
+        const float kVisibleFloor = 2.5e-4f;
 
         for (UINT fi = 0; fi < W; fi++) {
-            float mono = (mysound.fSpecLeft[fi] + mysound.fSpecRight[fi]) * 0.5f;
-            // Preamp: raw FFT values in MDropDX12 are ~0.01-0.5 range;
-            // shader get_fft() applies sqrt(), so we want texture values ~0.01-1.0
-            mono *= 2.0f;
+            // Use clean (un-equalized) FFT for shader texture — matches Milkwave
+            float mono = (mysound.fShaderSpecLeft[fi] + mysound.fShaderSpecRight[fi]) * 0.5f;
+            mono *= 0.00035f;
 
             if (mono < kNoiseGate) mono = 0.0f;
 

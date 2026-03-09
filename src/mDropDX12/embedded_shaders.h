@@ -32,6 +32,7 @@ float4 _c15 = float4(0, 0, 0, 0); // bass_smooth, mid_smooth, treb_smooth, vol_s
 float4 _c16 = float4(1, 0, 1, 0); // vis_intensity, vis_shift, vis_version
 float4 _c17 = float4(0, 0, 0, 0); // colshift_hue, colshift_saturation, colshift_brightness
 float4 _c18 = float4(1, 0, 0, 0); // gamma_adj (default 1.0 = no change)
+float4 _c19 = float4(0, 0, 0, 0); // iDate: year, month (0-11), day, seconds since midnight
 
 float4 _qa; // q vars bank 1 [q1-q4]
 float4 _qb; // q vars bank 2 [q5-q8]
@@ -105,6 +106,12 @@ float4x3 rot_rand4;
 #define colshift_brightness _c17.z
 
 #define gamma_adj _c18.x
+
+#define idate _c19
+#define idate_year _c19.x
+#define idate_month _c19.y
+#define idate_day _c19.z
+#define idate_seconds _c19.w
 
 #define q1 _qa.x
 #define q2 _qa.y
