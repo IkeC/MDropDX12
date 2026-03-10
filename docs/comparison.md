@@ -24,7 +24,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Auto quality (window-size adaptive) | ✅ | ✅ | ❌ | ❌ |
 | Fixed window dimensions (config) | ✅ | ✅ | ❌ | ✅ |
 | VSync toggle | ✅ | ✅ | ✅ | ❌ |
-| FPS cap dropdown in settings UI | ✅ | ❌ | ❌ | ❌ |
+| FPS cap dropdown in settings UI | ✅ | ✅ (per-mode) | ❌ | ❌ |
 | FPS cap hotkey cycling | ✅ | ✅ | ✅ | ❌ |
 | Black mode (hide rendering) | ✅ | ✅ | ❌ | ❌ |
 
@@ -37,8 +37,8 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | On-the-fly device selection | ✅ | ✅ | ❌ | ✅ (Ctrl+A) |
 | Hi-res audio support | ✅ | ✅ | ✅ (v3.31) | ❌ |
 | Smooth audio variables (bass/mid/treb/vol_smooth) | ✅ | ✅ | ❌ | ❌ |
-| FFT EQ smoothing (attack/decay, peak hold) | ✅ | ❌ | ❌ | ❌ |
-| FFT shader functions (get_fft, get_fft_hz, get_fft_peak) | ✅ | ❌ | ❌ | ❌ |
+| FFT EQ smoothing (attack/decay, peak hold) | ✅ | ✅ | ❌ | ❌ |
+| FFT shader functions (get_fft, get_fft_hz, get_fft_peak) | ✅ | ✅ | ❌ | ❌ |
 | Signal amplification | ✅ | ✅ | ❌ | ❌ |
 | Disable audio capture option | ✅ | ✅ | ❌ | ❌ |
 
@@ -48,7 +48,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | ------- | --------- | -------- | --------- | -------- |
 | .milk preset loading | ✅ | ✅ | ✅ | ✅ |
 | .milk2 double-preset format | ✅ | ❌ | ✅ | ❌ |
-| .milk3 Shadertoy import (GLSL→HLSL) | ✅ | ❌ | ❌ | ❌ |
+| .milk3 Shadertoy import (GLSL→HLSL) | ✅ | ✅ | ❌ | ❌ |
 | Preset browser (in-app) | ✅ | ✅ | ✅ | ❌ (WIP) |
 | Preset browser filtering (Ctrl+F) | ✅ | ✅ | ❌ | ❌ |
 | Preset tagging | ✅ | ✅ | ❌ | ❌ |
@@ -61,8 +61,8 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Preset change on track change | ✅ | ✅ | ❌ | ❌ |
 | Drag-and-drop preset loading | ✅ | ❌ | ❌ | ❌ |
 | Command-line / Explorer double-click loading | ✅ | ❌ | ❌ | ❌ |
-| Preset filter by type (.milk / .milk2 / .milk3) | ✅ | ❌ | ❌ | ❌ |
-| Preset mode buttons (assign/recall) | ❌ | ✅ | ❌ | ❌ |
+| Preset filter by type (.milk / .milk2 / .milk3) | ✅ | ✅ | ❌ | ❌ |
+| Preset mode buttons (assign/recall) | ✅ | ✅ | ❌ | ❌ |
 | Deep mashup (multi-layer) | ❌ | ❌ | ✅ | ❌ |
 | Preset lock | ✅ | ✅ | ✅ | ✅ (Space) |
 
@@ -83,12 +83,12 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
 | ------- | --------- | -------- | --------- | -------- |
 | Warp/comp HLSL shaders | ✅ | ✅ | ✅ | ✅ (HLSL→GLSL transpilation) |
-| Shader editor tab | ❌ | ✅ | ❌ | ❌ |
+| Shader editor tab (Shadertoy import UI) | ✅ | ✅ | ❌ | ❌ |
 | MilkPanel shader editor | ❌ | ❌ | ✅ | ❌ |
 | Shader precompiling and caching | ✅ | ✅ | ✅ (v3.31) | ❌ |
-| SM5.0 (ps_5_0) for Shadertoy presets | ✅ | ❌ | ❌ | n/a |
-| GLSL→HLSL shader converter | ✅ | ❌ | ❌ | n/a |
-| HLSL variable shadowing fix | ✅ | ❌ | ❌ | n/a |
+| SM5.0 (ps_5_0) for Shadertoy presets | ✅ | ❌ (DX9Ex) | ❌ (DX9Ex) | n/a |
+| GLSL→HLSL shader converter | ✅ | ✅ (Remote) | ❌ | n/a |
+| HLSL variable shadowing fix | ✅ | ✅ | ❌ | n/a |
 | PSVersion=4 (AMD GPU support) | ✅ | ✅ | ❌ | n/a |
 | Shader randomize (!/@ keys) | ✅ | ✅ | ✅ | ❌ |
 
@@ -98,9 +98,9 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | ------- | --------- | -------- | --------- | -------- |
 | Disk texture loading | ✅ | ✅ | ✅ | ✅ |
 | Content Base Path (textures, sprites) | ✅ | ❌ | ❌ | ❌ |
-| Fallback texture search paths | ✅ | ❌ | ❌ | ❌ |
-| Random Textures Directory | ✅ | ❌ | ❌ | ❌ |
-| Fallback to 1x1 white texture | ✅ | ❌ | ❌ | ❌ |
+| Fallback texture search paths | ✅ | ✅ | ❌ | ❌ |
+| Random Textures Directory | ✅ | ✅ | ❌ | ❌ |
+| Fallback to 1x1 white texture | ✅ | ✅ | ❌ | ❌ |
 | 3D volume textures (noisevol) | ✅ | ✅ | ✅ | ✅ |
 | Resource viewer | ✅ | ❌ | ❌ | ❌ |
 
@@ -124,7 +124,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Message overrides (size, font, color, effects, animation) | ✅ | ✅ | ❌ | ❌ |
 | Custom text messages (from Remote) | ♻️ | ✅ | ❌ | ❌ |
 | Font/color customization | ♻️ | ✅ | ❌ | ❌ |
-| Multiple simultaneous messages | ♻️ | ✅ | ❌ | ❌ |
+| Multiple simultaneous messages | ✅ | ✅ | ❌ | ❌ |
 | Message positioning (start/end coords) | ♻️ | ✅ | ❌ | ❌ |
 | Background box for text | ♻️ | ✅ | ❌ | ❌ |
 | Fade-out / burn-in timing | ♻️ | ✅ | ❌ | ❌ |
@@ -159,7 +159,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Custom shapes (per_frame/per_point) | ✅ | ✅ | ✅ | ✅ |
 | Custom waves (per_frame/per_point) | ✅ | ✅ | ✅ | ✅ |
 | Live wave manipulation | ♻️ | ✅ | ❌ | ❌ |
-| Mouse interaction mode (Ctrl+M) | ❌ | ✅ | ❌ | ❌ |
+| Mouse interaction mode | ✅ | ✅ (Ctrl+M toggle) | ❌ | ❌ |
 | Expanded variable ranges | ❌ | ❌ | ✅ | ❌ |
 
 ## Input Mixing
@@ -219,7 +219,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | TDR recovery (device lost handling) | ✅ | ❌ | ❌ | ❌ |
 | Focus restoration after TDC rebuild | ✅ | ❌ | ❌ | ❌ |
 | Device restart from settings UI | ✅ | ❌ | ❌ | ❌ |
-| Async compilation (prevents GPU stall) | ✅ | ❌ | ❌ | ❌ |
+| Async compilation (prevents GPU stall) | ✅ | ✅ | ❌ | ❌ |
 | Shader compile timeout | ✅ | ❌ | ❌ | ❌ |
 | SEH crash protection (preset load/EEL JIT) | ✅ | ❌ | ❌ | ❌ |
 | EEL crash diagnostics (diag_eel_error.txt) | ✅ | ❌ | ❌ | ❌ |
@@ -264,7 +264,7 @@ MilkDrop3 introduced `.milk2` files which contain two presets blended together w
 
 ### .milk3 Shadertoy Import Format
 
-MDropDX12 introduced `.milk3`, a JSON format for importing Shadertoy shaders. The built-in GLSL→HLSL converter handles type replacement, matrix multiplication rewriting, and Shadertoy-specific uniforms (iResolution, iTime, iChannel0–3, iMouse). Supports multi-pass rendering (Buffer A → Buffer B → Image) with FLOAT32 ping-pong feedback buffers, SM5.0 shaders, and sRGB gamma correction. Common shader code can be shared across passes. No other MilkDrop-based visualizer supports Shadertoy import.
+MDropDX12 and Milkwave both support `.milk3`, a JSON format for importing Shadertoy shaders. Both include a GLSL→HLSL converter that handles type replacement, matrix multiplication rewriting, and Shadertoy-specific uniforms (iResolution, iTime, iChannel0–3, iMouse). MDropDX12's converter is built into the engine and supports multi-pass rendering (Buffer A → Buffer B → Image) with FLOAT32 ping-pong feedback buffers, SM5.0 shaders, and sRGB gamma correction. Milkwave Remote's Shader Tab (which inspired MDropDX12's implementation) provides a UI for GLSL→HLSL conversion and Shadertoy directory browsing. Common shader code can be shared across passes in both implementations.
 
 ### projectM on Windows
 
@@ -273,7 +273,7 @@ The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projec
 ### Architectural Differences
 
 - **MDropDX12 v1.7.4**: DirectX 12, x64, native ns-eel2 (x64 JIT with SEH crash protection), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); ToolWindow system (Settings, Displays, Song Info, Hotkeys, MIDI, Error Display run on own threads), configurable hotkeys with local/global scope and dynamic Script/Launch entries, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing, Shadertoy import with GLSL→HLSL converter and .milk3 JSON format (SM5.0, FLOAT32 ping-pong feedback buffers, Buffer A/B multi-pass), FFT EQ smoothing with attack/decay and peak hold, SEH crash diagnostics for EEL JIT and preset loading, self-bootstrapping exe with embedded shaders
-- **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine
+- **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine, GLSL→HLSL Shadertoy converter (Remote Shader Tab), FFT EQ smoothing with attack/decay and peak hold, HLSL variable shadowing fix, fallback texture search paths, async shader compilation
 - **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
 - **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code
 

@@ -689,7 +689,47 @@ void mdrop::Engine::RunPerFrameEquations(int code) {
 #ifndef _NO_EXPR_
     if (pState->m_pf_codehandle) {
       if (pState->m_pf_codehandle) {
+        // DIAG: dump reg20-28 before/after per_frame execution to file
+        static int diagPfCount = 0;
+        static bool diagPfReset = true;
+        if (m_bPresetDiagLogged) { diagPfReset = true; }
+        if (!m_bPresetDiagLogged && diagPfReset) {
+          diagPfCount = 0; diagPfReset = false;
+          // Open/create diag file at preset start
+          wchar_t dp[MAX_PATH];
+          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
+          FILE* dfp = nullptr;
+          _wfopen_s(&dfp, dp, L"w");
+          if (dfp) { fprintf(dfp, "--- preset load ---\n"); fclose(dfp); }
+        }
+        if (diagPfCount < 30) {
+          double* regs = NSEEL_getglobalregs();
+          wchar_t dp[MAX_PATH];
+          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
+          FILE* dfp = nullptr;
+          _wfopen_s(&dfp, dp, L"a");
+          if (dfp) {
+            fprintf(dfp, "#%d rep=%d/%d BEF reg20-28: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+                    diagPfCount, rep, num_reps,
+                    regs[20], regs[21], regs[22], regs[23], regs[24], regs[25], regs[26], regs[27], regs[28]);
+            fclose(dfp);
+          }
+        }
         NSEEL_code_execute(pState->m_pf_codehandle);
+        if (diagPfCount < 30) {
+          double* regs = NSEEL_getglobalregs();
+          wchar_t dp[MAX_PATH];
+          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
+          FILE* dfp = nullptr;
+          _wfopen_s(&dfp, dp, L"a");
+          if (dfp) {
+            fprintf(dfp, "#%d rep=%d/%d AFT reg20-28: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+                    diagPfCount, rep, num_reps,
+                    regs[20], regs[21], regs[22], regs[23], regs[24], regs[25], regs[26], regs[27], regs[28]);
+            fclose(dfp);
+          }
+          diagPfCount++;
+        }
       }
     }
 #endif
@@ -2390,12 +2430,36 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
     }
 
-    // Diagnostic: log warp pass state once per preset load
-    if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
-      DLOG_VERBOSE("DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
-              m_dx12WarpPSO ? "PRESET" : "FALLBACK",
-              (m_shaders.warp.CT != nullptr) ? "yes" : "no",
-              (float)(*m_pState->var_pf_decay));
+    // Diagnostic: log rotation matrix evolution over multiple frames
+    {
+      static int diagFrameCount = 0;
+      static bool diagWasLogged = true;
+      if (m_bPresetDiagLogged) { diagWasLogged = true; }
+      if (!m_bPresetDiagLogged && diagWasLogged) { diagFrameCount = 0; diagWasLogged = false; }
+      int presetFrame = diagFrameCount++;
+      if (presetFrame == 0 || presetFrame == 1 || presetFrame == 5 ||
+          presetFrame == 10 || presetFrame == 30 || presetFrame == 60 ||
+          presetFrame == 120) {
+        double* regs = NSEEL_getglobalregs();
+        DLOG_VERBOSE("DIAG frame=%d q7=%.4f q8=%.4f q14=%.6f q16=%.4f",
+                presetFrame, (float)*m_pState->var_pf_q[6], (float)*m_pState->var_pf_q[7],
+                (float)*m_pState->var_pf_q[13], (float)*m_pState->var_pf_q[15]);
+        DLOG_VERBOSE("DIAG frame=%d q20-28(rot): %.6f %.6f %.6f | %.6f %.6f %.6f | %.6f %.6f %.6f",
+                presetFrame,
+                (float)*m_pState->var_pf_q[19], (float)*m_pState->var_pf_q[20], (float)*m_pState->var_pf_q[21],
+                (float)*m_pState->var_pf_q[22], (float)*m_pState->var_pf_q[23], (float)*m_pState->var_pf_q[24],
+                (float)*m_pState->var_pf_q[25], (float)*m_pState->var_pf_q[26], (float)*m_pState->var_pf_q[27]);
+        DLOG_VERBOSE("DIAG frame=%d reg20-28: %.6f %.6f %.6f | %.6f %.6f %.6f | %.6f %.6f %.6f",
+                presetFrame,
+                (float)regs[20], (float)regs[21], (float)regs[22],
+                (float)regs[23], (float)regs[24], (float)regs[25],
+                (float)regs[26], (float)regs[27], (float)regs[28]);
+        // Log q4-6 (camera pos) and q10 (movement compensation)
+        DLOG_VERBOSE("DIAG frame=%d q4-6(pos): %.4f %.4f %.4f q10=%.6f",
+                presetFrame,
+                (float)*m_pState->var_pf_q[3], (float)*m_pState->var_pf_q[4], (float)*m_pState->var_pf_q[5],
+                (float)*m_pState->var_pf_q[9]);
+      }
     }
 
     // Bind warp shader constant buffer
@@ -2619,8 +2683,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
 
     // Compute hue_shader corner colors (matches ShowToUser_Shaders comp grid logic).
-    // hue_shader is bilinearly interpolated from 4 animated corner colors; the GPU's
-    // vertex interpolation across the quad produces the exact same result.
+    // DX9 ShowToUser_Shaders hardcodes fShaderAmount=1 for shader comp presets,
+    // so animated shade colors are always applied at full strength.
     float shade[4][3];
     for (int i = 0; i < 4; i++) {
       shade[i][0] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0143f + 3 + i * 21 + m_fRandStart[3]);
