@@ -458,6 +458,7 @@ public:
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all
+  bool m_bMirrorPromptActive = false;   // Guard: prompt already showing
   std::atomic<bool> m_bMirrorStylesDirty{false}; // UI thread sets; render thread applies
 
   enum MirrorActivateResult { MirrorActivated, MirrorFullscreenOnly, MirrorCancelled };
