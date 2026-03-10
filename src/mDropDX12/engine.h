@@ -719,8 +719,14 @@ public:
   float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
   float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
   bool    m_bLoadingShadertoyMode = false;    // true when async load is for a .milk3 Shadertoy preset
+  bool    m_bLoadingMilk2 = false;            // true when async load is a .milk2 double-preset
   int     m_nPresetsLoadedTotal; //important for texture eviction age-tracking...
-  CState	m_state_DO_NOT_USE[3];	// do not use; use pState and pOldState instead.
+  CState	m_state_DO_NOT_USE[4];	// do not use; use pState and pOldState instead.
+  CState* m_pMilk2OldState;      // 4th CState for .milk2 preset 1 (old/blend-from state)
+  PShaderSet m_Milk2OldShaders;   // preset 1's shaders during .milk2 async load
+  int     m_nMilk2MixType = -1;   // blend pattern from .milk2 metadata
+  wchar_t m_szMilk2Temp1[MAX_PATH] = {};  // temp file for preset 1 (deleted after load)
+  wchar_t m_szMilk2Temp2[MAX_PATH] = {};  // temp file for preset 2 (deleted after load)
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS
 
 #define MASH_SLOTS 5
@@ -1172,7 +1178,6 @@ public:
   void        LoadRandomPreset(float fBlendTime);
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
   bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
-  void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
   bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick

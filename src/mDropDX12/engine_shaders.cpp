@@ -1246,6 +1246,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);
 
+  // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
+  // The include already declares "Texture2D sampler_randNN;" — having both
+  // causes a redefinition error (sampler = SamplerState in SM5.0).
+  for (int ri = 0; ri <= 3; ri++) {
+    char dx9Decl[48];
+    sprintf(dx9Decl, "sampler sampler_rand%02d", ri);
+    char* pos = strstr(&szShaderText[shaderStartPos], dx9Decl);
+    if (pos) {
+      // Blank the declaration up to and including the semicolon
+      char* end = strchr(pos, ';');
+      if (end) memset(pos, ' ', end - pos + 1);
+    }
+  }
+
   // Shader inputs/outputs (injected automatically, not visible in preset code):
   //
   // WARP shader:
