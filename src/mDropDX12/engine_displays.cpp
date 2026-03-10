@@ -139,13 +139,35 @@ Engine::MirrorActivateResult Engine::TryActivateMirrors(HWND hRenderWnd)
         return MirrorActivated;
     }
 
-    // Show prompt
+    // Guard: only one prompt at a time
+    if (m_bMirrorPromptActive)
+        return MirrorCancelled;
+    m_bMirrorPromptActive = true;
+
+    // Show timed prompt — auto-accepts "Yes" after 5 seconds
     wchar_t msg[256];
     swprintf(msg, 256,
-        L"No mirrors enabled.\nFound %d display(s).\n\nMirror to all?",
+        L"No mirrors enabled.\nFound %d display(s).\n\nMirror to all?\n(Auto-accepting in 5 seconds...)",
         totalMonitors);
+
+    // Use MessageBoxTimeout (undocumented ntdll/user32 export) for auto-dismiss
+    // Fallback: timer callback closes the MessageBox after 5 seconds
+    static UINT_PTR s_timerId = 0;
+    s_timerId = SetTimer(NULL, 0, 5000, [](HWND, UINT, UINT_PTR idEvent, DWORD) {
+        KillTimer(NULL, idEvent);
+        // Find and dismiss the prompt by pressing Yes
+        HWND hMB = FindWindowW(L"#32770", L"MDropDX12");
+        if (hMB) {
+            EndDialog(hMB, IDYES);
+        }
+    });
+
     int result = MessageBoxW(hRenderWnd, msg, L"MDropDX12",
         MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST);
+
+    KillTimer(NULL, s_timerId);
+    s_timerId = 0;
+    m_bMirrorPromptActive = false;
 
     if (result == IDYES) {
         for (auto& o : m_displayOutputs)
