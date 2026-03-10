@@ -1438,6 +1438,10 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     if (!m_szCompShadersText[0]) {
       DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText", LOG_VERBOSE);
       g_engine.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+      // DX12: non-shader presets need a compiled comp PSO for video echo, gamma, and hue shader.
+      // DX9 handled these via multi-pass blend states in ShowToUser_NoShaders(), which doesn't
+      // exist in the DX12 path. Set PS version so the generated shader text gets compiled.
+      nCompPSVersionInFile = MD2_PS_2_0;
     }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
@@ -1718,6 +1722,16 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           g_engine.LoadPerFrameEvallibVars(g_engine.m_pState);
 
           NSEEL_code_execute(pf_codehandle_init);
+
+          // DIAG: log reg20-28 after per_frame_init (runs on background thread)
+          {
+            double* regs = NSEEL_getglobalregs();
+            DLOG_INFO("DIAG per_frame_init DONE reg20-28: %.4f %.4f %.4f | %.4f %.4f %.4f | %.4f %.4f %.4f  preset=%ls",
+                    (float)regs[20], (float)regs[21], (float)regs[22],
+                    (float)regs[23], (float)regs[24], (float)regs[25],
+                    (float)regs[26], (float)regs[27], (float)regs[28],
+                    m_szDesc);
+          }
 
           for (int vi = 0; vi < NUM_Q_VAR; vi++)
             q_values_after_init_code[vi] = *var_pf_q[vi];

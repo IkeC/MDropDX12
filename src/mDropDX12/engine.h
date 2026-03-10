@@ -625,7 +625,7 @@ public:
   float   m_fFFTPeak[MY_FFT_SAMPLES];       // peak hold per bin
   int     m_nFFTPeakHold[MY_FFT_SAMPLES];   // frames remaining in peak hold
 
-  int m_MinPSVersionConfig = 2;
+  int m_MinPSVersionConfig = 4; // MD2_PS_3_0: DX12 requires ps_3_0 minimum (ps_2_a silently drops texture bindings)
   int m_MaxPSVersionConfig = 6;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
 
