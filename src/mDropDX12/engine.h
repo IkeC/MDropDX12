@@ -627,7 +627,7 @@ public:
 
   int m_MinPSVersionConfig = 4; // MD2_PS_3_0: DX12 requires ps_3_0 minimum (ps_2_a silently drops texture bindings)
   int m_MaxPSVersionConfig = 6;
-  bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
+  bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = false;
 
   // GPU Protection Settings
   int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
@@ -904,6 +904,10 @@ public:
   ComPtr<ID3D12PipelineState> m_dx12CompPSO;         // current preset comp
   ComPtr<ID3D12PipelineState> m_dx12FallbackWarpPSO; // default warp_ps.fx
   ComPtr<ID3D12PipelineState> m_dx12FallbackCompPSO; // default comp_ps.fx
+  ComPtr<ID3D12PipelineState> m_dx12OldWarpPSO;      // previous preset warp (blend pass 0, no alpha)
+  ComPtr<ID3D12PipelineState> m_dx12WarpBlendPSO;    // current preset warp (blend pass 1, alpha blend)
+  ComPtr<ID3D12PipelineState> m_dx12OldCompPSO;      // previous preset comp (blend pass 0, no alpha)
+  ComPtr<ID3D12PipelineState> m_dx12CompBlendPSO;    // current preset comp (blend pass 1, alpha blend)
   ComPtr<ID3D12PipelineState> m_dx12BlurPSO[2];      // [0] = horiz (blur1), [1] = vert (blur2)
   DX12Texture m_injectEffectTex;                     // back-buffer-sized copy for F11 inject post-process
   ComPtr<ID3D12PipelineState> m_pInjectEffectPSO;    // inject effect pixel shader PSO
@@ -936,6 +940,8 @@ public:
   void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
+  UINT m_oldWarpMainTexSlot = 0;                      // t-register for sampler_main in old warp PS
+  UINT m_oldCompMainTexSlot = 0;                      // t-register for sampler_main in old comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
   void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()

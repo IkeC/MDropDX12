@@ -3424,6 +3424,10 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   m_dx12BlurPSO[0].Reset();
   m_dx12BlurPSO[1].Reset();
   m_dx12BufferAPSO.Reset();
+  m_dx12OldWarpPSO.Reset();
+  m_dx12WarpBlendPSO.Reset();
+  m_dx12OldCompPSO.Reset();
+  m_dx12CompBlendPSO.Reset();
   /*
   SafeRelease( m_shaders.comp.ptr );
   SafeRelease( m_shaders.warp.ptr );
