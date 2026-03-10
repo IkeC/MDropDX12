@@ -1397,6 +1397,25 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p = after + 1;  // advance past the '('
       }
     }
+    // Also strip whitespace after '(' — e.g. "tex2D( sampler_pw_main," → "tex2D(sampler_pw_main,"
+    // Without this, replaceTex2D won't match and the call falls through to the tex2D macro
+    // which uses _samp_lw (LINEAR+WRAP) instead of the correct sampler for pw_/fc_/pc_ prefixes.
+    {
+      const char* texFuncs2[] = { "tex2Dlod(", "tex2Dbias(", "tex2D(", "tex3Dlod(", "tex3D(" };
+      for (const char* fn : texFuncs2) {
+        int fnLen = (int)strlen(fn);
+        char* p = szShaderText;
+        while ((p = strstr(p, fn)) != nullptr) {
+          char* after = p + fnLen;  // points to char right after '('
+          int spaces = 0;
+          while (after[spaces] == ' ' || after[spaces] == '\t') spaces++;
+          if (spaces > 0) {
+            memmove(after, after + spaces, strlen(after + spaces) + 1);
+          }
+          p = after;
+        }
+      }
+    }
     auto replaceTex2D = [&](const char* sampName, const char* sampState) {
       char from[80], to[80];
       // tex2D(sampler_name, ...) → sampler_name.Sample(sampState, ...)
