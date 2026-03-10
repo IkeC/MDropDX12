@@ -89,6 +89,9 @@ protected:
   // Handle WM_NOTIFY. Return 0 if handled, -1 if not.
   virtual LRESULT DoNotify(HWND hWnd, NMHDR* pnm) { return -1; }
 
+  // Handle WM_CONTEXTMENU. x/y are screen coordinates. Return 0 if handled, -1 if not.
+  virtual LRESULT DoContextMenu(HWND hWnd, int x, int y) { return -1; }
+
   // Catch-all for messages BaseWndProc doesn't handle (WM_TIMER, WM_DROPFILES, etc.)
   virtual LRESULT DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) { return -1; }
 
@@ -419,6 +422,7 @@ protected:
   void    OnResize() override;
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoContextMenu(HWND hWnd, int x, int y) override;
   LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
   void    DoDestroy() override;
 
@@ -442,6 +446,48 @@ private:
   void UpdatePresetDirDisplay();
   void NavigatePresetDirUp();
   void NavigatePresetDirInto(int sel);
+  bool ShowNoteDialog(HWND hParent, const wchar_t* presetName, wchar_t* szNote, int nMaxNote);
+  int  m_nContextSel = -1;  // listbox index for context menu
+};
+
+// ── Concrete subclass: Annotations window ──
+
+class AnnotationsWindow : public ToolWindow {
+public:
+  AnnotationsWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Annotations"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12AnnotationsWnd"; }
+  const wchar_t* GetINISection() const override  { return L"AnnotationsWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_ANNOTWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_ANNOTWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_ANNOTWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 500; }
+  int GetMinHeight() const override { return 400; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+
+private:
+  HWND m_hListView = NULL;
+  HWND m_hFilterCombo = NULL;
+  HWND m_hBtnLoad = NULL;
+  HWND m_hBtnRemove = NULL;
+  HWND m_hBtnDetails = NULL;
+  HWND m_hBtnImport = NULL;
+  HWND m_hBtnScan = NULL;
+  int  m_nTopY = 0;
+  int  m_nFilterMode = 0; // 0=All, 1=Favorite, 2=Error, 3=Skip, 4=Broken
+
+  void LayoutControls();
+  void RefreshList();
+  void ShowDetailsDialog();
+  void ShowImportDialog();
+  void DoScanPresets();
+  std::wstring GetSelectedFilename();
 };
 
 // ── Concrete subclass: Button Board window ──

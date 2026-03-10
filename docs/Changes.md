@@ -1,5 +1,27 @@
 # MDropDX12 Changelog
 
+## v1.7.5 (2026-03-10)
+
+### Preset Annotations
+
+- New persistent preset annotation system — per-preset ratings (0-5), flags (favorite/error/skip/broken), notes, and auto-captured shader error text stored in `presets.json`
+- Annotations ToolWindow with filterable ListView, detail dialogs, import from file, and scan loaded presets for `.milk` `fRatingThis` values
+- Import dialog shows side-by-side comparison of source vs current ratings/flags with selective import, merge, or bulk import options
+- Auto-flag presets with `PFLAG_ERROR` on shader compilation failure, capturing error text for later review
+- Random preset selection skips presets flagged as `PFLAG_SKIP` or `PFLAG_BROKEN`
+- Right-click context menu on Presets window with Toggle Favorite, Toggle Skip, Flag as Broken, Add Note, View Error, Clear Flags, and Rating submenu
+- Annotations accessible from Presets context menu ("Open Annotations...") and Tools tab in Settings
+
+### UI Infrastructure
+
+- Added `DoContextMenu` virtual method to ToolWindow base class — enables right-click context menus in any ToolWindow subclass
+- Dark-themed popup context menus using undocumented uxtheme dark mode APIs (`SetPreferredAppMode`, `AllowDarkModeForWindow`, `FlushMenuThemes`)
+- Cover art sprite system with Show Now button and IPC signal
+
+### Preset Transitions
+
+- Two-pass shader blending for DX12 preset transitions
+
 ## v1.7.4 (2026-03-10)
 
 Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.com/OfficialIncubo) for testing and reporting issues.

@@ -896,6 +896,34 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_OPEN_SHIMPORT      9084
 #define IDC_MW_TOOLS_LIST         9090  // ListView on Tools tab
 
+// Preset annotation context menu (9600-9619)
+#define IDC_MW_ANNOT_FAV          9600  // Toggle Favorite
+#define IDC_MW_ANNOT_SKIP         9601  // Toggle Skip
+#define IDC_MW_ANNOT_BROKEN       9602  // Flag as Broken
+#define IDC_MW_ANNOT_NOTE         9603  // Add Note...
+#define IDC_MW_ANNOT_VIEWERR      9604  // View Error
+#define IDC_MW_ANNOT_CLEAR        9605  // Clear All Flags
+#define IDC_MW_ANNOT_RATE_BASE    9610  // 9610-9615 for ratings 0-5
+
+// Annotations ToolWindow controls (9620-9639)
+#define IDC_MW_ANNOTWIN_PIN          9620
+#define IDC_MW_ANNOTWIN_FONT_PLUS    9621
+#define IDC_MW_ANNOTWIN_FONT_MINUS   9622
+#define IDC_MW_ANNOTWIN_LIST         9623  // ListView: annotations
+#define IDC_MW_ANNOTWIN_FILTER       9624  // ComboBox: filter (All/Favorite/Error/Skip/Broken)
+#define IDC_MW_ANNOTWIN_NOTE_EDIT    9625  // Multiline EDIT: notes (read-only)
+#define IDC_MW_ANNOTWIN_ERROR_EDIT   9626  // Multiline EDIT: error text (read-only)
+#define IDC_MW_ANNOTWIN_LOAD         9627  // Button: Load selected preset
+#define IDC_MW_ANNOTWIN_REMOVE       9628  // Button: Remove annotation
+#define IDC_MW_OPEN_ANNOTATIONS      9629  // Launcher button on Tools tab
+#define IDC_MW_ANNOTWIN_DETAILS      9630  // Button: View details (notes/error)
+#define IDC_MW_ANNOTWIN_IMPORT       9631  // Button: Import from file
+#define IDC_MW_IMPORT_LIST           9632  // ListView in import dialog
+#define IDC_MW_IMPORT_ALL            9633  // Button: Import All
+#define IDC_MW_IMPORT_SEL            9634  // Button: Import Selected
+#define IDC_MW_IMPORT_MERGE          9635  // Button: Merge All
+#define IDC_MW_ANNOTWIN_SCAN         9636  // Button: Scan presets for ratings
+
 // Settings tab page indices
 #define SP_GENERAL  0
 #define SP_TOOLS    1

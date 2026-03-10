@@ -1402,6 +1402,9 @@ void Engine::MyReadConfig() {
   LoadMidiSettings();
   LoadMidiJSON();
 
+  // Preset annotations
+  LoadPresetAnnotations();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================

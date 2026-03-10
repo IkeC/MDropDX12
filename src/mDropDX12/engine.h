@@ -52,6 +52,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 #include <array>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -381,6 +382,20 @@ typedef struct {
   float    fRatingCum;
 } PresetInfo;
 typedef std::vector<PresetInfo> PresetList;
+
+// Preset annotation flags (bitmask)
+#define PFLAG_FAVORITE  0x01
+#define PFLAG_ERROR     0x02
+#define PFLAG_SKIP      0x04
+#define PFLAG_BROKEN    0x08
+
+struct PresetAnnotation {
+    std::wstring filename;      // key — filename without path
+    int          rating = 0;    // 0-5, 0 = unrated
+    uint32_t     flags = 0;     // PFLAG_ bitmask
+    std::wstring notes;
+    std::wstring errorText;     // auto-captured from shader compile
+};
 
 
 class Engine : public EngineShell {
@@ -761,6 +776,21 @@ public:
   //   Be careful - this can be -1 if the user changed dir. & a new preset hasn't been loaded yet.
   wchar_t		m_szCurrentPresetFile[512];	// w/o path.  this is always valid (unless no presets were found)
   PresetList  m_presets;
+
+  // Preset annotation system (presets.json)
+  std::unordered_map<std::wstring, PresetAnnotation> m_presetAnnotations;
+  bool m_bAnnotationsDirty = false;
+  void LoadPresetAnnotations();
+  void SavePresetAnnotations();
+  PresetAnnotation* GetAnnotation(const wchar_t* filename, bool create = false);
+  void SetPresetFlag(const wchar_t* filename, uint32_t flag, bool set);
+  void SetPresetNote(const wchar_t* filename, const std::wstring& note);
+  void AutoFlagPresetError(const wchar_t* filename, const std::wstring& errorMsg);
+  // Import: parse annotations from an arbitrary presets.json file
+  static std::unordered_map<std::wstring, PresetAnnotation> ParseAnnotationsFile(const wchar_t* path);
+  // Scan loaded presets and build a map from fRatingThis (non-default ratings only)
+  std::unordered_map<std::wstring, PresetAnnotation> ScanPresetsForRatings();
+
   void		UpdatePresetList(bool bBackground = false, bool bForce = false, bool bTryReselectCurrentPreset = true);
   wchar_t     m_szUpdatePresetMask[MAX_PATH];
   bool        m_bPresetListReady;
@@ -1276,6 +1306,11 @@ public:
   std::unique_ptr<PresetsWindow> m_presetsWindow;
   void OpenPresetsWindow();
   void ClosePresetsWindow();
+
+  // Annotations window (ToolWindow subclass, own thread)
+  std::unique_ptr<AnnotationsWindow> m_annotationsWindow;
+  void OpenAnnotationsWindow();
+  void CloseAnnotationsWindow();
 
   // Sprites window (ToolWindow subclass, own thread)
   std::unique_ptr<SpritesWindow> m_spritesWindow;

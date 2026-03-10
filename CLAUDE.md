@@ -21,6 +21,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - `HWND_NOTOPMOST` has ONE T — never use `HWND_NOTTOPMOST`
 - All file paths use wide strings (`wchar_t`, `std::wstring`)
 - The visualizer should never crash — always handle exceptions gracefully
+- **New actions may be added to the hotkey system**, but they must be **unbound by default** (modifiers=0, key=0 in `HK_DEF`). Users bind keys themselves via the Hotkeys window (Ctrl+F7). Never hardcode key bindings in `WM_KEYDOWN`/`WM_CHAR` handlers — all key-triggered actions go through `DispatchHotkeyAction()` in `engine_hotkeys.cpp`.
 
 ## Naming Conventions
 
@@ -43,7 +44,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.7.4)
+## Key Features (current: v1.7.5)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
@@ -76,6 +77,9 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 - FFT EQ smoothing with attack/decay and peak hold — `get_fft()`, `get_fft_hz()`, `get_fft_peak()`, `get_fft_peak_hz()` shader functions; audio texture 512x2 R32_FLOAT (row 0 = smoothed, row 1 = peak)
 - Error Display Settings ToolWindow for configuring shader error notification appearance
+- Preset annotation system: persistent per-preset ratings, flags (favorite/error/skip/broken), notes, and auto-captured shader errors in `presets.json`
+- Annotations ToolWindow with filter, import from file, scan loaded presets for ratings, and detail dialogs
+- Dark-themed popup context menus using undocumented uxtheme APIs
 
 ## DX12 Rendering Pipeline
 

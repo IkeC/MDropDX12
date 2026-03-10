@@ -4,8 +4,10 @@
 // Extracted from Settings page 0 (General tab).
 
 #include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include <CommCtrl.h>
+#include <windowsx.h>
 
 // Shorten a directory path to "...\parent\leaf\" for compact display.
 static void ShortenDirectoryPath(const wchar_t* szFullPath, wchar_t* szOut, int nMaxChars) {
@@ -54,7 +56,19 @@ void PresetsWindow::RefreshPresetList() {
     SendMessage(m_hList, LB_RESETCONTENT, 0, 0);
     for (int i = 0; i < p->m_nPresets; i++) {
         if (p->m_presets[i].szFilename.empty()) continue;
-        SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+        // Add annotation prefix indicators
+        PresetAnnotation* a = p->GetAnnotation(p->m_presets[i].szFilename.c_str());
+        if (a && a->flags) {
+            std::wstring display;
+            if (a->flags & PFLAG_FAVORITE) display += L"\x2605";  // filled star
+            if (a->flags & (PFLAG_ERROR | PFLAG_BROKEN)) display += L"\x26A0";  // warning
+            if (a->flags & PFLAG_SKIP) display += L"\x2298";  // circled dash
+            display += L" ";
+            display += p->m_presets[i].szFilename;
+            SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)display.c_str());
+        } else {
+            SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+        }
     }
     if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
         SendMessage(m_hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
@@ -459,6 +473,78 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
     }
 
+    // ── Annotation context menu commands ──
+    if (code == 0 && m_nContextSel >= 0 && m_nContextSel < p->m_nPresets) {
+        const wchar_t* fn = p->m_presets[m_nContextSel].szFilename.c_str();
+        if (id == IDC_MW_ANNOT_FAV) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            p->SetPresetFlag(fn, PFLAG_FAVORITE, !(a && (a->flags & PFLAG_FAVORITE)));
+            RefreshPresetList();
+            return 0;
+        }
+        if (id == IDC_MW_ANNOT_SKIP) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            p->SetPresetFlag(fn, PFLAG_SKIP, !(a && (a->flags & PFLAG_SKIP)));
+            RefreshPresetList();
+            return 0;
+        }
+        if (id == IDC_MW_ANNOT_BROKEN) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            p->SetPresetFlag(fn, PFLAG_BROKEN, !(a && (a->flags & PFLAG_BROKEN)));
+            RefreshPresetList();
+            return 0;
+        }
+        if (id == IDC_MW_ANNOT_NOTE) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            wchar_t szNote[1024] = {};
+            if (a && !a->notes.empty())
+                wcsncpy_s(szNote, a->notes.c_str(), _TRUNCATE);
+            // Simple input dialog
+            if (ShowNoteDialog(hWnd, fn, szNote, _countof(szNote))) {
+                p->SetPresetNote(fn, szNote);
+                p->AddNotification(L"Note saved");
+            }
+            return 0;
+        }
+        if (id == IDC_MW_ANNOT_VIEWERR) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            if (a && !a->errorText.empty())
+                MessageBoxW(hWnd, a->errorText.c_str(), L"Shader Error", MB_OK | MB_ICONWARNING);
+            else
+                MessageBoxW(hWnd, L"No error recorded.", L"Shader Error", MB_OK);
+            return 0;
+        }
+        if (id == IDC_MW_ANNOT_CLEAR) {
+            PresetAnnotation* a = p->GetAnnotation(fn);
+            if (a) {
+                a->flags = 0;
+                a->errorText.clear();
+                a->notes.clear();
+                a->rating = 0;
+                p->m_bAnnotationsDirty = true;
+                p->SavePresetAnnotations();
+                RefreshPresetList();
+            }
+            return 0;
+        }
+        if (id >= IDC_MW_ANNOT_RATE_BASE && id <= IDC_MW_ANNOT_RATE_BASE + 5) {
+            int rating = id - IDC_MW_ANNOT_RATE_BASE;
+            PresetAnnotation* a = p->GetAnnotation(fn, true);
+            if (a) {
+                a->rating = rating;
+                p->m_bAnnotationsDirty = true;
+                p->SavePresetAnnotations();
+            }
+            return 0;
+        }
+    }
+
+    // Open Annotations window
+    if (id == IDC_MW_OPEN_ANNOTATIONS && code == BN_CLICKED) {
+        p->OpenAnnotationsWindow();
+        return 0;
+    }
+
     // ── Startup mode combo ──
     if (id == IDC_MW_PRESETS_STARTUP && code == CBN_SELCHANGE) {
         int mode = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
@@ -505,7 +591,177 @@ LRESULT PresetsWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         return 0;
     }
+
     return -1;
+}
+
+// ─── Context Menu ────────────────────────────────────────────────────────
+
+LRESULT PresetsWindow::DoContextMenu(HWND hWnd, int x, int y) {
+    if (!m_hList) return -1;
+
+    Engine* p = m_pEngine;
+    int sel = (int)SendMessage(m_hList, LB_GETCURSEL, 0, 0);
+    if (sel < 0 || sel >= p->m_nPresets) return -1;
+    if (p->m_presets[sel].szFilename.c_str()[0] == L'*') return -1; // directory
+
+    const wchar_t* fn = p->m_presets[sel].szFilename.c_str();
+    PresetAnnotation* a = p->GetAnnotation(fn);
+    bool isFav    = a && (a->flags & PFLAG_FAVORITE);
+    bool isSkip   = a && (a->flags & PFLAG_SKIP);
+    bool isBroken = a && (a->flags & PFLAG_BROKEN);
+    bool hasError = a && (a->flags & PFLAG_ERROR);
+
+    HMENU hMenu = CreatePopupMenu();
+    AppendMenuW(hMenu, MF_STRING | (isFav ? MF_CHECKED : 0), IDC_MW_ANNOT_FAV, L"Favorite");
+    AppendMenuW(hMenu, MF_STRING | (isSkip ? MF_CHECKED : 0), IDC_MW_ANNOT_SKIP, L"Skip");
+    AppendMenuW(hMenu, MF_STRING | (isBroken ? MF_CHECKED : 0), IDC_MW_ANNOT_BROKEN, L"Broken");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, IDC_MW_ANNOT_NOTE, L"Add Note...");
+    AppendMenuW(hMenu, MF_STRING | (hasError ? 0 : MF_GRAYED), IDC_MW_ANNOT_VIEWERR, L"View Error...");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, IDC_MW_ANNOT_CLEAR, L"Clear All Flags");
+
+    // Rating submenu
+    HMENU hRateMenu = CreatePopupMenu();
+    int curRating = a ? a->rating : 0;
+    for (int r = 5; r >= 0; r--) {
+        wchar_t label[32];
+        if (r == 0) wcscpy_s(label, L"Unrated");
+        else {
+            label[0] = 0;
+            for (int s = 0; s < r; s++) wcscat_s(label, L"\x2605");
+        }
+        AppendMenuW(hRateMenu, MF_STRING | (curRating == r ? MF_CHECKED : 0), IDC_MW_ANNOT_RATE_BASE + r, label);
+    }
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hRateMenu, L"Rating");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, IDC_MW_OPEN_ANNOTATIONS, L"Open Annotations...");
+
+    POINT pt = { x, y };
+    if (pt.x == -1 && pt.y == -1) { // keyboard context menu
+        RECT rc;
+        SendMessage(m_hList, LB_GETITEMRECT, sel, (LPARAM)&rc);
+        pt.x = rc.left + 20;
+        pt.y = rc.bottom;
+        ClientToScreen(m_hList, &pt);
+    }
+
+    // Store selected index for command handler
+    m_nContextSel = sel;
+    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hWnd, NULL);
+    DestroyMenu(hMenu);
+    return 0;
+}
+
+// ─── Note Dialog ────────────────────────────────────────────────────────
+
+struct NoteDialogData {
+    const wchar_t* presetName;
+    wchar_t* szNote;
+    int nMaxNote;
+    bool accepted;
+};
+
+static INT_PTR CALLBACK NoteDialogProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    NoteDialogData* d = (NoteDialogData*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+    switch (msg) {
+    case WM_INITDIALOG:
+        d = (NoteDialogData*)lParam;
+        SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)d);
+        SetWindowTextW(hDlg, d->presetName);
+        SetDlgItemTextW(hDlg, 101, d->szNote);
+        return TRUE;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK) {
+            GetDlgItemTextW(hDlg, 101, d->szNote, d->nMaxNote);
+            d->accepted = true;
+            EndDialog(hDlg, IDOK);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDCANCEL) {
+            d->accepted = false;
+            EndDialog(hDlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    case WM_CLOSE:
+        d->accepted = false;
+        EndDialog(hDlg, IDCANCEL);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+bool PresetsWindow::ShowNoteDialog(HWND hParent, const wchar_t* presetName, wchar_t* szNote, int nMaxNote) {
+    // Build a tiny dialog template in memory
+    // Layout: multiline edit (id 101), OK button (IDOK), Cancel button (IDCANCEL)
+    #pragma pack(push, 4)
+    struct {
+        DLGTEMPLATE dlg;
+        WORD menu, cls, title;
+        // Items follow
+    } tmpl = {};
+    #pragma pack(pop)
+
+    // Instead of a template, just use CreateDialogIndirect or a simple MessageBox approach
+    // Simplest: create a popup window manually
+    HWND hDlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        L"#32770", presetName,
+        WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME,
+        CW_USEDEFAULT, CW_USEDEFAULT, 400, 200,
+        hParent, NULL, GetModuleHandle(NULL), NULL);
+    if (!hDlg) return false;
+
+    HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", szNote,
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP,
+        10, 10, 370, 100, hDlg, (HMENU)101, GetModuleHandle(NULL), NULL);
+    SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    HWND hOK = CreateWindowExW(0, L"BUTTON", L"OK",
+        WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP,
+        220, 120, 75, 28, hDlg, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
+    SendMessage(hOK, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    HWND hCancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        305, 120, 75, 28, hDlg, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
+    SendMessage(hCancel, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    // Center on parent
+    RECT rcParent, rcDlg;
+    GetWindowRect(hParent, &rcParent);
+    GetWindowRect(hDlg, &rcDlg);
+    int cx = (rcParent.left + rcParent.right) / 2 - (rcDlg.right - rcDlg.left) / 2;
+    int cy = (rcParent.top + rcParent.bottom) / 2 - (rcDlg.bottom - rcDlg.top) / 2;
+    SetWindowPos(hDlg, NULL, cx, cy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+    // Run modal message loop
+    EnableWindow(hParent, FALSE);
+    bool accepted = false;
+    MSG m;
+    while (GetMessage(&m, NULL, 0, 0)) {
+        if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
+            break;
+        }
+        if (m.message == WM_COMMAND && m.hwnd == hDlg) {
+            if (LOWORD(m.wParam) == IDOK) {
+                GetWindowTextW(hEdit, szNote, nMaxNote);
+                accepted = true;
+                break;
+            }
+            if (LOWORD(m.wParam) == IDCANCEL) break;
+        }
+        if (!IsDialogMessage(hDlg, &m)) {
+            TranslateMessage(&m);
+            DispatchMessage(&m);
+        }
+    }
+    EnableWindow(hParent, TRUE);
+    DestroyWindow(hDlg);
+    SetForegroundWindow(hParent);
+    return accepted;
 }
 
 // ─── Directory Navigation ───────────────────────────────────────────────

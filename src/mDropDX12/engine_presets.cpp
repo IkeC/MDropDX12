@@ -294,7 +294,14 @@ void Engine::LoadRandomPreset(float fBlendTime) {
     // pick a random file
     if (!m_bEnableRating || (m_presets[m_nPresets - 1].fRatingCum < 0.1f))// || (m_nRatingReadProgress < m_nPresets))
     {
-      m_nCurrentPreset = m_nDirs + (rand() % (m_nPresets - m_nDirs));
+      // Try up to 50 times to avoid skip/broken presets
+      int nFiles = m_nPresets - m_nDirs;
+      for (int attempt = 0; attempt < 50 && nFiles > 0; attempt++) {
+        m_nCurrentPreset = m_nDirs + (rand() % nFiles);
+        PresetAnnotation* a = GetAnnotation(m_presets[m_nCurrentPreset].szFilename.c_str());
+        if (!a || !(a->flags & (PFLAG_SKIP | PFLAG_BROKEN)))
+          break; // found a non-skipped preset
+      }
     }
     else {
       float cdf_pos = (rand() % 14345) / 14345.0f * m_presets[m_nPresets - 1].fRatingCum;
@@ -325,6 +332,17 @@ void Engine::LoadRandomPreset(float fBlendTime) {
             lo = mid;
         }
         m_nCurrentPreset = hi;
+      }
+      // If selected preset is skip/broken, try a few more random picks
+      PresetAnnotation* a = GetAnnotation(m_presets[m_nCurrentPreset].szFilename.c_str());
+      if (a && (a->flags & (PFLAG_SKIP | PFLAG_BROKEN))) {
+        int nFiles = m_nPresets - m_nDirs;
+        for (int attempt = 0; attempt < 20 && nFiles > 0; attempt++) {
+          m_nCurrentPreset = m_nDirs + (rand() % nFiles);
+          a = GetAnnotation(m_presets[m_nCurrentPreset].szFilename.c_str());
+          if (!a || !(a->flags & (PFLAG_SKIP | PFLAG_BROKEN)))
+            break;
+        }
       }
     }
   }
