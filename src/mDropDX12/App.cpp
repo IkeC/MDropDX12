@@ -1315,7 +1315,13 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     // Toggle actions: handle inline (need local hWnd/fullscreen state)
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
-      ToggleFullScreen(hWnd);
+      if (g_engine.m_bMirrorsActive) {
+        // Mirroring → single fullscreen: disable mirrors, stay fullscreen
+        g_engine.m_bMirrorsActive = false;
+        g_engine.AddNotification(L"Mirror outputs disabled");
+      } else {
+        ToggleFullScreen(hWnd);
+      }
       SetForegroundWindow(hWnd);
       break;
     case HK_TOGGLE_STRETCH:
@@ -1352,7 +1358,13 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     int id = (int)wParam;
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
-      ToggleFullScreen(hWnd);
+      if (g_engine.m_bMirrorsActive) {
+        // Mirroring → single fullscreen: disable mirrors, stay fullscreen
+        g_engine.m_bMirrorsActive = false;
+        g_engine.AddNotification(L"Mirror outputs disabled");
+      } else {
+        ToggleFullScreen(hWnd);
+      }
       SetForegroundWindow(hWnd);
       break;
     case HK_TOGGLE_STRETCH:
@@ -1604,7 +1616,12 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       }
     }
     else if (wParam == VK_RETURN) {
-      ToggleFullScreen(hWnd);
+      if (g_engine.m_bMirrorsActive) {
+        g_engine.m_bMirrorsActive = false;
+        g_engine.AddNotification(L"Mirror outputs disabled");
+      } else {
+        ToggleFullScreen(hWnd);
+      }
     }
     else {
       g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
