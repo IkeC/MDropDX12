@@ -1426,6 +1426,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       swprintf(temp, wasabiApiLangString(IDS_ERROR_PARSING_X_X_SHADER), szProfile, szWhichShader);
       dumpmsg(temp, LOG_WARN);
       AddError(temp, 8.0f, ERR_PRESET, true);
+      AutoFlagPresetError(m_szCurrentPresetFile, temp);
       return false;
     }
   }
@@ -1646,6 +1647,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
         SafeRelease(m_pShaderCompileErrors);
         AddNotification(wideErrorMsg);
+        AutoFlagPresetError(m_szCurrentPresetFile, wideErrorMsg);
       }
       else {
         if (MessageBoxA(GetPluginWindow(), "The shader could not be compiled.\n\nPlease install the Microsoft DirectX End-User Runtimes.\n\nOpen Download-Website now?", "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
@@ -1693,6 +1695,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       else {
         AddError(temp, 6.0f, ERR_PRESET, true);
       }
+      AutoFlagPresetError(m_szCurrentPresetFile, temp);
       return false;
     }
   }

@@ -396,6 +396,8 @@
     <ClCompile Include="engine_songinfo_ui.cpp" />
     <ClCompile Include="engine_midi_ui.cpp" />
     <ClCompile Include="engine_midi.cpp" />
+    <ClCompile Include="engine_preset_annotations.cpp" />
+    <ClCompile Include="engine_annotations_ui.cpp" />
     <ClCompile Include="midi_input.cpp" />
     <ClCompile Include="tool_window.cpp" />
     <ClCompile Include="engine_shaders.cpp" />

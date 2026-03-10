@@ -13,7 +13,32 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <windowsx.h>
 #pragma comment(lib, "dwmapi.lib")
+
+//----------------------------------------------------------------------
+// Undocumented uxtheme dark mode APIs (Windows 10 1903+ / build 18362+)
+// Used by Notepad++, Windows Terminal, VS Code, etc. for dark popup menus.
+//----------------------------------------------------------------------
+enum PreferredAppMode { Default = 0, AllowDark = 1, ForceDark = 2, ForceLight = 3 };
+using fnSetPreferredAppMode = PreferredAppMode(WINAPI*)(PreferredAppMode);
+using fnFlushMenuThemes = void(WINAPI*)();
+using fnAllowDarkModeForWindow = bool(WINAPI*)(HWND, bool);
+
+static fnSetPreferredAppMode  pSetPreferredAppMode = nullptr;
+static fnFlushMenuThemes      pFlushMenuThemes = nullptr;
+static fnAllowDarkModeForWindow pAllowDarkModeForWindow = nullptr;
+static bool s_bDarkAPIsResolved = false;
+
+static void ResolveDarkModeAPIs() {
+    if (s_bDarkAPIsResolved) return;
+    s_bDarkAPIsResolved = true;
+    HMODULE hUx = GetModuleHandleW(L"uxtheme.dll");
+    if (!hUx) return;
+    pSetPreferredAppMode = (fnSetPreferredAppMode)GetProcAddress(hUx, MAKEINTRESOURCEA(135));
+    pFlushMenuThemes = (fnFlushMenuThemes)GetProcAddress(hUx, MAKEINTRESOURCEA(136));
+    pAllowDarkModeForWindow = (fnAllowDarkModeForWindow)GetProcAddress(hUx, MAKEINTRESOURCEA(133));
+}
 
 namespace mdrop {
 
@@ -683,6 +708,15 @@ void ApplyDarkThemeToWindow(Engine* p, HWND hWnd) {
     DwmSetWindowAttribute(hWnd, 34, &reset, sizeof(reset));
     DwmSetWindowAttribute(hWnd, 36, &reset, sizeof(reset));
   }
+
+  // Enable dark popup menus via undocumented uxtheme APIs (Windows 10 1903+)
+  ResolveDarkModeAPIs();
+  if (pSetPreferredAppMode)
+    pSetPreferredAppMode(bDark ? ForceDark : ForceLight);
+  if (pAllowDarkModeForWindow)
+    pAllowDarkModeForWindow(hWnd, bDark);
+  if (pFlushMenuThemes)
+    pFlushMenuThemes();
 }
 
 void ApplyDarkThemeToChildren(Engine* p, const std::vector<HWND>& ctrls) {
@@ -1279,6 +1313,13 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       tw->ApplyDarkTheme();
     }
     break;
+
+  case WM_CONTEXTMENU:
+  {
+    LRESULT r = tw->DoContextMenu(hWnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+    if (r != -1) return r;
+    break;
+  }
 
   default:
   {
