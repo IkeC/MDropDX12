@@ -2315,6 +2315,36 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
     try {
         // Phase 1: Global replacements
 
+        // Strip GLSL-only constructs that have no HLSL equivalent
+        // precision qualifiers: "precision highp float;", "precision mediump sampler2D;" etc.
+        {
+            size_t pos = 0;
+            while ((pos = inp.find("precision ", pos)) != std::string::npos) {
+                // Must be at start of line (or start of string)
+                if (pos > 0 && inp[pos-1] != '\n' && inp[pos-1] != '\r') { pos += 10; continue; }
+                size_t eol = inp.find('\n', pos);
+                if (eol == std::string::npos) eol = inp.size();
+                inp.erase(pos, eol - pos);
+            }
+        }
+        // Strip 'uniform' qualifier (framework-specific, not standard Shadertoy)
+        // "uniform vec2 x;" → "vec2 x;" — also strip entire sampler array declarations
+        {
+            size_t pos = 0;
+            while ((pos = inp.find("uniform ", pos)) != std::string::npos) {
+                if (pos > 0 && inp[pos-1] != '\n' && inp[pos-1] != '\r' && inp[pos-1] != ' ') { pos += 8; continue; }
+                // If it's a sampler array, strip entire line (can't declare sampler arrays in our shader)
+                size_t eol = inp.find('\n', pos);
+                std::string line = inp.substr(pos, (eol != std::string::npos ? eol : inp.size()) - pos);
+                if (line.find("sampler") != std::string::npos && line.find('[') != std::string::npos) {
+                    if (eol == std::string::npos) eol = inp.size();
+                    inp.erase(pos, eol - pos);
+                } else {
+                    inp.erase(pos, 8); // just strip "uniform "
+                }
+            }
+        }
+
         // Integer/unsigned/boolean vector types (must come BEFORE vec→float to avoid ivec2→ifloat2)
         replaceAll(inp, "uvec2", "uint2");
         replaceAll(inp, "uvec3", "uint3");
@@ -2641,10 +2671,25 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     pos = after;
                 }
             }
+            // Helper: detect scalar numeric literals (e.g., "3.0", "0.5f", "2", "1e-3").
+            // Scalar*matrix and matrix*scalar should use * (component-wise), NOT mul().
+            auto isScalarLiteral = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                bool hasDigit = false;
+                for (char c : s) {
+                    if (isdigit(c)) hasDigit = true;
+                    else if (c != '.' && c != 'e' && c != 'E' && c != '-' && c != '+' && c != 'f' && c != ' ')
+                        return false;
+                }
+                return hasDigit;
+            };
+
             // Convert matVar*expr and expr*matVar to mul() calls.
             // All matrices use mul-swap: matVar*expr → mul(expr, matVar), expr*matVar → mul(matVar, expr)
             //   floatNxM(a,b,c) stores a,b,c as ROWS but GLSL treats them as COLUMNS.
             //   Swapping mul() args compensates. Preserves M[i] indexing (row i = GLSL col i).
+            // IMPORTANT: Skip conversion when operand is a scalar literal — scalar*matrix
+            // is valid component-wise multiplication in both GLSL and HLSL.
             for (const auto& mv : matVars) {
                 int mvLen = (int)mv.name.size();
                 size_t pos = 0;
@@ -2692,6 +2737,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                                     afterStar = swizEnd;
                             }
                             std::string operand = inp.substr(opStart, afterStar - opStart);
+                            // Skip scalar*matrix — use * for component-wise multiply
+                            if (isScalarLiteral(operand)) { pos = afterStar; continue; }
                             std::string repl;
                             if (mv.isSquare)
                                 repl = "mul(" + operand + ", " + mv.name + ")";  // SWAPPED
@@ -2825,6 +2872,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                         }
                         if (opEnd > opStart) {
                             std::string operand = inp.substr(opStart, opEnd - opStart);
+                            // Skip scalar*matrix — use * for component-wise multiply
+                            if (isScalarLiteral(operand)) { pos = callEnd; continue; }
                             std::string repl;
                             if (mf.isSquare)
                                 repl = "mul(" + funcCall + ", " + operand + ")";  // SWAPPED
@@ -2857,6 +2906,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (rhsEnd > rhsStart) {
                                 std::string rhs = inp.substr(rhsStart, rhsEnd - rhsStart);
                                 while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                                // Skip matrix*scalar — use * for component-wise multiply
+                                if (isScalarLiteral(rhs)) { pos = callEnd; continue; }
                                 // Check for chain: if there's a "* expr" after the RHS, fold it in.
                                 // e.g. matFunc1(...) * matFunc2(...) * vec → mul(mul(vec, M2), M1)
                                 std::string suffix = inp.substr(rhsEnd);
@@ -3897,6 +3948,65 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     }
                     pos = callEnd;
                 }
+            }
+        }
+
+        // Fix mul()*expr → mul(expr, mul()) — matrix chain results followed by vector multiply.
+        // After Phase 1b converts M1*M2*M3 into nested mul() calls, the final *vector
+        // may be left as the * operator. HLSL requires mul() for matrix-vector multiply.
+        {
+            auto isScalarLit = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                bool hasDigit = false;
+                for (char c : s) {
+                    if (isdigit(c)) hasDigit = true;
+                    else if (c!='.'&&c!='e'&&c!='E'&&c!='-'&&c!='+'&&c!='f'&&c!=' ') return false;
+                }
+                return hasDigit;
+            };
+            size_t pos = 0;
+            while ((pos = result.find("mul(", pos)) != std::string::npos) {
+                // Don't match identifiers ending with "mul(" (e.g., "cmul(")
+                if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += 4; continue; }
+                size_t mulStart = pos;
+                std::string rest = result.substr(pos + 4);
+                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closingIdx < 0) { pos += 4; continue; }
+                size_t mulEnd = pos + 4 + closingIdx + 1;
+                size_t afterMul = mulEnd;
+                while (afterMul < result.size() && result[afterMul] == ' ') afterMul++;
+                if (afterMul < result.size() && result[afterMul] == '*' &&
+                    (afterMul + 1 >= result.size() || result[afterMul + 1] != '=')) {
+                    afterMul++;
+                    while (afterMul < result.size() && result[afterMul] == ' ') afterMul++;
+                    size_t rhsStart = afterMul, rhsEnd = rhsStart;
+                    if (rhsEnd < result.size() && result[rhsEnd] == '(') {
+                        int d = 1; rhsEnd++;
+                        while (rhsEnd < result.size() && d > 0) {
+                            if (result[rhsEnd] == '(') d++;
+                            else if (result[rhsEnd] == ')') d--;
+                            rhsEnd++;
+                        }
+                    } else {
+                        while (rhsEnd < result.size() && (isalnum(result[rhsEnd]) || result[rhsEnd] == '_')) rhsEnd++;
+                        if (rhsEnd < result.size() && result[rhsEnd] == '.') {
+                            rhsEnd++;
+                            while (rhsEnd < result.size() && (result[rhsEnd]=='x'||result[rhsEnd]=='y'||result[rhsEnd]=='z'||result[rhsEnd]=='w')) rhsEnd++;
+                        }
+                    }
+                    if (rhsEnd > rhsStart) {
+                        std::string mulCall = result.substr(mulStart, mulEnd - mulStart);
+                        std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                        if (!isScalarLit(rhs)) {
+                            std::string replacement = "mul(" + rhs + ", " + mulCall + ")";
+                            result = result.substr(0, mulStart) + replacement + result.substr(rhsEnd);
+                            pos = mulStart; // re-scan from start in case of nested mul()
+                            DebugLogA("CONV-FIX: mul(...)*expr → mul(expr, mul(...))\n");
+                            continue;
+                        }
+                    }
+                }
+                pos = mulEnd;
             }
         }
 
