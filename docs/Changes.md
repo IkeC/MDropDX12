@@ -1,5 +1,25 @@
 # MDropDX12 Changelog
 
+## v1.7.7 (2026-03-11)
+
+### Rendering Fixes
+
+- Fixed fullscreen black rendering for dot-based presets — DX12 custom wave dots were always 1px instead of emulating DX9 `D3DRS_POINTSIZE` (2-3px squares at high resolution). Sparse additive dots couldn't accumulate enough brightness in the feedback loop to overcome comp shader darken effects.
+- Fixed dark/incorrect rendering for blur-dependent presets (e.g., Flexi) — removed leftover DX9 half-texel UV offsets from blur shaders that shifted blur by 1 texel, compounding through the feedback loop
+- Fixed non-shader preset rendering — auto-gen comp shader now correctly binds VS[1] (post-warp+shapes) instead of VS[0], and custom shapes use proper alpha blending PSO
+- Fixed comp shader reading post-warp darkened texture instead of pre-warp input for user-written comp shaders
+- Fixed pre-MilkDrop2 preset rendering — clamp sampler for non-wrapping textures, correct Y-flip, and proper warp decay via vertex diffuse color
+
+### Hotkeys & Input
+
+- Added separate Mirror and Stretch hotkey actions (unbound by default)
+- Fixed global hotkeys not dispatching most actions
+- Guard mirror prompt against re-entry with auto-accept after 5 seconds
+
+### Internal
+
+- Reduced ToolWindow boilerplate with macros, registry, and template helpers
+
 ## v1.7.6 (2026-03-10)
 
 ### Display Mode Stability
