@@ -388,15 +388,16 @@ void COverlayThread::RenderOverlayToDIB() {
         int availW = (int)w - margin * 2;
         HFONT hUseFont = m_hHUDFont;
         HFONT hShrunk = NULL;
+        int useFontH = m_hudFontH;
 
         HFONT hPrev = (HFONT)SelectObject(m_hMemDC, m_hHUDFont);
         RECT rCalc = { 0, 0, availW, 2048 };
         ::DrawTextW(m_hMemDC, m_currentData.szPresetName, -1, &rCalc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
         if (rCalc.right - rCalc.left > availW && m_hudFontH > 10) {
             // Compute scaled font height to fit
-            int shrunkH = (int)(m_hudFontH * (float)availW / (float)(rCalc.right - rCalc.left));
-            if (shrunkH < 10) shrunkH = 10;
-            hShrunk = CreateFontW(-shrunkH, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            useFontH = (int)(m_hudFontH * (float)availW / (float)(rCalc.right - rCalc.left));
+            if (useFontH < 10) useFontH = 10;
+            hShrunk = CreateFontW(-useFontH, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
             if (hShrunk) {
@@ -405,8 +406,72 @@ void COverlayThread::RenderOverlayToDIB() {
             }
         }
 
-        DrawShadowText(m_currentData.szPresetName, true, margin, &upperRightY,
-                       (int)w - margin, false, m_currentData.presetNameColor);
+        int textH = rCalc.bottom - rCalc.top;
+        int lockW = 0;
+
+        BYTE cr = (BYTE)((m_currentData.presetNameColor >> 16) & 0xFF);
+        BYTE cg = (BYTE)((m_currentData.presetNameColor >> 8) & 0xFF);
+        BYTE cb = (BYTE)(m_currentData.presetNameColor & 0xFF);
+
+        if (m_currentData.bPresetLocked) {
+            // Lock icon dimensions based on text height
+            int iconH = textH * 3 / 4;
+            int bodyH = iconH * 5 / 8;
+            int bodyW = iconH * 5 / 8;
+            int shackleH = iconH - bodyH;
+            lockW = bodyW + textH / 3;  // icon width + gap
+        }
+
+        // Compute right-aligned position for lock + name
+        int nameW = rCalc.right - rCalc.left;
+        int totalW = lockW + nameW;
+        int startX = (int)w - margin - totalW;
+        if (startX < margin) startX = margin;
+
+        // Draw lock icon using GDI primitives (no font dependency)
+        if (m_currentData.bPresetLocked) {
+            int iconH = textH * 3 / 4;
+            int bodyH = iconH * 5 / 8;
+            int bodyW = iconH * 5 / 8;
+            int shackleH = iconH - bodyH;
+            int iconY = upperRightY + (textH - iconH) / 2;
+            int iconX = startX;
+
+            auto drawLockAt = [&](int ox, int oy, COLORREF color) {
+                int bx = iconX + ox;
+                int by = iconY + oy + shackleH;
+                // Body (filled rectangle)
+                HBRUSH hBr = CreateSolidBrush(color);
+                RECT rBody = { bx, by, bx + bodyW, by + bodyH };
+                FillRect(m_hMemDC, &rBody, hBr);
+                DeleteObject(hBr);
+                // Shackle (arc above body)
+                HPEN hPen = CreatePen(PS_SOLID, max(1, bodyW / 6), color);
+                HPEN hOldPen = (HPEN)SelectObject(m_hMemDC, hPen);
+                HBRUSH hOldBr = (HBRUSH)SelectObject(m_hMemDC, GetStockObject(NULL_BRUSH));
+                int sx = bx + bodyW / 5;
+                int sw = bodyW * 3 / 5;
+                Arc(m_hMemDC, sx, iconY + oy, sx + sw, iconY + oy + shackleH * 2,
+                    sx + sw, iconY + oy + shackleH, sx, iconY + oy + shackleH);
+                SelectObject(m_hMemDC, hOldPen);
+                SelectObject(m_hMemDC, hOldBr);
+                DeleteObject(hPen);
+            };
+
+            drawLockAt(1, 1, RGB(64, 64, 64));  // shadow
+            drawLockAt(0, 0, RGB(cr, cg, cb));    // main
+        }
+
+        // Draw preset name
+        SelectObject(m_hMemDC, hUseFont);
+        int nameX = startX + lockW;
+        int nameLen = (int)wcslen(m_currentData.szPresetName);
+        SetTextColor(m_hMemDC, RGB(64, 64, 64));
+        ::TextOutW(m_hMemDC, nameX + 1, upperRightY + 1, m_currentData.szPresetName, nameLen);
+        SetTextColor(m_hMemDC, RGB(cr, cg, cb));
+        ::TextOutW(m_hMemDC, nameX, upperRightY, m_currentData.szPresetName, nameLen);
+
+        upperRightY += textH;
         SelectObject(m_hMemDC, hPrev);
         if (hShrunk) DeleteObject(hShrunk);
     }

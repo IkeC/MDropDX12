@@ -429,8 +429,8 @@ void Engine::MyRenderUI(
       SelectFont(DECORATIVE_FONT);
       swprintf(
         buf,
-        L"%s %s ",
-        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"[L]" : L"",
+        L"%s%s ",
+        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\u2022 " : L"",
         (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
 
       DWORD alpha = 255;
@@ -493,9 +493,9 @@ void Engine::MyRenderUI(
 
       // HUD: preset name
       od.bShowPresetName = m_bShowPresetInfo && !m_blackmode;
+      od.bPresetLocked = (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol;
       if (od.bShowPresetName) {
-        swprintf(od.szPresetName, 256, L"%s%s ",
-          (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"[L] " : L"",
+        swprintf(od.szPresetName, 256, L"%s ",
           (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
         od.presetNameColor = ((DWORD)m_fontinfo[DECORATIVE_FONT].R << 16)
                            | ((DWORD)m_fontinfo[DECORATIVE_FONT].G << 8)
