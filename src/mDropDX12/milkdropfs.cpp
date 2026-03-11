@@ -308,12 +308,7 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, flags);
 
       // Global autosize: compute fFontSize so text fills ~90% of screen width
-      // Skip when slide-in animation is active (text enters from offscreen)
-      bool bSlideIn = (m_supertexts[supertextIndex].fStartX != -100.0f &&
-                       m_supertexts[supertextIndex].fStartX != m_supertexts[supertextIndex].fX) ||
-                      (m_supertexts[supertextIndex].fStartY != -100.0f &&
-                       m_supertexts[supertextIndex].fStartY != m_supertexts[supertextIndex].fY);
-      if (m_bMessageAutoSize && !bSlideIn && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
+      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
         const float kFill = 0.9f;
         float ratio = kFill * (float)m_supertexts[supertextIndex].nFontSizeUsed
                       / ((float)m_nTexSizeX / 1024.0f * 100.0f);
@@ -7838,6 +7833,11 @@ void mdrop::Engine::ShowSongTitleAnim(int w, int h, float fProgress, int superte
     // positioning:
     float fSizeX = (float)m_nTexSizeX / 1024.0f * 100.0f / (float)m_supertexts[supertextIndex].nFontSizeUsed * powf(1.033f, m_supertexts[supertextIndex].fFontSize - 50.0f);
     float fSizeY = fSizeX * m_nTitleTexSizeY / (float)m_nTitleTexSizeX;
+
+    if (fSizeX > 0.88f) {
+      fSizeY *= 0.88f / fSizeX;
+      fSizeX = 0.88f;
+    }
 
     i = 0;
     float vert_clip = VERT_CLIP;//0.67f;	// warning: visible clipping has been observed at 0.5 (for very short strings) and even 0.6 (for wingdings)!

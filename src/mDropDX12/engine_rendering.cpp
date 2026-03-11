@@ -212,13 +212,14 @@ void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
 
 #define MyTextOut_BGCOLOR(str, corner, bDarkBox, boxColor) { \
     SetRect(&r, 0, 0, xR-xL, 2048); \
-	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_WORD_ELLIPSIS | DT_CALCRECT | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT : 0), 0xFFFFFFFF, false, boxColor); \
+	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_END_ELLIPSIS | DT_CALCRECT | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT : 0), 0xFFFFFFFF, false, boxColor); \
     int w = r.right - r.left; \
+    if (w > xR-xL) w = xR-xL; \
     if      (corner == MTO_UPPER_LEFT ) SetRect(&r, xL, *upper_left_corner_y, xL+w, *upper_left_corner_y + h); \
     else if (corner == MTO_UPPER_RIGHT) SetRect(&r, xR-w, *upper_right_corner_y, xR, *upper_right_corner_y + h); \
     else if (corner == MTO_LOWER_LEFT ) SetRect(&r, xL, *lower_left_corner_y - h, xL+w, *lower_left_corner_y); \
     else if (corner == MTO_LOWER_RIGHT) SetRect(&r, xR-w, *lower_right_corner_y - h, xR, *lower_right_corner_y); \
-	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_WORD_ELLIPSIS | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT: 0), 0xFFFFFFFF, bDarkBox, boxColor); \
+	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_END_ELLIPSIS | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT: 0), 0xFFFFFFFF, bDarkBox, boxColor); \
     if      (corner == MTO_UPPER_LEFT ) *upper_left_corner_y  += h; \
     else if (corner == MTO_UPPER_RIGHT) *upper_right_corner_y += h; \
     else if (corner == MTO_LOWER_LEFT ) *lower_left_corner_y  -= h; \
@@ -227,13 +228,14 @@ void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
 
 #define MyTextOut_Color(str, corner, color) { \
     SetRect(&r, 0, 0, xR-xL, 2048); \
-	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_WORD_ELLIPSIS | DT_CALCRECT | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT : 0), color, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_END_ELLIPSIS | DT_CALCRECT | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT : 0), color, false, 0xFF000000); \
     int w = r.right - r.left; \
+    if (w > xR-xL) w = xR-xL; \
     if      (corner == MTO_UPPER_LEFT ) SetRect(&r, xL, *upper_left_corner_y, xL+w, *upper_left_corner_y + h); \
     else if (corner == MTO_UPPER_RIGHT) SetRect(&r, xR-w, *upper_right_corner_y, xR, *upper_right_corner_y + h); \
     else if (corner == MTO_LOWER_LEFT ) SetRect(&r, xL, *lower_left_corner_y - h, xL+w, *lower_left_corner_y); \
     else if (corner == MTO_LOWER_RIGHT) SetRect(&r, xR-w, *lower_right_corner_y - h, xR, *lower_right_corner_y); \
-	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_WORD_ELLIPSIS | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT: 0), color, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, str, -1, &r, DT_NOPREFIX | ((corner == MTO_UPPER_RIGHT)?0:DT_SINGLELINE) | DT_END_ELLIPSIS | ((corner == MTO_UPPER_RIGHT) ? DT_RIGHT: 0), color, false, 0xFF000000); \
     if      (corner == MTO_UPPER_LEFT ) *upper_left_corner_y  += h; \
     else if (corner == MTO_UPPER_RIGHT) *upper_right_corner_y += h; \
     else if (corner == MTO_LOWER_LEFT ) *lower_left_corner_y  -= h; \
@@ -245,18 +247,19 @@ void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
 #define MyTextOut_Shadow(str, corner) { \
     /* calc rect size */        \
     SetRect(&r, 0, 0, xR-xL, 2048); \
-	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS | DT_CALCRECT, 0xFFFFFFFF, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS | DT_CALCRECT, 0xFFFFFFFF, false, 0xFF000000); \
     int w = r.right - r.left; \
+    if (w > xR-xL) w = xR-xL; \
     /* first the shadow */         \
     if      (corner == MTO_UPPER_LEFT ) SetRect(&r, xL, *upper_left_corner_y, xL+w, *upper_left_corner_y + h); \
     else if (corner == MTO_UPPER_RIGHT) SetRect(&r, xR-w, *upper_right_corner_y, xR, *upper_right_corner_y + h); \
     else if (corner == MTO_LOWER_LEFT ) SetRect(&r, xL, *lower_left_corner_y - h, xL+w, *lower_left_corner_y); \
     else if (corner == MTO_LOWER_RIGHT) SetRect(&r, xR-w, *lower_right_corner_y - h, xR, *lower_right_corner_y); \
     r.top += 1; r.left += 1;      \
-    m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS, 0xFF000000, false, 0xFF000000); \
+    m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS, 0xFF000000, false, 0xFF000000); \
     /* now draw real text */            \
     r.top -= 1; r.left -= 1;       \
-	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS, 0xFFFFFFFF, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS, 0xFFFFFFFF, false, 0xFF000000); \
     if      (corner == MTO_UPPER_LEFT ) *upper_left_corner_y  += h; \
     else if (corner == MTO_UPPER_RIGHT) *upper_right_corner_y += h; \
     else if (corner == MTO_LOWER_LEFT ) *lower_left_corner_y  -= h; \
@@ -266,18 +269,19 @@ void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
 #define MyTextOut_Shadow_Color(str, corner, color) { \
     /* calc rect size */        \
     SetRect(&r, 0, 0, xR-xL, 2048); \
-	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS | DT_CALCRECT, color, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS | DT_CALCRECT, color, false, 0xFF000000); \
     int w = r.right - r.left; \
+    if (w > xR-xL) w = xR-xL; \
     /* first the shadow */         \
     if      (corner == MTO_UPPER_LEFT ) SetRect(&r, xL, *upper_left_corner_y, xL+w, *upper_left_corner_y + h); \
     else if (corner == MTO_UPPER_RIGHT) SetRect(&r, xR-w, *upper_right_corner_y, xR, *upper_right_corner_y + h); \
     else if (corner == MTO_LOWER_LEFT ) SetRect(&r, xL, *lower_left_corner_y - h, xL+w, *lower_left_corner_y); \
     else if (corner == MTO_LOWER_RIGHT) SetRect(&r, xR-w, *lower_right_corner_y - h, xR, *lower_right_corner_y); \
     r.top += 1; r.left += 1;      \
-    m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS, 0xFF000000, false, 0xFF000000); \
+    m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS, 0xFF000000, false, 0xFF000000); \
     /* now draw real text */            \
     r.top -= 1; r.left -= 1;       \
-	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_WORD_ELLIPSIS, color, false, 0xFF000000); \
+	m_text.DrawTextW(pFont, (wchar_t*)str, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS, color, false, 0xFF000000); \
     if      (corner == MTO_UPPER_LEFT ) *upper_left_corner_y  += h; \
     else if (corner == MTO_UPPER_RIGHT) *upper_right_corner_y += h; \
     else if (corner == MTO_LOWER_LEFT ) *lower_left_corner_y  -= h; \
@@ -500,6 +504,23 @@ void Engine::MyRenderUI(
       }
     }
     // NOTE: custom timed msg comes at the end!!
+  }
+
+  // 1b. render timed preset name display (Simple mode) — centered at top
+  if (m_szPresetNameDisplay[0] && GetTime() < m_fPresetNameShowUntil) {
+    SelectFont(DECORATIVE_FONT);
+    float fAge = GetTime() - (m_fPresetNameShowUntil - 3.5f);
+    float fAlpha = 1.0f;
+    if (fAge < 0.3f) fAlpha = fAge / 0.3f;                          // fade in
+    else if (fAge > 3.5f - 0.3f) fAlpha = (3.5f - fAge) / 0.3f;    // fade out
+    fAlpha = max(0.0f, min(1.0f, fAlpha));
+    DWORD alpha = (DWORD)(fAlpha * 255.0f);
+    DWORD cr = m_fontinfo[DECORATIVE_FONT].R;
+    DWORD cg = m_fontinfo[DECORATIVE_FONT].G;
+    DWORD cb = m_fontinfo[DECORATIVE_FONT].B;
+    DWORD color = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
+    SetRect(&r, xL, h / 2, xR, h / 2 + h * 2);
+    m_text.DrawTextW(pFont, m_szPresetNameDisplay, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_CENTER | DT_END_ELLIPSIS, color, false, 0xFF000000);
   }
 
   // 2. render text in lower-right corner
