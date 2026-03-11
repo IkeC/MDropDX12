@@ -430,7 +430,7 @@ void Engine::MyRenderUI(
       swprintf(
         buf,
         L"%s %s ",
-        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\xD83D\xDD12" : L"",
+        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"[L]" : L"",
         (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
 
       DWORD alpha = 255;
@@ -495,7 +495,7 @@ void Engine::MyRenderUI(
       od.bShowPresetName = m_bShowPresetInfo && !m_blackmode;
       if (od.bShowPresetName) {
         swprintf(od.szPresetName, 256, L"%s%s ",
-          (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\xD83D\xDD12 " : L"",
+          (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"[L] " : L"",
           (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
         od.presetNameColor = ((DWORD)m_fontinfo[DECORATIVE_FONT].R << 16)
                            | ((DWORD)m_fontinfo[DECORATIVE_FONT].G << 8)
