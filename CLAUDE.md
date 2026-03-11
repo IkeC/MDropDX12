@@ -103,7 +103,7 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 - After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
 - Building closes any running visualizer instance (the linker overwrites the exe)
 - INI section is `[Milkwave]` for backward compatibility (not renamed)
-- Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
+- Reference visualizer for comparison: Milkwave Visualizer (window title "Milkwave Visualizer")
 - User has custom texture files that presets reference (clipboard textures, etc.)
 - Textures (`resources/textures/`) tracked in git; shader cache (`cache/`) is not
 - Shader .fx files are embedded in the exe (self-bootstrapping); `resources/data/` no longer shipped
