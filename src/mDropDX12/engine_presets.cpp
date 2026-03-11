@@ -1689,6 +1689,8 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   std::wstring imageW   = root[L"image"].asString(L"");
   std::wstring bufferAW = root[L"bufferA"].asString(L"");
   std::wstring bufferBW = root[L"bufferB"].asString(L"");
+  std::wstring bufferCW = root[L"bufferC"].asString(L"");
+  std::wstring bufferDW = root[L"bufferD"].asString(L"");
 
   // Store Image/comp shader
   if (!imageW.empty()) {
@@ -1709,6 +1711,20 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     std::string bufferBA = wideToNarrow(bufferBW);
     strncpy_s(m_pNewState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufferBA.c_str(), _TRUNCATE);
     m_pNewState->m_nBufferBPSVersion = MD2_PS_5_0;
+  }
+
+  // Store Buffer C shader
+  if (!bufferCW.empty()) {
+    std::string bufferCA = wideToNarrow(bufferCW);
+    strncpy_s(m_pNewState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufferCA.c_str(), _TRUNCATE);
+    m_pNewState->m_nBufferCPSVersion = MD2_PS_5_0;
+  }
+
+  // Store Buffer D shader
+  if (!bufferDW.empty()) {
+    std::string bufferDA = wideToNarrow(bufferDW);
+    strncpy_s(m_pNewState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufferDA.c_str(), _TRUNCATE);
+    m_pNewState->m_nBufferDPSVersion = MD2_PS_5_0;
   }
 
   // No warp shader in Shadertoy mode
@@ -1784,6 +1800,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       m_NewShaders.comp.ptr = NULL; m_NewShaders.comp.CT = NULL; m_NewShaders.comp.bytecodeBlob = NULL;
       m_NewShaders.bufferA.ptr = NULL; m_NewShaders.bufferA.CT = NULL; m_NewShaders.bufferA.bytecodeBlob = NULL;
       m_NewShaders.bufferB.ptr = NULL; m_NewShaders.bufferB.CT = NULL; m_NewShaders.bufferB.bytecodeBlob = NULL;
+      m_NewShaders.bufferC.ptr = NULL; m_NewShaders.bufferC.CT = NULL; m_NewShaders.bufferC.bytecodeBlob = NULL;
+      m_NewShaders.bufferD.ptr = NULL; m_NewShaders.bufferD.CT = NULL; m_NewShaders.bufferD.bytecodeBlob = NULL;
       DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)", LOG_WARN);
     } else {
       m_presetLoadThread.join();
@@ -1801,6 +1819,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   m_NewShaders.comp.Clear();
   m_NewShaders.bufferA.Clear();
   m_NewShaders.bufferB.Clear();
+  m_NewShaders.bufferC.Clear();
+  m_NewShaders.bufferD.Clear();
 
   m_nLoadingPreset = 1;
   m_bPresetLoadReady = false;
@@ -1858,6 +1878,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
         m_Milk2OldShaders.comp.Clear();
         m_Milk2OldShaders.bufferA.Clear();
         m_Milk2OldShaders.bufferB.Clear();
+        m_Milk2OldShaders.bufferC.Clear();
+        m_Milk2OldShaders.bufferD.Clear();
         LoadShaders(&m_Milk2OldShaders, m_pMilk2OldState, false, false);
         LoadShaders(&m_NewShaders, m_pNewState, false, false);
 
@@ -2114,6 +2136,8 @@ void Engine::LoadPresetTick() {
     m_OldShaders.comp.Clear();
     m_OldShaders.bufferA.Clear();
     m_OldShaders.bufferB.Clear();
+    m_OldShaders.bufferC.Clear();
+    m_OldShaders.bufferD.Clear();
     if (m_bLoadingMilk2) {
       // .milk2: use preset 1's shaders as old, preset 2's as new
       m_OldShaders = m_Milk2OldShaders;
@@ -2122,6 +2146,8 @@ void Engine::LoadPresetTick() {
       m_Milk2OldShaders.comp.ptr = NULL; m_Milk2OldShaders.comp.CT = NULL; m_Milk2OldShaders.comp.bytecodeBlob = NULL;
       m_Milk2OldShaders.bufferA.ptr = NULL; m_Milk2OldShaders.bufferA.CT = NULL; m_Milk2OldShaders.bufferA.bytecodeBlob = NULL;
       m_Milk2OldShaders.bufferB.ptr = NULL; m_Milk2OldShaders.bufferB.CT = NULL; m_Milk2OldShaders.bufferB.bytecodeBlob = NULL;
+      m_Milk2OldShaders.bufferC.ptr = NULL; m_Milk2OldShaders.bufferC.CT = NULL; m_Milk2OldShaders.bufferC.bytecodeBlob = NULL;
+      m_Milk2OldShaders.bufferD.ptr = NULL; m_Milk2OldShaders.bufferD.CT = NULL; m_Milk2OldShaders.bufferD.bytecodeBlob = NULL;
     } else {
       m_OldShaders = m_shaders;
     }
@@ -2144,12 +2170,22 @@ void Engine::LoadPresetTick() {
     m_NewShaders.bufferB.CT = NULL;
     m_NewShaders.bufferB.bytecodeBlob = NULL;
     m_NewShaders.bufferB.params.Clear();
+    m_NewShaders.bufferC.ptr = NULL;
+    m_NewShaders.bufferC.CT = NULL;
+    m_NewShaders.bufferC.bytecodeBlob = NULL;
+    m_NewShaders.bufferC.params.Clear();
+    m_NewShaders.bufferD.ptr = NULL;
+    m_NewShaders.bufferD.CT = NULL;
+    m_NewShaders.bufferD.bytecodeBlob = NULL;
+    m_NewShaders.bufferD.params.Clear();
 
     // Derive buffer/feedback flags from the newly swapped shaders.
     // These flags must ONLY change on the render thread (here) — never on the
     // background compilation thread, which would race with mid-frame rendering.
     m_bHasBufferA = (m_shaders.bufferA.bytecodeBlob != NULL);
     m_bHasBufferB = (m_shaders.bufferB.bytecodeBlob != NULL);
+    m_bHasBufferC = (m_shaders.bufferC.bytecodeBlob != NULL);
+    m_bHasBufferD = (m_shaders.bufferD.bytecodeBlob != NULL);
     m_bCompUsesFeedback = m_bHasBufferA;  // Buffer A always implies feedback
     m_bCompUsesImageFeedback = false;
     for (int i = 0; i < 16; i++) {

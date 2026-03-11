@@ -762,6 +762,18 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
     DebugLogA(bOK ? "DX12: LoadShaders bufferB: compiled OK" : "DX12: LoadShaders bufferB: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
   }
 
+  // Buffer C shader (Shadertoy four-pass)
+  if (!sh->bufferC.ptr && !sh->bufferC.CT && pState->m_nBufferCPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferCShadersText, &sh->bufferC, SHADER_COMP, false, pState->m_nBufferCPSVersion, bCompileOnly, "bufferC");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferC: compiled OK" : "DX12: LoadShaders bufferC: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+  }
+
+  // Buffer D shader (Shadertoy five-pass)
+  if (!sh->bufferD.ptr && !sh->bufferD.CT && pState->m_nBufferDPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferDShadersText, &sh->bufferD, SHADER_COMP, false, pState->m_nBufferDPSVersion, bCompileOnly, "bufferD");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferD: compiled OK" : "DX12: LoadShaders bufferD: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+  }
+
   // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
@@ -852,6 +864,32 @@ void Engine::CreateDX12PresetPSOs() {
       g_pCompVSBlob,
       m_shaders.bufferB.bytecodeBlob->GetBufferPointer(),
       (UINT)m_shaders.bufferB.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
+  // Create Buffer C PSO — same FLOAT32 feedback format
+  m_dx12BufferCPSO.Reset();
+  if (m_shaders.bufferC.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferCPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferC.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferC.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
+  // Create Buffer D PSO — same FLOAT32 feedback format
+  m_dx12BufferDPSO.Reset();
+  if (m_shaders.bufferD.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferDPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferD.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferD.bytecodeBlob->GetBufferSize(),
       g_MyVertexLayout, _countof(g_MyVertexLayout),
       false, &dummy);
   }
