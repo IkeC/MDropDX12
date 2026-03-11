@@ -1197,6 +1197,10 @@ public:
   int                  m_nSongTitleAnimProfile = -1;   // -1 = default hardcoded, -2 = random, 0+ = profile
   int                  m_nPresetNameAnimProfile = -3;  // -1 = disabled, -2 = random, -3 = simple, 0+ = profile
 
+  // Simple preset name HUD display (non-animated, fixed font size)
+  wchar_t              m_szPresetNameDisplay[512] = {};
+  float                m_fPresetNameShowUntil = -1.0f;
+
   texmgr      m_texmgr;		// for user sprites
   
   bool m_blackmode = false;

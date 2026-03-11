@@ -1974,26 +1974,9 @@ void Engine::OnFinishedLoadingPreset() {
         m_supertexts[slot].fStartTime = GetTime();
       }
     } else {
-      // Simple fixed-size display — uses decorative font size and color
-      int slot = GetNextFreeSupertextIndex();
-      lstrcpyW(m_supertexts[slot].szTextW, szName);
-      m_supertexts[slot].bRedrawSuperText = true;
-      m_supertexts[slot].bIsSongTitle = false;
-      lstrcpyW(m_supertexts[slot].nFontFace, m_fontinfo[DECORATIVE_FONT].szFace);
-      m_supertexts[slot].fFontSize = (float)m_fontinfo[DECORATIVE_FONT].nSize;
-      m_supertexts[slot].bBold = m_fontinfo[DECORATIVE_FONT].bBold;
-      m_supertexts[slot].bItal = m_fontinfo[DECORATIVE_FONT].bItalic;
-      m_supertexts[slot].nColorR = m_fontinfo[DECORATIVE_FONT].R;
-      m_supertexts[slot].nColorG = m_fontinfo[DECORATIVE_FONT].G;
-      m_supertexts[slot].nColorB = m_fontinfo[DECORATIVE_FONT].B;
-      m_supertexts[slot].fX = 0.5f;
-      m_supertexts[slot].fY = 0.5f;
-      m_supertexts[slot].fGrowth = 1.0f;
-      m_supertexts[slot].fDuration = 3.5f;
-      m_supertexts[slot].fFadeInTime = 0.3f;
-      m_supertexts[slot].fFadeOutTime = 0.3f;
-      m_supertexts[slot].fBurnTime = 0.0f;
-      m_supertexts[slot].fStartTime = GetTime();
+      // Simple HUD display — fixed font size, no texture scaling
+      lstrcpynW(m_szPresetNameDisplay, szName, 512);
+      m_fPresetNameShowUntil = GetTime() + 3.5f;
     }
   }
 }

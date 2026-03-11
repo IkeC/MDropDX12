@@ -119,11 +119,13 @@ void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pF
 
   if (!lpDX) return;
 
-  // Scale HUD fonts (SIMPLE_FONT, DECORATIVE_FONT) proportional to window height.
+  // Scale HUD fonts (SIMPLE_FONT, DECORATIVE_FONT) proportional to window size.
+  // Use min(width, height) so portrait displays don't get oversized fonts.
   // Baseline at 720p (scale=1.0); at 1080p ~1.5x, at 1440p ~2.0x.
-  // This replaces the GDI overlay's dynamic font sizing (h/32).
+  int clientW = lpDX->m_client_width;
   int clientH = lpDX->m_client_height;
-  m_hudFontScale = (clientH > 0) ? max(1.0f, (float)clientH / 720.0f) : 1.0f;
+  int clientMin = (clientW > 0 && clientH > 0) ? min(clientW, clientH) : max(clientW, clientH);
+  m_hudFontScale = (clientMin > 0) ? max(1.0f, (float)clientMin / 720.0f) : 1.0f;
 
   // Build a font atlas for each configured font
   for (int i = 0; i < nFonts && i < MAX_TEXT_FONTS; i++) {
