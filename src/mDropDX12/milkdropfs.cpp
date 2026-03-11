@@ -4204,17 +4204,39 @@ void mdrop::Engine::DX12_DrawCustomWaves() {
           }
           cmdList->SetPipelineState(m_lpDX->m_PSOs[psoId].Get());
 
-          int its = (pState->m_wave[i].bDrawThick && !useDots) ? 4 : 1;
           float x_inc = 2.0f / (float)m_nTexSizeX;
           float y_inc = 2.0f / (float)m_nTexSizeY;
-          for (int it = 0; it < its; it++) {
-            switch (it) {
-            case 0: break;
-            case 1: for (int j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;
-            case 2: for (int j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;
-            case 3: for (int j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;
+
+          if (useDots) {
+            // Emulate DX9 D3DRS_POINTSIZE for dots (DX12 points are always 1px).
+            // DX9: ptsize = (texWidth >= 1024 ? 2 : 1) + (bDrawThick ? 1 : 0)
+            int ptsize = (m_nTexSizeX >= 1024 ? 2 : 1) + (pState->m_wave[i].bDrawThick ? 1 : 0);
+            int half = ptsize / 2;
+            for (int dy = 0; dy < ptsize; dy++) {
+              for (int dx = 0; dx < ptsize; dx++) {
+                float xoff = (float)(dx - half) * x_inc;
+                float yoff = (float)(dy - half) * y_inc;
+                if (xoff != 0.0f || yoff != 0.0f) {
+                  for (int j = 0; j < nSamples; j++) { pVerts[j].x += xoff; pVerts[j].y += yoff; }
+                }
+                m_lpDX->DrawVertices(topology, pVerts, nSamples, sizeof(WFVERTEX));
+                if (xoff != 0.0f || yoff != 0.0f) {
+                  for (int j = 0; j < nSamples; j++) { pVerts[j].x -= xoff; pVerts[j].y -= yoff; }
+                }
+              }
             }
-            m_lpDX->DrawVertices(topology, pVerts, nSamples, sizeof(WFVERTEX));
+          } else {
+            // Thick lines: 4 offset passes for 2x2 coverage (existing DX9 behavior)
+            int its = pState->m_wave[i].bDrawThick ? 4 : 1;
+            for (int it = 0; it < its; it++) {
+              switch (it) {
+              case 0: break;
+              case 1: for (int j = 0; j < nSamples; j++) pVerts[j].x += x_inc; break;
+              case 2: for (int j = 0; j < nSamples; j++) pVerts[j].y += y_inc; break;
+              case 3: for (int j = 0; j < nSamples; j++) pVerts[j].x -= x_inc; break;
+              }
+              m_lpDX->DrawVertices(topology, pVerts, nSamples, sizeof(WFVERTEX));
+            }
           }
         }
       }
@@ -4341,6 +4363,12 @@ void mdrop::Engine::ComputeGridAlphaValues() {
 
         // initial texcoords, w/built-in zoom factor
         float fZoom2Inv = 1.0f / fZoom2;
+
+        // DIAG: log zoom/UV values for first 3 vertices on first frame of preset
+        if (n < 3 && !m_bPresetDiagLogged) {
+          DLOG_VERBOSE("DIAG WarpUV[%d]: fZoom=%.6f fZoomExp=%.4f fZoom2=%.6f fZoom2Inv=%.6f rad=%.4f",
+                  n, fZoom, fZoomExp, fZoom2, fZoom2Inv, m_vertinfo[n].rad);
+        }
 
         float u, v;
         if (m_bScreenDependentRenderMode) {
