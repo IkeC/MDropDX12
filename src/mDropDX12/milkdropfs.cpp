@@ -2349,8 +2349,12 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     //
     // DX12 mapping:
     //   Custom comp shader → TEX_VS binds VS[0] (matches ApplyShaderParams)
-    //   No comp shader (passthrough) → TEX_VS binds VS[1] (matches ShowToUser_NoShaders)
-    bool bNewUsesCompShader = (m_pState->m_nCompPSVersion > 0);
+    //   Auto-gen comp shader (no [comp_shader] section) → TEX_VS binds VS[1] (matches ShowToUser_NoShaders)
+    // Note: m_nCompPSVersion > 0 is true for BOTH user-written and auto-generated comp shaders
+    // (auto-gen sets it to MD2_PS_2_0 so the shader gets compiled). Use m_bAutoGenCompShader
+    // to distinguish: auto-gen comp shaders read VS[1] (post-warp + shapes), user-written
+    // comp shaders read VS[0] (pre-warp previous frame, matching DX9 ApplyShaderParams).
+    bool bNewUsesCompShader = (m_pState->m_nCompPSVersion > 0) && !m_pState->m_bAutoGenCompShader;
     const DX12Texture& compVsTex = bNewUsesCompShader ? m_dx12VS[0] : m_dx12VS[1];
 
     UINT warpSlots[32], bufferASlots[32], bufferBSlots[32], compSlots[32];
@@ -2373,7 +2377,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     if (m_pState->m_bBlending && m_OldShaders.warp.bytecodeBlob)
       BuildBindingSlots(&m_OldShaders.warp.params, m_dx12VS[0], oldWarpSlots);
     if (m_pState->m_bBlending && m_OldShaders.comp.bytecodeBlob) {
-      bool bOldUsesCompShader = (m_pOldState && m_pOldState->m_nCompPSVersion > 0);
+      bool bOldUsesCompShader = (m_pOldState && m_pOldState->m_nCompPSVersion > 0 && !m_pOldState->m_bAutoGenCompShader);
       const DX12Texture& oldCompVsTex = bOldUsesCompShader ? m_dx12VS[0] : m_dx12VS[1];
       BuildBindingSlots(&m_OldShaders.comp.params, oldCompVsTex, oldCompSlots);
     }
@@ -2724,19 +2728,31 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     else
       SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
 
-    // Compute hue_shader corner colors (matches ShowToUser_Shaders comp grid logic).
-    // DX9 ShowToUser_Shaders hardcodes fShaderAmount=1 for shader comp presets,
-    // so animated shade colors are always applied at full strength.
-    float shade[4][3];
-    for (int i = 0; i < 4; i++) {
-      shade[i][0] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0143f + 3 + i * 21 + m_fRandStart[3]);
-      shade[i][1] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0107f + 1 + i * 13 + m_fRandStart[1]);
-      shade[i][2] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0129f + 6 + i * 9 + m_fRandStart[2]);
-      float mx = ((shade[i][0] > shade[i][1]) ? shade[i][0] : shade[i][1]);
-      if (shade[i][2] > mx) mx = shade[i][2];
-      for (int k = 0; k < 3; k++) {
-        shade[i][k] /= mx;
-        shade[i][k] = 0.5f + 0.5f * shade[i][k];
+    // Compute hue_shader corner colors.
+    // DX9 ShowToUser_Shaders hardcodes fShaderAmount=1 for comp shader presets.
+    // DX9 ShowToUser_NoShaders gates by fShaderAmount and blends shade→white.
+    float shade[4][3] = {
+      { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f },
+      { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }
+    };
+    // For comp shader presets: always apply shade at full strength (fShaderAmount=1).
+    // For non-shader presets: only apply if fShaderAmount > 0, blended with white.
+    float fShaderAmount = (m_pState->m_nCompPSVersion > 0)
+        ? 1.0f : m_pState->m_fShader.eval(GetTime());
+    if (fShaderAmount > 0.001f) {
+      for (int i = 0; i < 4; i++) {
+        shade[i][0] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0143f + 3 + i * 21 + m_fRandStart[3]);
+        shade[i][1] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0107f + 1 + i * 13 + m_fRandStart[1]);
+        shade[i][2] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0129f + 6 + i * 9 + m_fRandStart[2]);
+        float mx = ((shade[i][0] > shade[i][1]) ? shade[i][0] : shade[i][1]);
+        if (shade[i][2] > mx) mx = shade[i][2];
+        for (int k = 0; k < 3; k++) {
+          shade[i][k] /= mx;
+          shade[i][k] = 0.5f + 0.5f * shade[i][k];
+        }
+        for (int k = 0; k < 3; k++) {
+          shade[i][k] = shade[i][k] * fShaderAmount + 1.0f * (1.0f - fShaderAmount);
+        }
       }
     }
     DWORD cShade[4] = {
@@ -3989,7 +4005,7 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
             bool bClamp = (*pState->var_pf_wrap <= m_fSnapPoint);
             DX12PsoId fillPso = additive
               ? (bClamp ? PSO_ADDITIVE_CLAMP_SPRITEVERTEX : PSO_ADDITIVE_SPRITEVERTEX)
-              : (bClamp ? PSO_TEXTURED_CLAMP_SPRITEVERTEX : PSO_TEXTURED_SPRITEVERTEX);
+              : (bClamp ? PSO_TEXTURED_CLAMP_SPRITEVERTEX : PSO_ALPHABLEND_SPRITEVERTEX);
             cmdList->SetPipelineState(m_lpDX->m_PSOs[fillPso].Get());
             SPRITEVERTEX triVerts[300]; // max 100 sides → 100 tris → 300 verts
             int nTriVerts = ExpandFanToTriList(v, sides + 2, triVerts);

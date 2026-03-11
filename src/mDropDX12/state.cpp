@@ -685,6 +685,7 @@ void CState::Default(DWORD ApplyFlags) {
   if (ApplyFlags & STATE_COMP) {
     m_szCompShadersText[0] = 0;
     m_nCompPSVersion = 0;
+    m_bAutoGenCompShader = false;
     m_szBufferAShadersText[0] = 0;
     m_nBufferAPSVersion = 0;
   }
@@ -1446,6 +1447,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
       // DX9 handled these via multi-pass blend states in ShowToUser_NoShaders(), which doesn't
       // exist in the DX12 path. Set PS version so the generated shader text gets compiled.
       nCompPSVersionInFile = MD2_PS_2_0;
+      m_bAutoGenCompShader = true;
     }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
