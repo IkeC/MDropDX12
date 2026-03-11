@@ -2644,6 +2644,55 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     m_fFFTDecayGlobal = max(0.0f, min(1.0f, m_fFFTDecayGlobal));
     m_bFFTSmoothingActive = true;
   }
+  else if (wcsncmp(sMessage, L"SHADER_IMPORT=", 14) == 0) {
+    // Load JSON, convert GLSL→HLSL, apply.  Format: SHADER_IMPORT=<path>
+    std::wstring filePath(sMessage + 14);
+    DebugLogW((L"[SHADER_IMPORT] Loading: " + filePath).c_str());
+    if (!m_shaderImportWindow)
+        m_shaderImportWindow = std::make_unique<mdrop::ShaderImportWindow>(this);
+    std::wstring result = m_shaderImportWindow->ImportFromFile(filePath.c_str());
+    DebugLogW((L"[SHADER_IMPORT] Result: " + result).c_str());
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHADER_IMPORT_RESULT=" + result);
+  }
+  else if (wcsncmp(sMessage, L"SHADER_GLSL=", 12) == 0) {
+    // Raw GLSL → convert + apply.  Format: SHADER_GLSL=<glsl_code>
+    std::wstring wGlsl(sMessage + 12);
+    std::string glsl;
+    glsl.reserve(wGlsl.size());
+    for (wchar_t ch : wGlsl)
+      glsl += (ch < 128) ? (char)ch : '?';
+    DebugLogA(("SHADER_GLSL: received " + std::to_string(glsl.size()) + " chars").c_str());
+    if (!m_shaderImportWindow)
+        m_shaderImportWindow = std::make_unique<mdrop::ShaderImportWindow>(this);
+    std::wstring result = m_shaderImportWindow->ImportFromGLSL(glsl, true);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHADER_GLSL_RESULT=" + result);
+  }
+  else if (wcsncmp(sMessage, L"SHADER_CONVERT=", 15) == 0) {
+    // Convert only, don't apply — returns HLSL.  Format: SHADER_CONVERT=<glsl_code>
+    std::wstring wGlsl(sMessage + 15);
+    std::string glsl;
+    glsl.reserve(wGlsl.size());
+    for (wchar_t ch : wGlsl)
+      glsl += (ch < 128) ? (char)ch : '?';
+    DebugLogA(("SHADER_CONVERT: received " + std::to_string(glsl.size()) + " chars").c_str());
+    if (!m_shaderImportWindow)
+        m_shaderImportWindow = std::make_unique<mdrop::ShaderImportWindow>(this);
+    std::wstring result = m_shaderImportWindow->ImportFromGLSL(glsl, false);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHADER_CONVERT_RESULT=" + result);
+  }
+  else if (wcsncmp(sMessage, L"SHADER_SAVE=", 12) == 0) {
+    // Save current shader passes as preset.  Format: SHADER_SAVE=<path.milk3>
+    std::wstring savePath(sMessage + 12);
+    DebugLogW((L"[SHADER_SAVE] " + savePath).c_str());
+    if (!m_shaderImportWindow)
+        m_shaderImportWindow = std::make_unique<mdrop::ShaderImportWindow>(this);
+    std::wstring result = m_shaderImportWindow->SavePresetToFile(savePath.c_str());
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHADER_SAVE_RESULT=" + result);
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.

@@ -1934,10 +1934,12 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
 
     // HUD notification
     wchar_t note[256];
-    swprintf(note, 256, L"Shadertoy: fb=%s bufA_PSO=%s comp_PSO=%s (%dx%d)",
-      m_dx12Feedback[0].IsValid() ? L"OK" : L"FAIL",
-      m_dx12BufferAPSO ? L"OK" : L"NULL",
-      m_dx12CompPSO ? L"OK" : L"NULL",
+    swprintf(note, 256, L"Shadertoy: A=%s B=%s C=%s D=%s Img=%s (%dx%d)",
+      m_dx12BufferAPSO ? L"OK" : L"--",
+      m_dx12BufferBPSO ? L"OK" : L"--",
+      m_dx12BufferCPSO ? L"OK" : L"--",
+      m_dx12BufferDPSO ? L"OK" : L"--",
+      m_dx12CompPSO ? L"OK" : L"--",
       m_nTexSizeX, m_nTexSizeY);
     AddNotification(note, 5.0f);
   }

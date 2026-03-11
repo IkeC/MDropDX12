@@ -644,8 +644,19 @@ void ShaderImportWindow::RebuildPassList() {
     HWND hList = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_PASS_LIST);
     if (!hList) return;
     SendMessage(hList, LB_RESETCONTENT, 0, 0);
-    for (auto& p : m_passes)
-        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.name.c_str());
+    for (auto& p : m_passes) {
+        wchar_t label[128];
+        size_t sz = p.glslSource.size();
+        if (p.name == L"Common" && sz == 0)
+            swprintf(label, 128, L"%s", p.name.c_str());
+        else if (sz == 0)
+            swprintf(label, 128, L"%s  (empty)", p.name.c_str());
+        else if (sz < 1024)
+            swprintf(label, 128, L"%s  (%zu B)", p.name.c_str(), sz);
+        else
+            swprintf(label, 128, L"%s  (%.1f KB)", p.name.c_str(), sz / 1024.0);
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)label);
+    }
     if (m_nSelectedPass >= (int)m_passes.size())
         m_nSelectedPass = 0;
     SendMessage(hList, LB_SETCURSEL, m_nSelectedPass, 0);
@@ -1155,9 +1166,10 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
         // --- Pattern 1: Audio texture (texelFetch with ivec2(expr, 0) or ivec2(expr, 1)) ---
         // Audio textures are 512x2: row 0=FFT, row 1=waveform.
         // Distinguish from buffer reads which use ivec2(fragCoord) or ivec2(x, y).
-        // Skip if JSON explicitly assigned CHAN_FEEDBACK — small-coord texelFetch reads
-        // (e.g. ivec2(0,0)) are ambiguous between audio and stored pixel data in feedback.
-        if (!(jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK))
+        // Skip if JSON explicitly assigned a non-noise channel — small-coord texelFetch
+        // reads (e.g. ivec2(x,0)) are ambiguous between audio and buffer pixel data.
+        if (!(jsonLoaded && pass.channels[ch] != CHAN_NOISE_LQ &&
+              pass.channels[ch] != CHAN_NOISE_MQ && pass.channels[ch] != CHAN_NOISE_HQ))
         {
             char pat[64];
             sprintf_s(pat, "texelFetch(iChannel%d", ch);
@@ -1362,7 +1374,37 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
         if (jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK && isBufferA) {
             char fetchPat[64];
             sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
-            if (src.find(fetchPat) == std::string::npos) {
+            bool hasFeedbackEvidence = (src.find(fetchPat) != std::string::npos);
+            // Also check for #define aliasing: "#define alias iChannelN" then "texelFetch(alias"
+            if (!hasFeedbackEvidence) {
+                char chPat[16];
+                sprintf_s(chPat, "iChannel%d", ch);
+                // Search for "#define <name> iChannelN"
+                size_t dpos = 0;
+                while ((dpos = combinedSrc.find("#define ", dpos)) != std::string::npos) {
+                    dpos += 8;
+                    while (dpos < combinedSrc.size() && combinedSrc[dpos] == ' ') dpos++;
+                    size_t nameStart = dpos;
+                    while (dpos < combinedSrc.size() && (isalnum((unsigned char)combinedSrc[dpos]) || combinedSrc[dpos] == '_')) dpos++;
+                    std::string alias = combinedSrc.substr(nameStart, dpos - nameStart);
+                    while (dpos < combinedSrc.size() && combinedSrc[dpos] == ' ') dpos++;
+                    size_t valEnd = dpos;
+                    while (valEnd < combinedSrc.size() && combinedSrc[valEnd] != '\n' && combinedSrc[valEnd] != '\r') valEnd++;
+                    std::string val = combinedSrc.substr(dpos, valEnd - dpos);
+                    // Trim trailing whitespace
+                    while (!val.empty() && (val.back() == ' ' || val.back() == '\t')) val.pop_back();
+                    if (val == chPat && !alias.empty()) {
+                        // Found "#define alias iChannelN" — check for texelFetch(alias or texture(alias
+                        if (combinedSrc.find("texelFetch(" + alias) != std::string::npos ||
+                            combinedSrc.find("texture(" + alias) != std::string::npos ||
+                            combinedSrc.find("textureLod(" + alias) != std::string::npos) {
+                            hasFeedbackEvidence = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!hasFeedbackEvidence) {
                 // No texelFetch evidence — downgrade to noise default
                 const int noiseDefaults[] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
                 pass.channels[ch] = noiseDefaults[ch];
@@ -1827,44 +1869,54 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
         // Phase 1b handles named matrix variables with the same swap.
         // Must check both "matN(" and "floatNxN(" since Phase 1 may have already replaced.
 
-        // Helper: find *=matN( or *=floatNxN( pattern and return {index, matSize, skip}
-        auto findMulAssign = [&](size_t& outIdx, int& outSize, size_t& outSkip) -> bool {
-            for (int ms = 2; ms <= 4; ms++) {
-                char tokens[2][16];
-                sprintf_s(tokens[0], "*=mat%d(", ms);
-                sprintf_s(tokens[1], "*=float%dx%d(", ms, ms);
-                for (int ti = 0; ti < 2; ti++) {
-                    size_t idx = result.find(tokens[ti]);
-                    if (idx != std::string::npos) {
-                        outIdx = idx;
-                        outSize = ms;
-                        outSkip = strlen(tokens[ti]);
-                        return true;
+        // Helper: find *=matN( or *=floatNxM( pattern (square AND non-square matrices)
+        // Returns {index, matType string e.g. "float4x2", skip}
+        std::string matType;
+        auto findMulAssign = [&](size_t& outIdx, size_t& outSkip) -> bool {
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char tokens[2][20];
+                    if (n == m) sprintf_s(tokens[0], "*=mat%d(", n);
+                    else sprintf_s(tokens[0], "*=mat%dx%d(", n, m);
+                    sprintf_s(tokens[1], "*=float%dx%d(", n, m);
+                    for (int ti = 0; ti < 2; ti++) {
+                        size_t idx = result.find(tokens[ti]);
+                        if (idx != std::string::npos) {
+                            outIdx = idx;
+                            outSkip = strlen(tokens[ti]);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            matType = mt;
+                            return true;
+                        }
                     }
                 }
             }
             return false;
         };
-        auto findMulRight = [&](size_t& outIdx, int& outSize, size_t& outSkip) -> bool {
-            for (int ms = 2; ms <= 4; ms++) {
-                char tokens[2][16];
-                sprintf_s(tokens[0], "*mat%d(", ms);
-                sprintf_s(tokens[1], "*float%dx%d(", ms, ms);
-                for (int ti = 0; ti < 2; ti++) {
-                    size_t idx = result.find(tokens[ti]);
-                    if (idx != std::string::npos) {
-                        outIdx = idx;
-                        outSize = ms;
-                        outSkip = strlen(tokens[ti]);
-                        return true;
+        auto findMulRight = [&](size_t& outIdx, size_t& outSkip) -> bool {
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char tokens[2][20];
+                    if (n == m) sprintf_s(tokens[0], "*mat%d(", n);
+                    else sprintf_s(tokens[0], "*mat%dx%d(", n, m);
+                    sprintf_s(tokens[1], "*float%dx%d(", n, m);
+                    for (int ti = 0; ti < 2; ti++) {
+                        size_t idx = result.find(tokens[ti]);
+                        if (idx != std::string::npos) {
+                            outIdx = idx;
+                            outSkip = strlen(tokens[ti]);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            matType = mt;
+                            return true;
+                        }
                     }
                 }
             }
             return false;
         };
 
-        size_t index; int matSize; size_t skip;
-        if (findMulAssign(index, matSize, skip)) {
+        size_t index; size_t skip;
+        if (findMulAssign(index, skip)) {
             // e.g. "uv *= mat2(cos(a), -sin(a), sin(a), cos(a));"
             std::string fac1 = result.substr(0, index);
             // Trim right
@@ -1879,76 +1931,95 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
             int closingIdx = FindClosingBracket(rest, '(', ')', 1);
             if (closingIdx > 0) {
                 std::string args = rest.substr(0, closingIdx);
-                // v *= matN(args) → v = mul(floatNxN(args), v)  [swapped for column-major]
-                result = indent_str + fac1 + " = mul(float"
-                       + std::to_string(matSize) + "x" + std::to_string(matSize)
-                       + "(" + args + "), " + fac1 + ");";
+                // v *= matN(args) → v = mul(floatNxM(args), v)  [swapped for column-major]
+                result = indent_str + fac1 + " = mul("
+                       + matType + "(" + args + "), " + fac1 + ");";
             }
-        } else if (findMulRight(index, matSize, skip)) {
+        } else if (findMulRight(index, skip)) {
             std::string prefix = result.substr(0, index);
-            // Trim to get fac1 (last word before *mat)
-            while (!prefix.empty() && prefix.back() == ' ') prefix.pop_back();
-            size_t lastSpace = prefix.rfind(' ');
-            std::string fac1 = (lastSpace != std::string::npos) ? prefix.substr(lastSpace + 1) : prefix;
-            std::string left = (lastSpace != std::string::npos) ? prefix.substr(0, lastSpace + 1) : "";
+            // Extract fac1: the left operand of *, working backward from '*'
+            // Must handle cases like "float2(v*mat2(...))" where fac1 is just "v",
+            // not "float2(v" (which would include the outer constructor's open paren).
+            size_t fac1End = prefix.size();
+            while (fac1End > 0 && prefix[fac1End - 1] == ' ') fac1End--;
+            size_t fac1Start = fac1End;
+            if (fac1Start > 0 && prefix[fac1Start - 1] == ')') {
+                // Balanced paren expression: scan backward to find matching '('
+                int depth = 0;
+                fac1Start--;
+                while (fac1Start > 0) {
+                    if (prefix[fac1Start] == ')') depth++;
+                    else if (prefix[fac1Start] == '(') { depth--; if (depth == 0) break; }
+                    fac1Start--;
+                }
+                // Include any identifier prefix (e.g. "func(...)")
+                while (fac1Start > 0 && (isalnum((unsigned char)prefix[fac1Start - 1]) || prefix[fac1Start - 1] == '_'))
+                    fac1Start--;
+            } else {
+                // Simple identifier: scan backward past identifier chars and '.'
+                while (fac1Start > 0 && (isalnum((unsigned char)prefix[fac1Start - 1]) || prefix[fac1Start - 1] == '_' || prefix[fac1Start - 1] == '.'))
+                    fac1Start--;
+            }
+            std::string fac1 = prefix.substr(fac1Start, fac1End - fac1Start);
+            std::string left = prefix.substr(0, fac1Start);
 
             std::string rest = result.substr(index + skip);
             int closingIdx = FindClosingBracket(rest, '(', ')', 1);
             if (closingIdx > 0) {
                 std::string args = rest.substr(0, closingIdx);
-                // x * matN(args) → mul(floatNxN(args), x)  [swapped for column-major]
-                result = left + "mul(float"
-                       + std::to_string(matSize) + "x" + std::to_string(matSize)
-                       + "(" + args + "), " + fac1 + ");";
+                std::string suffix = rest.substr(closingIdx + 1);
+                // x * matNxM(args) → mul(floatNxM(args), x)  [swapped for column-major]
+                result = left + "mul("
+                       + matType + "(" + args + "), " + fac1 + ")" + suffix;
             }
         }
 
-        // Handle matN(args)*expr or floatNxN(args)*expr — matrix constructor on LEFT of multiply
+        // Handle matNxM(args)*expr or floatNxM(args)*expr — matrix constructor on LEFT of multiply
         // GLSL (column-major): M * v → HLSL (row-major): mul(v, M)
-        // Must check both forms since Phase 1 may have already replaced mat2→float2x2
-        for (int ms = 2; ms <= 4; ms++) {
-            char matTokens[2][16];
-            sprintf_s(matTokens[0], "mat%d(", ms);
-            sprintf_s(matTokens[1], "float%dx%d(", ms, ms);
-            for (int ti = 0; ti < 2; ti++) {
-                const char* matToken = matTokens[ti];
-                size_t mpos = result.find(matToken);
-                if (mpos != std::string::npos) {
-                    std::string afterMat = result.substr(mpos + strlen(matToken));
-                    int closeIdx = FindClosingBracket(afterMat, '(', ')', 1);
-                    if (closeIdx > 0) {
+        // Must check both forms since Phase 1 may have already replaced mat→float
+        // Handles both square (mat2, mat3, mat4) and non-square (mat2x3, mat4x2, etc.)
+        {
+            bool handled = false;
+            for (int n = 2; n <= 4 && !handled; n++) {
+                for (int m = 2; m <= 4 && !handled; m++) {
+                    char matTokens[3][20];
+                    int numTokens = 0;
+                    if (n == m) { sprintf_s(matTokens[numTokens++], "mat%d(", n); }
+                    else { sprintf_s(matTokens[numTokens++], "mat%dx%d(", n, m); }
+                    sprintf_s(matTokens[numTokens++], "float%dx%d(", n, m);
+                    for (int ti = 0; ti < numTokens && !handled; ti++) {
+                        const char* matToken = matTokens[ti];
+                        size_t mpos = result.find(matToken);
+                        if (mpos == std::string::npos) continue;
+                        std::string afterMat = result.substr(mpos + strlen(matToken));
+                        int closeIdx = FindClosingBracket(afterMat, '(', ')', 1);
+                        if (closeIdx <= 0) continue;
                         size_t afterClose = mpos + strlen(matToken) + closeIdx + 1;
-                        // Skip whitespace after closing paren
                         size_t starPos = afterClose;
                         while (starPos < result.size() && result[starPos] == ' ') starPos++;
-                        if (starPos < result.size() && result[starPos] == '*') {
-                            // Make sure it's not *= (handled above)
-                            if (starPos + 1 < result.size() && result[starPos + 1] == '=') continue;
-                            // Extract the right-hand operand after *
-                            size_t rhsStart = starPos + 1;
-                            while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
-                            // Find end of RHS: stop at ; or ) or , respecting brackets
-                            size_t rhsEnd = rhsStart;
-                            int depth = 0;
-                            while (rhsEnd < result.size()) {
-                                char c = result[rhsEnd];
-                                if (c == '(' || c == '[') depth++;
-                                else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
-                                else if ((c == ';' || c == ',') && depth == 0) break;
-                                rhsEnd++;
-                            }
-                            if (rhsEnd > rhsStart) {
-                                std::string matArgs = afterMat.substr(0, closeIdx);
-                                std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
-                                // Trim trailing whitespace from rhs
-                                while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
-                                std::string prefix = result.substr(0, mpos);
-                                std::string suffix = result.substr(rhsEnd);
-                                result = prefix + "mul(" + rhs + ", float"
-                                       + std::to_string(ms) + "x" + std::to_string(ms)
-                                       + "(" + matArgs + "))" + suffix;
-                                break; // handled, don't check second token form
-                            }
+                        if (starPos >= result.size() || result[starPos] != '*') continue;
+                        if (starPos + 1 < result.size() && result[starPos + 1] == '=') continue;
+                        size_t rhsStart = starPos + 1;
+                        while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
+                        size_t rhsEnd = rhsStart;
+                        int depth = 0;
+                        while (rhsEnd < result.size()) {
+                            char c = result[rhsEnd];
+                            if (c == '(' || c == '[') depth++;
+                            else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                            else if ((c == ';' || c == ',') && depth == 0) break;
+                            rhsEnd++;
+                        }
+                        if (rhsEnd > rhsStart) {
+                            std::string matArgs = afterMat.substr(0, closeIdx);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                            std::string pfx = result.substr(0, mpos);
+                            std::string sfx = result.substr(rhsEnd);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            result = pfx + "mul(" + rhs + ", " + mt
+                                   + "(" + matArgs + "))" + sfx;
+                            handled = true;
                         }
                     }
                 }
@@ -1962,6 +2033,19 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
         replaceAll(result, "mat2 ", "float2x2 ");
         replaceAll(result, "mat3 ", "float3x3 ");
         replaceAll(result, "mat4 ", "float4x4 ");
+        // Non-square matrices
+        for (int n = 2; n <= 4; n++) {
+            for (int m = 2; m <= 4; m++) {
+                if (n == m) continue;
+                char from1[12], to1[14], from2[12], to2[14];
+                sprintf_s(from1, "mat%dx%d(", n, m);
+                sprintf_s(to1, "float%dx%d(", n, m);
+                sprintf_s(from2, "mat%dx%d ", n, m);
+                sprintf_s(to2, "float%dx%d ", n, m);
+                replaceAll(result, from1, to1);
+                replaceAll(result, from2, to2);
+            }
+        }
     } catch (...) {
         return inputLine;
     }
@@ -2322,7 +2406,20 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // iResolution: Shadertoy vec3(width, height, pixelAspect=1.0)
         // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
         // Inline-expand so iResolution.z → float3(...).z → 1.0
+        // First: rename any local variable declarations (e.g. "vec2 iResolution = iResolution.xy")
+        // so the variable name doesn't get replaced by the expansion.
+        replaceAll(inp, "float2 iResolution", "float2 _iRes");
+        replaceAll(inp, "float3 iResolution", "float3 _iRes");
+        replaceAll(inp, "float4 iResolution", "float4 _iRes");
         replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
+
+        // iChannelResolution[N]: Shadertoy vec3 per-channel resolution
+        // All feedback/buffer textures use the render target size, so map to texsize.
+        for (int ci = 0; ci < 4; ci++) {
+            char from[32];
+            sprintf_s(from, "iChannelResolution[%d]", ci);
+            replaceAll(inp, from, "float3(texsize.x, texsize.y, 1.0)");
+        }
 
         // Replace hardcoded resolution constants with texsize.xy.
         // Shadertoy authors often hardcode their preview resolution (e.g. vec2(1280,720))
@@ -3126,6 +3223,158 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             result = clean.str();
         }
 
+        // Fix multi-line matrix multiply: expr *floatNxM(...) or floatNxM(...) *expr
+        // Phase 3 per-line FixMatrixMultiplication can't handle multi-line matrix constructors.
+        // This full-text pass handles them by scanning with FindClosingBracket across newlines.
+        {
+            auto replaceAllInPlace = [](std::string& s, const std::string& from, const std::string& to) {
+                size_t pos = 0;
+                while ((pos = s.find(from, pos)) != std::string::npos) {
+                    s.replace(pos, from.size(), to);
+                    pos += to.size();
+                }
+            };
+            // Normalize spaces around * for matrix patterns
+            replaceAllInPlace(result, "* float", "*float");
+            replaceAllInPlace(result, " *float", "*float");
+
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                    // Pattern 1: expr *floatNxM(...) → mul(floatNxM(...), expr)
+                    {
+                        char token[20]; sprintf_s(token, "*%s(", mt);
+                        size_t pos = 0;
+                        while ((pos = result.find(token, pos)) != std::string::npos) {
+                            // Check it's not *= (assignment handled elsewhere)
+                            if (pos > 0 && result[pos - 1] == '=') { pos++; continue; } // skip "=*float..."
+                            // Actually we need *= check on the * itself
+                            if (pos + 1 < result.size() && result[pos + 1] == '=') { pos++; continue; }
+
+                            // Extract fac1 (left operand) by working backward
+                            size_t fac1End = pos;
+                            while (fac1End > 0 && result[fac1End - 1] == ' ') fac1End--;
+                            size_t fac1Start = fac1End;
+                            if (fac1Start > 0 && result[fac1Start - 1] == ')') {
+                                int depth = 0;
+                                fac1Start--;
+                                while (fac1Start > 0) {
+                                    if (result[fac1Start] == ')') depth++;
+                                    else if (result[fac1Start] == '(') { depth--; if (depth == 0) break; }
+                                    fac1Start--;
+                                }
+                                while (fac1Start > 0 && (isalnum((unsigned char)result[fac1Start - 1]) || result[fac1Start - 1] == '_'))
+                                    fac1Start--;
+                            } else {
+                                while (fac1Start > 0 && (isalnum((unsigned char)result[fac1Start - 1]) || result[fac1Start - 1] == '_' || result[fac1Start - 1] == '.'))
+                                    fac1Start--;
+                            }
+                            if (fac1Start >= fac1End) { pos++; continue; }
+                            std::string fac1 = result.substr(fac1Start, fac1End - fac1Start);
+                            std::string left = result.substr(0, fac1Start);
+
+                            // Find matching closing paren for the matrix constructor (across lines)
+                            size_t argsStart = pos + strlen(token);
+                            std::string rest = result.substr(argsStart);
+                            int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                            if (closingIdx <= 0) { pos++; continue; }
+                            std::string args = rest.substr(0, closingIdx);
+                            std::string suffix = rest.substr(closingIdx + 1);
+
+                            result = left + "mul(" + mt + "(" + args + "), " + fac1 + ")" + suffix;
+                            pos = left.size(); // continue scanning from replacement
+                        }
+                    }
+                    // Pattern 2: floatNxM(...) *expr → mul(expr, floatNxM(...))
+                    {
+                        char token[20]; sprintf_s(token, "%s(", mt);
+                        size_t pos = 0;
+                        while ((pos = result.find(token, pos)) != std::string::npos) {
+                            // Don't match if preceded by identifier char
+                            if (pos > 0 && (isalnum((unsigned char)result[pos - 1]) || result[pos - 1] == '_')) { pos++; continue; }
+                            size_t argsStart = pos + strlen(token);
+                            std::string rest = result.substr(argsStart);
+                            int closeIdx = FindClosingBracket(rest, '(', ')', 1);
+                            if (closeIdx <= 0) { pos += strlen(token); continue; }
+                            size_t afterClose = argsStart + closeIdx + 1;
+                            size_t starPos = afterClose;
+                            while (starPos < result.size() && (result[starPos] == ' ' || result[starPos] == '\n' || result[starPos] == '\r')) starPos++;
+                            if (starPos >= result.size() || result[starPos] != '*') { pos += strlen(token); continue; }
+                            if (starPos + 1 < result.size() && result[starPos + 1] == '=') { pos += strlen(token); continue; }
+                            size_t rhsStart = starPos + 1;
+                            while (rhsStart < result.size() && (result[rhsStart] == ' ' || result[rhsStart] == '\n')) rhsStart++;
+                            size_t rhsEnd = rhsStart;
+                            int depth = 0;
+                            while (rhsEnd < result.size()) {
+                                char c = result[rhsEnd];
+                                if (c == '(' || c == '[') depth++;
+                                else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                                else if ((c == ';' || c == ',') && depth == 0) break;
+                                rhsEnd++;
+                            }
+                            if (rhsEnd <= rhsStart) { pos += strlen(token); continue; }
+                            std::string matArgs = rest.substr(0, closeIdx);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                            std::string pfx = result.substr(0, pos);
+                            std::string sfx = result.substr(rhsEnd);
+                            result = pfx + "mul(" + rhs + ", " + mt + "(" + matArgs + "))" + sfx;
+                            pos = pfx.size(); // continue scanning
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fix transpose(mat)*expr → mul(mat, expr)  [drop transpose]
+        // With mul-swap strategy: M_hlsl = M_glsl^T (GLSL columns stored as HLSL rows).
+        // GLSL transpose(M)*v means M^T*v. Since M_hlsl already IS M_glsl^T,
+        // we just need mul(M_hlsl, v) without transpose — the storage swap cancels it.
+        // transpose() returns a matrix, so ident*matVar won't catch it.
+        {
+            size_t pos = 0;
+            while ((pos = result.find("transpose(", pos)) != std::string::npos) {
+                // Don't match if preceded by identifier char
+                if (pos > 0 && (isalnum((unsigned char)result[pos - 1]) || result[pos - 1] == '_')) { pos++; continue; }
+                size_t argsStart = pos + 10; // strlen("transpose(")
+                std::string rest = result.substr(argsStart);
+                int closeIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closeIdx <= 0) { pos += 10; continue; }
+                size_t afterClose = argsStart + closeIdx + 1;
+                // Skip whitespace after ')'
+                size_t starPos = afterClose;
+                while (starPos < result.size() && result[starPos] == ' ') starPos++;
+                if (starPos < result.size() && result[starPos] == '*' &&
+                    (starPos + 1 >= result.size() || result[starPos + 1] != '=')) {
+                    // Extract RHS
+                    size_t rhsStart = starPos + 1;
+                    while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
+                    size_t rhsEnd = rhsStart;
+                    int depth = 0;
+                    while (rhsEnd < result.size()) {
+                        char c = result[rhsEnd];
+                        if (c == '(' || c == '[') depth++;
+                        else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                        else if ((c == ';' || c == ',') && depth == 0) break;
+                        rhsEnd++;
+                    }
+                    if (rhsEnd > rhsStart) {
+                        // Extract inner arg of transpose(): transpose(X) → X
+                        std::string matInner = rest.substr(0, closeIdx);
+                        std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                        while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                        std::string pfx = result.substr(0, pos);
+                        std::string sfx = result.substr(rhsEnd);
+                        // mul(mat, vec) — drop transpose, storage swap cancels it
+                        result = pfx + "mul(" + matInner + ", " + rhs + ")" + sfx;
+                        pos = pfx.size();
+                        continue;
+                    }
+                }
+                pos += 10;
+            }
+        }
+
         // Fix GLSL vector comparisons in if/while conditions:
         // GLSL: if(v.xy == vec2(-0.5)) returns scalar bool
         // HLSL: v.xy == float2(-0.5) returns bool2, not scalar — must wrap with all()
@@ -3403,6 +3652,51 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             }
         }
 
+        // Fix matrix size promotion: GLSL mat4(mat3_var) extends with identity; HLSL rejects.
+        // float4x4(m3x3) → float4x4(float4(m3x3[0],0), float4(m3x3[1],0), float4(m3x3[2],0), float4(0,0,0,1))
+        {
+            const char* prefix = "float4x4(";
+            size_t searchFrom = 0;
+            while (searchFrom < result.size()) {
+                size_t index = result.find(prefix, searchFrom);
+                if (index == std::string::npos) break;
+                if (index > 0 && (isalnum((unsigned char)result[index - 1]) || result[index - 1] == '_')) {
+                    searchFrom = index + 1; continue;
+                }
+                size_t prefixLen = strlen(prefix);
+                std::string rest = result.substr(index + prefixLen);
+                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closingIdx <= 0) { searchFrom = index + prefixLen; continue; }
+                std::string argsLine = rest.substr(0, closingIdx);
+                // Count top-level commas — if 0 and arg is an identifier (not a scalar), it's a mat promotion
+                int topCommas = 0;
+                { int depth = 0;
+                  for (char c : argsLine) {
+                    if (c == '(') depth++; else if (c == ')') depth--;
+                    else if (c == ',' && depth == 0) topCommas++;
+                  }
+                }
+                if (topCommas == 0 && !argsLine.empty()) {
+                    std::string arg = argsLine;
+                    size_t s = arg.find_first_not_of(" \t\n\r");
+                    size_t e = arg.find_last_not_of(" \t\n\r");
+                    if (s != std::string::npos) arg = arg.substr(s, e - s + 1);
+                    // Skip if arg is a scalar literal (number) — that's a valid broadcast
+                    bool isScalar = false;
+                    try { size_t pos; (void)std::stof(arg, &pos); if (pos == arg.size()) isScalar = true; } catch (...) {}
+                    if (!isScalar && arg.find('(') == std::string::npos) {
+                        // It's a single identifier — likely a mat3 promotion to mat4
+                        std::string replacement = "float4x4(float4(" + arg + "[0],0), float4(" + arg + "[1],0), float4(" + arg + "[2],0), float4(0,0,0,1))";
+                        result = result.substr(0, index) + replacement
+                               + result.substr(index + prefixLen + closingIdx + 1);
+                        searchFrom = index + replacement.size();
+                        continue;
+                    }
+                }
+                searchFrom = index + prefixLen + closingIdx;
+            }
+        }
+
         // Fix scalar-to-vector broadcast: GLSL typeN(scalar) → HLSL ((typeN)(scalar))
         // GLSL allows vec3(1.0) to broadcast; HLSL requires explicit args or cast syntax.
         {
@@ -3590,6 +3884,51 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (nl != std::string::npos) structEnd = nl + 1;
                             result.insert(structEnd, helper);
                         }
+                    }
+                }
+            }
+
+            // Fix HLSL X3508 for 'out' struct params: insert zero-init
+            // at top of function body so fxc sees all members written.
+            // Handles multi-parameter functions (e.g. void F(float x, out Struct s)).
+            // NOTE: Only 'out' params — 'inout' carries pre-computed data that must not be destroyed.
+            for (const auto& sn : structNames) {
+                for (const char* qualifier : {"out "}) {
+                    std::string qPat = std::string(qualifier) + sn + " ";
+                    size_t pos = 0;
+                    while ((pos = result.find(qPat, pos)) != std::string::npos) {
+                        // Verify it's a parameter qualifier (preceded by '(' or ',')
+                        size_t prev = pos;
+                        if (prev > 0) prev--;
+                        while (prev > 0 && (result[prev] == ' ' || result[prev] == '\n' || result[prev] == '\r' || result[prev] == '\t')) prev--;
+                        char c = (prev < result.size()) ? result[prev] : 0;
+                        if (c != '(' && c != ',') { pos += qPat.size(); continue; }
+                        // Don't match "inout" when scanning for "out" (would double-match)
+                        if (strcmp(qualifier, "out ") == 0 && pos >= 2 && result.substr(pos - 2, 2) == "in") {
+                            pos += qPat.size(); continue;
+                        }
+                        // Extract param name
+                        size_t pnStart = pos + qPat.size();
+                        while (pnStart < result.size() && result[pnStart] == ' ') pnStart++;
+                        size_t pnEnd = pnStart;
+                        while (pnEnd < result.size() && (isalnum((unsigned char)result[pnEnd]) || result[pnEnd] == '_')) pnEnd++;
+                        if (pnEnd == pnStart) { pos += qPat.size(); continue; }
+                        std::string paramName = result.substr(pnStart, pnEnd - pnStart);
+                        // Find the function body's opening brace
+                        size_t closeParen = result.find(')', pnEnd);
+                        if (closeParen == std::string::npos) { pos += qPat.size(); continue; }
+                        size_t braceOpen = result.find('{', closeParen);
+                        if (braceOpen == std::string::npos) { pos += qPat.size(); continue; }
+                        // Verify no semicolon between ) and { (it's a definition, not declaration)
+                        bool isDecl = false;
+                        for (size_t k = closeParen; k < braceOpen; k++) {
+                            if (result[k] == ';') { isDecl = true; break; }
+                        }
+                        if (isDecl) { pos += qPat.size(); continue; }
+                        // Insert zero-init at top of function body
+                        std::string init = "\n  " + paramName + " = (" + sn + ")0;";
+                        result.insert(braceOpen + 1, init);
+                        pos = braceOpen + 1 + init.size();
                     }
                 }
             }

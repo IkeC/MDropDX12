@@ -371,6 +371,25 @@ server.tool(
   }
 );
 
+// Tool: Shader import (load JSON, convert GLSL→HLSL, apply)
+server.tool(
+  'mdrop_shader_import',
+  'Import a Shadertoy shader from a .json file — loads, converts GLSL→HLSL, and applies to the visualizer. Returns conversion result. Use for debugging shader import issues.',
+  {
+    file_path: z.string().describe('Full path to the shader_import .json file'),
+  },
+  async ({ file_path }) => {
+    try {
+      // Normalize path separators for Windows
+      const normalizedPath = file_path.replace(/\//g, '\\');
+      const response = await send(`SHADER_IMPORT=${normalizedPath}`, true);
+      return { content: [{ type: 'text', text: response || '(no response — check debug.log)' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
 // Tool: Raw command (escape hatch)
 server.tool(
   'mdrop_command',

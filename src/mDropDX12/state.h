@@ -71,7 +71,7 @@ struct EelCompileScope {
 #define NUM_T_VAR 8
 
 #define MAX_BIGSTRING_LEN    32768
-#define MAX_SHADER_TEXT_LEN  131072  // 128KB for large Shadertoy shaders
+#define MAX_SHADER_TEXT_LEN  262144  // 256KB for large Shadertoy shaders
 
 class CBlendableFloat {
 public:
