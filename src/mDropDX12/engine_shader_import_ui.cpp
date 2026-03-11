@@ -3608,59 +3608,345 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             }
         }
 
-        // Fix over-specified identical constructors: float3(expr, expr, expr) → ((float3)(expr))
+        // Fix over-specified constructors: GLSL vecN(args) accepts excess components; HLSL rejects (X3014).
+        // Case 1: all args identical: float3(expr,expr,expr) → ((float3)(expr))
+        // Case 2: mixed args with vectors: float3(Z.z, 0, -Z) → float3(Z.z, 0, (-Z).x)
         // This runs AFTER backslash continuation removal so multi-line constructs are joined.
-        // GLSL allows vec3(vec3,vec3,vec3) (takes first N components); HLSL rejects excess.
-        for (int numArgs = 2; numArgs <= 4; numArgs++) {
-            std::string prefix = "float" + std::to_string(numArgs) + "(";
-            std::string typeName = "float" + std::to_string(numArgs);
-            size_t searchFrom = 0;
-            while (searchFrom < result.size()) {
-                size_t index = result.find(prefix, searchFrom);
-                if (index == std::string::npos) break;
-                std::string rest = result.substr(index + prefix.size());
-                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
-                if (closingIdx <= 0) { searchFrom = index + prefix.size(); continue; }
-                std::string argsLine = rest.substr(0, closingIdx);
-                // Count top-level commas
-                int topCommas = 0;
-                { int depth = 0;
-                  for (char c : argsLine) {
-                    if (c == '(') depth++;
-                    else if (c == ')') depth--;
-                    else if (c == ',' && depth == 0) topCommas++;
-                  }
+        {
+            // Build variable type map from declarations in the converted HLSL
+            std::map<std::string, int> varTypeMap;
+            for (int dim = 2; dim <= 4; dim++) {
+                std::string ts = "float" + std::to_string(dim);
+                size_t pos = 0;
+                while ((pos = result.find(ts, pos)) != std::string::npos) {
+                    size_t after = pos + ts.size();
+                    // Skip float2x2 etc. and float2( constructors
+                    if (after < result.size() && (result[after] == 'x' || isdigit(result[after]))) { pos = after; continue; }
+                    // Must be preceded by non-alnum (or start of string) to avoid matching "Myfloat3"
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos = after; continue; }
+                    // Must be followed by whitespace
+                    if (after >= result.size() || (result[after] != ' ' && result[after] != '\t')) { pos = after; continue; }
+                    while (after < result.size() && (result[after] == ' ' || result[after] == '\t')) after++;
+                    // Extract identifier
+                    size_t idStart = after;
+                    while (after < result.size() && (isalnum(result[after]) || result[after] == '_')) after++;
+                    if (after > idStart) {
+                        std::string vn = result.substr(idStart, after - idStart);
+                        if (!isdigit(vn[0])) {
+                            // Skip if followed by '(' — likely a function declaration, not a variable
+                            size_t ck = after;
+                            while (ck < result.size() && result[ck] == ' ') ck++;
+                            if (ck >= result.size() || result[ck] != '(')
+                                varTypeMap[vn] = dim;
+                        }
+                        // Follow comma-separated declarations: float3 p = ..., Z = ..., X = ...;
+                        // After the first variable, scan through the rest of the declaration
+                        // picking up more identifiers of the same type after commas at depth 0.
+                        {
+                            size_t scanPos = after;
+                            int dp = 0;
+                            while (scanPos < result.size()) {
+                                char c = result[scanPos];
+                                if (c == '(' || c == '[') dp++;
+                                else if (c == ')' || c == ']') { dp--; if (dp < 0) break; }
+                                else if (c == ';' || c == '{') break;
+                                else if (c == ',' && dp == 0) {
+                                    scanPos++;
+                                    while (scanPos < result.size() && (result[scanPos]==' '||result[scanPos]=='\t'||result[scanPos]=='\n'||result[scanPos]=='\r')) scanPos++;
+                                    size_t id2 = scanPos;
+                                    while (scanPos < result.size() && (isalnum(result[scanPos]) || result[scanPos] == '_')) scanPos++;
+                                    if (scanPos > id2) {
+                                        std::string vn2 = result.substr(id2, scanPos - id2);
+                                        if (!isdigit(vn2[0])) {
+                                            size_t ck2 = scanPos;
+                                            while (ck2 < result.size() && result[ck2] == ' ') ck2++;
+                                            if (ck2 >= result.size() || result[ck2] != '(')
+                                                varTypeMap[vn2] = dim;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                scanPos++;
+                            }
+                            after = scanPos;
+                        }
+                    }
+                    pos = after;
                 }
-                if (topCommas == numArgs - 1) {
+            }
+
+            // Estimate component count of a constructor argument
+            auto getArgCompCount = [&](const std::string& arg) -> int {
+                if (arg.empty()) return 1;
+                // Check for trailing swizzle (e.g., .xyz → 3, .xy → 2, .x → 1)
+                // Find last '.' not inside parentheses
+                size_t lastDot = std::string::npos;
+                int dp = 0;
+                for (size_t i = arg.size(); i > 0; i--) {
+                    if (arg[i-1] == ')') dp++;
+                    else if (arg[i-1] == '(') dp--;
+                    else if (arg[i-1] == '.' && dp == 0) { lastDot = i-1; break; }
+                }
+                if (lastDot != std::string::npos && lastDot < arg.size() - 1) {
+                    std::string swz = arg.substr(lastDot + 1);
+                    bool isSwizzle = !swz.empty() && swz.size() <= 4;
+                    for (char c : swz)
+                        if (c!='x'&&c!='y'&&c!='z'&&c!='w'&&c!='r'&&c!='g'&&c!='b'&&c!='a') { isSwizzle = false; break; }
+                    if (isSwizzle) return (int)swz.size();
+                }
+                // Strip leading unary operators and whitespace
+                size_t start = 0;
+                while (start < arg.size() && (arg[start]==' '||arg[start]=='\t'||arg[start]=='-'||arg[start]=='+'||arg[start]=='!')) start++;
+                if (start >= arg.size()) return 1;
+                // Extract leading identifier
+                size_t end = start;
+                while (end < arg.size() && (isalnum(arg[end]) || arg[end] == '_')) end++;
+                if (end == start) return 1;
+                std::string varName = arg.substr(start, end - start);
+                if (isdigit(varName[0])) return 1;
+                // Only look up if identifier is the entire expression (no trailing operators)
+                size_t tail = end;
+                while (tail < arg.size() && (arg[tail]==' '||arg[tail]=='\t')) tail++;
+                if (tail >= arg.size()) {
+                    auto it = varTypeMap.find(varName);
+                    if (it != varTypeMap.end()) return it->second;
+                }
+                return 1;
+            };
+
+            for (int numArgs = 2; numArgs <= 4; numArgs++) {
+                std::string prefix = "float" + std::to_string(numArgs) + "(";
+                std::string typeName = "float" + std::to_string(numArgs);
+                size_t searchFrom = 0;
+                while (searchFrom < result.size()) {
+                    size_t index = result.find(prefix, searchFrom);
+                    if (index == std::string::npos) break;
+                    // Don't match identifiers ending with float3( e.g. "Myfloat3("
+                    if (index > 0 && (isalnum(result[index-1]) || result[index-1] == '_')) {
+                        searchFrom = index + prefix.size(); continue;
+                    }
+                    std::string rest = result.substr(index + prefix.size());
+                    int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                    if (closingIdx <= 0) { searchFrom = index + prefix.size(); continue; }
+                    std::string argsLine = rest.substr(0, closingIdx);
+
                     // Split by top-level commas
                     std::vector<std::string> args;
-                    int depth2 = 0;
-                    std::string current;
-                    for (char c : argsLine) {
-                        if (c == '(') depth2++;
-                        else if (c == ')') depth2--;
-                        if (c == ',' && depth2 == 0) { args.push_back(current); current.clear(); }
-                        else current += c;
+                    { int depth = 0; std::string cur;
+                      for (char c : argsLine) {
+                          if (c == '(') depth++;
+                          else if (c == ')') depth--;
+                          if (c == ',' && depth == 0) { args.push_back(cur); cur.clear(); }
+                          else cur += c;
+                      }
+                      args.push_back(cur);
                     }
-                    args.push_back(current);
                     for (auto& a : args) {
                         size_t s = a.find_first_not_of(" \t\n\r");
                         size_t e = a.find_last_not_of(" \t\n\r");
                         a = (s != std::string::npos) ? a.substr(s, e - s + 1) : "";
                     }
-                    bool allIdentical = args.size() == (size_t)numArgs;
-                    for (size_t ai = 1; ai < args.size() && allIdentical; ai++)
-                        if (args[ai] != args[0]) allIdentical = false;
-                    if (allIdentical && !args[0].empty() && args[0].find('(') != std::string::npos) {
-                        std::string replacement = "((" + typeName + ")(" + args[0] + "))";
-                        result = result.substr(0, index) + replacement
-                               + result.substr(index + prefix.size() + closingIdx + 1);
-                        searchFrom = index + replacement.size();
-                        DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified → cast\n").c_str());
-                        continue;
+
+                    // Case 1: All args identical — float3(expr,expr,expr) → ((float3)(expr))
+                    if ((int)args.size() == numArgs) {
+                        bool allIdentical = true;
+                        for (size_t ai = 1; ai < args.size() && allIdentical; ai++)
+                            if (args[ai] != args[0]) allIdentical = false;
+                        if (allIdentical && !args[0].empty() && args[0].find('(') != std::string::npos) {
+                            std::string replacement = "((" + typeName + ")(" + args[0] + "))";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefix.size() + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified identical → cast\n").c_str());
+                            continue;
+                        }
+                    }
+
+                    // Case 2: Mixed args — estimate total components, truncate if over-specified
+                    int totalComp = 0;
+                    std::vector<int> argComp(args.size());
+                    for (size_t ai = 0; ai < args.size(); ai++) {
+                        argComp[ai] = getArgCompCount(args[ai]);
+                        totalComp += argComp[ai];
+                    }
+                    if (totalComp > numArgs) {
+                        int excess = totalComp - numArgs;
+                        bool fixed = true;
+                        for (int ai = (int)args.size()-1; ai >= 0 && excess > 0; ai--) {
+                            if (argComp[ai] > 1) {
+                                int needed = argComp[ai] - excess;
+                                if (needed < 1) needed = 1;
+                                static const char* swz[] = {"", ".x", ".xy", ".xyz"};
+                                // Wrap in parens if arg has operators (so .x binds to the whole expression)
+                                bool hasOps = false;
+                                for (char c : args[ai])
+                                    if (c=='+' || c=='*' || c=='/' || c==' ') { hasOps = true; break; }
+                                // Also wrap if starts with unary minus (for clarity: (-Z).x not -Z.x)
+                                if (!args[ai].empty() && args[ai][0] == '-') hasOps = true;
+                                if (hasOps)
+                                    args[ai] = "(" + args[ai] + ")" + swz[needed];
+                                else
+                                    args[ai] = args[ai] + swz[needed];
+                                excess -= (argComp[ai] - needed);
+                            }
+                        }
+                        if (excess == 0) {
+                            std::string replacement = typeName + "(";
+                            for (size_t ai = 0; ai < args.size(); ai++) {
+                                if (ai > 0) replacement += ", ";
+                                replacement += args[ai];
+                            }
+                            replacement += ")";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefix.size() + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified → truncated\n").c_str());
+                            continue;
+                        }
+                    }
+
+                    searchFrom = index + prefix.size() + closingIdx;
+                }
+            }
+        }
+
+        // Fix matrix-returning #define macros used with * operator.
+        // HLSL's * does NOT do matrix-vector multiply (only mul() does).
+        // Detect: #define R(a) float2x2(...) then R(args)*expr → mul(expr, R(args))
+        // Uses mul-swap convention: GLSL mat*vec → HLSL mul(vec, mat)
+        {
+            std::set<std::string> matMacros;
+            size_t defPos = 0;
+            while ((defPos = result.find("#define ", defPos)) != std::string::npos) {
+                defPos += 8;
+                size_t nameStart = defPos;
+                while (defPos < result.size() && (isalnum(result[defPos]) || result[defPos] == '_')) defPos++;
+                if (defPos == nameStart) continue;
+                std::string macName = result.substr(nameStart, defPos - nameStart);
+                if (defPos < result.size() && result[defPos] == '(') {
+                    int d = 1; defPos++;
+                    while (defPos < result.size() && d > 0) {
+                        if (result[defPos] == '(') d++;
+                        else if (result[defPos] == ')') d--;
+                        defPos++;
                     }
                 }
-                searchFrom = index + prefix.size() + closingIdx;
+                while (defPos < result.size() && (result[defPos] == ' ' || result[defPos] == '\t')) defPos++;
+                bool isMatrix = false;
+                for (int mr = 2; mr <= 4 && !isMatrix; mr++)
+                    for (int mc = 2; mc <= 4 && !isMatrix; mc++) {
+                        std::string mt = "float" + std::to_string(mr) + "x" + std::to_string(mc) + "(";
+                        if (result.compare(defPos, mt.size(), mt) == 0) isMatrix = true;
+                    }
+                if (isMatrix) matMacros.insert(macName);
+                while (defPos < result.size() && result[defPos] != '\n') defPos++;
+            }
+
+            for (const auto& macName : matMacros) {
+                size_t pos = 0;
+                std::string macPfx = macName + "(";
+                while ((pos = result.find(macPfx, pos)) != std::string::npos) {
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos++; continue; }
+                    // Check we're not inside the #define line itself
+                    size_t lineStart = result.rfind('\n', pos);
+                    if (lineStart == std::string::npos) lineStart = 0; else lineStart++;
+                    std::string linePrefix = result.substr(lineStart, 8);
+                    if (linePrefix == "#define ") { pos += macPfx.size(); continue; }
+
+                    size_t callStart = pos;
+                    size_t argsStart = pos + macPfx.size();
+                    int d = 1; size_t p = argsStart;
+                    while (p < result.size() && d > 0) {
+                        if (result[p] == '(') d++;
+                        else if (result[p] == ')') d--;
+                        p++;
+                    }
+                    if (d != 0) { pos++; continue; }
+                    size_t callEnd = p;
+                    // Check if followed by *
+                    size_t afterCall = callEnd;
+                    while (afterCall < result.size() && result[afterCall] == ' ') afterCall++;
+                    if (afterCall < result.size() && result[afterCall] == '*') {
+                        afterCall++; // skip *
+                        while (afterCall < result.size() && result[afterCall] == ' ') afterCall++;
+                        // Extract RHS: identifier (with optional .swizzle) or parenthesized expr
+                        size_t rhsStart = afterCall, rhsEnd = rhsStart;
+                        if (rhsEnd < result.size() && result[rhsEnd] == '(') {
+                            int d2 = 1; rhsEnd++;
+                            while (rhsEnd < result.size() && d2 > 0) {
+                                if (result[rhsEnd] == '(') d2++;
+                                else if (result[rhsEnd] == ')') d2--;
+                                rhsEnd++;
+                            }
+                        } else {
+                            while (rhsEnd < result.size() && (isalnum(result[rhsEnd]) || result[rhsEnd] == '_')) rhsEnd++;
+                            if (rhsEnd < result.size() && result[rhsEnd] == '.') {
+                                rhsEnd++;
+                                while (rhsEnd < result.size() && (result[rhsEnd]=='x'||result[rhsEnd]=='y'||result[rhsEnd]=='z'||result[rhsEnd]=='w')) rhsEnd++;
+                            }
+                        }
+                        if (rhsEnd > rhsStart) {
+                            std::string macCall = result.substr(callStart, callEnd - callStart);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            std::string replacement = "mul(" + rhs + ", " + macCall + ")";
+                            result = result.substr(0, callStart) + replacement + result.substr(rhsEnd);
+                            pos = callStart + replacement.size();
+                            DebugLogA(("CONV-FIX: " + macName + "(...)*expr → mul(expr, " + macName + "(...))\n").c_str());
+                            continue;
+                        }
+                    }
+                    pos = callEnd;
+                }
+            }
+        }
+
+        // Zero-initialize uninitialized local variable declarations.
+        // GLSL hardware typically zero-inits locals; HLSL does NOT (X4000 error).
+        // Handles: "float s, i, d;" → "float s = 0, i = 0, d = 0;"
+        //          "float4 ref;" → "float4 ref = 0;"
+        // Only bare declarations without '=' are modified.
+        {
+            for (const char* typeStr : {"float ", "float2 ", "float3 ", "float4 ",
+                                        "int ", "int2 ", "int3 ", "int4 ",
+                                        "uint ", "uint2 ", "uint3 ", "uint4 "}) {
+                size_t tsLen = strlen(typeStr);
+                size_t pos = 0;
+                while ((pos = result.find(typeStr, pos)) != std::string::npos) {
+                    // Must be preceded by non-alnum (not inside "Myfloat" or "float2x2")
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += tsLen; continue; }
+                    // Skip float2x2 etc.
+                    if (typeStr[0] == 'f' && pos + tsLen < result.size() && result[pos + tsLen - 1] == ' ' &&
+                        pos + tsLen < result.size() && (result[pos + tsLen - 1] == 'x')) { pos += tsLen; continue; }
+                    // Find the end of the declaration (semicolon)
+                    size_t semi = std::string::npos;
+                    { int dp = 0;
+                      for (size_t s = pos + tsLen; s < result.size(); s++) {
+                          if (result[s] == '(' || result[s] == '[') dp++;
+                          else if (result[s] == ')' || result[s] == ']') dp--;
+                          else if (result[s] == ';' && dp == 0) { semi = s; break; }
+                          else if (result[s] == '{' && dp == 0) break; // entered a block, stop
+                      }
+                    }
+                    if (semi == std::string::npos) { pos += tsLen; continue; }
+                    std::string decl = result.substr(pos + tsLen, semi - (pos + tsLen));
+                    // Skip if there's already an '=' (has initializer — may be partial, but don't touch)
+                    if (decl.find('=') != std::string::npos) { pos = semi + 1; continue; }
+                    // This is a bare declaration. Add "= 0" before each comma and before semicolon.
+                    // "s, i, d" → "s = 0, i = 0, d = 0"
+                    std::string fixed;
+                    int dp = 0;
+                    for (size_t ci = 0; ci < decl.size(); ci++) {
+                        if (decl[ci] == '(') dp++;
+                        else if (decl[ci] == ')') dp--;
+                        if (decl[ci] == ',' && dp == 0)
+                            fixed += " = 0,";
+                        else
+                            fixed += decl[ci];
+                    }
+                    fixed += " = 0";
+                    result = result.substr(0, pos + tsLen) + fixed + result.substr(semi);
+                    pos = pos + tsLen + fixed.size() + 1;
+                }
             }
         }
 
