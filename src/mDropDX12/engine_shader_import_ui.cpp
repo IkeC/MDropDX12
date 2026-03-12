@@ -1217,8 +1217,17 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
                 pos += strlen(pat);
             }
             if (isAudio) {
-                pass.channels[ch] = CHAN_AUDIO;
-                continue;
+                // Audio textures are only read via texelFetch, never textureLod/texture.
+                // If this channel ALSO has textureLod calls, it's not audio — it's a buffer
+                // storing pixel data at small coordinates (e.g. camera matrix in temporal reprojection).
+                char lodCheck[64];
+                sprintf_s(lodCheck, "textureLod(iChannel%d", ch);
+                char texCheck[64];
+                sprintf_s(texCheck, "texture(iChannel%d", ch);
+                if (src.find(lodCheck) == std::string::npos && src.find(texCheck) == std::string::npos) {
+                    pass.channels[ch] = CHAN_AUDIO;
+                    continue;
+                }
             }
         }
 
@@ -1423,6 +1432,49 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
                 pass.channels[ch] = noiseDefaults[ch];
             }
             continue;
+        }
+
+        // --- Pattern 2f: Promote noise→CHAN_FEEDBACK on Buffer A for temporal reprojection ---
+        // Handles cases where JSON has wrong channel (e.g. ch0/ch3 swapped).
+        // Greek Temple: iChannel3 used for temporal reprojection — shader stores camera
+        // data in low-row pixels (fragCoord.y<1) and reads back via texelFetch + textureLod.
+        // Detect: shader writes state to specific pixels AND reads same channel with texelFetch.
+        // This "pixel data storage" pattern is unique to self-feedback, never noise.
+        if (isBufferA && (pass.channels[ch] == CHAN_NOISE_LQ ||
+                          pass.channels[ch] == CHAN_NOISE_MQ ||
+                          pass.channels[ch] == CHAN_NOISE_HQ)) {
+            // Evidence 1: shader stores data in low-row pixels (temporal reprojection pattern)
+            bool hasPixelStorage = (src.find("fragCoord.y<1") != std::string::npos ||
+                                    src.find("fragCoord.y < 1") != std::string::npos ||
+                                    src.find("fragCoord.y<=0") != std::string::npos ||
+                                    src.find("fragCoord.y == 0") != std::string::npos);
+            // Evidence 2: channel read via texelFetch WITHOUT noise modular coords (&255, &(res)
+            // Noise reads: texelFetch(iChannel1, (i+ivec2(0,0))&255, 0) — has &255
+            // Feedback reads: texelFetch(iChannel3, ivec2(0,0), 0) — no modular pattern
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            bool hasNonNoiseFetch = false;
+            size_t fPos = src.find(fetchPat);
+            while (fPos != std::string::npos) {
+                // Extract the call
+                size_t end = src.find('\n', fPos);
+                if (end == std::string::npos) end = src.size();
+                std::string line = src.substr(fPos, end - fPos);
+                bool isNoiseRead = (line.find("&255") != std::string::npos ||
+                                    line.find("& 255") != std::string::npos ||
+                                    line.find("&(res") != std::string::npos ||
+                                    line.find("& (res") != std::string::npos);
+                if (!isNoiseRead) {
+                    hasNonNoiseFetch = true;
+                    break;
+                }
+                fPos = src.find(fetchPat, fPos + 1);
+            }
+            // Require pixel storage + non-noise texelFetch on this channel
+            if (hasPixelStorage && hasNonNoiseFetch) {
+                pass.channels[ch] = CHAN_FEEDBACK;
+                continue;
+            }
         }
 
         // --- Pattern 3: Self-feedback / buffer reads ---

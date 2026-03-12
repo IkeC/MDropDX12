@@ -1932,16 +1932,14 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
     DLOG_INFO("Shadertoy: texSize=%dx%d fbRead=%d fbWrite=%d",
       m_nTexSizeX, m_nTexSizeY, fbRead, fbWrite);
 
-    // HUD notification
-    wchar_t note[256];
-    swprintf(note, 256, L"Shadertoy: A=%s B=%s C=%s D=%s Img=%s (%dx%d)",
-      m_dx12BufferAPSO ? L"OK" : L"--",
-      m_dx12BufferBPSO ? L"OK" : L"--",
-      m_dx12BufferCPSO ? L"OK" : L"--",
-      m_dx12BufferDPSO ? L"OK" : L"--",
-      m_dx12CompPSO ? L"OK" : L"--",
+    // Log shader status (no HUD overlay — VJ use case)
+    DLOG_INFO("Shadertoy: A=%s B=%s C=%s D=%s Img=%s (%dx%d)",
+      m_dx12BufferAPSO ? "OK" : "--",
+      m_dx12BufferBPSO ? "OK" : "--",
+      m_dx12BufferCPSO ? "OK" : "--",
+      m_dx12BufferDPSO ? "OK" : "--",
+      m_dx12CompPSO ? "OK" : "--",
       m_nTexSizeX, m_nTexSizeY);
-    AddNotification(note, 5.0f);
   }
 
   if (stFrame < 2) {
