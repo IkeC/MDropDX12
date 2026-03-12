@@ -2446,7 +2446,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         inp = WholeWordReplace(inp, "rad", "_st_rad");
         inp = WholeWordReplace(inp, "ang", "_st_ang");
         replaceAll(inp, "iTimeDelta", "xTimeDelta"); // protect from iTime replace
-        replaceAll(inp, "iTime", "time");
+        replaceAll(inp, "iTime", "_c2.x");  // Direct ref to avoid local 'time' shadowing #define
+        // Rename remaining 'time' tokens (local vars/params) to avoid #define time _c2.x collision
+        inp = WholeWordReplace(inp, "time", "_st_time");
         // iResolution: Shadertoy vec3(width, height, pixelAspect=1.0)
         // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
         // Inline-expand so iResolution.z → float3(...).z → 1.0
@@ -2487,7 +2489,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             }
         }
 
-        replaceAll(inp, "iFrame", "frame");
+        replaceAll(inp, "iFrame", "_c2.z");  // Direct ref to avoid local 'frame' shadowing #define
+        // Rename remaining 'frame' tokens (local vars/params) to avoid #define frame _c2.z collision
+        inp = WholeWordReplace(inp, "frame", "_st_frame");
         replaceAll(inp, "iMouse", "_c14");  // Direct ref to avoid local 'mouse' shadowing #define
         replaceAll(inp, "iDate", "_c19");   // float4(year, month 0-11, day, seconds since midnight)
         // ZERO/ZEROU: Shadertoy anti-optimization trick (#define ZERO min(iFrame,0)).
