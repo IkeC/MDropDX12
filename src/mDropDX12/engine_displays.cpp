@@ -357,7 +357,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                 (IUnknown**)m_lpDX->m_commandQueue.GetAddressOf())) {
             char logBuf[512];
             sprintf(logBuf, "InitDisplayOutput: OpenDirectX12 failed for '%s'\n", senderNameA);
-            DebugLogA(logBuf);
+            DebugLogA(logBuf, LOG_ERROR);
             return;
         }
 
@@ -368,7 +368,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                     D3D12_RESOURCE_STATE_RENDER_TARGET)) {
                 char logBuf[512];
                 sprintf(logBuf, "InitDisplayOutput: WrapDX12Resource failed [%d]\n", n);
-                DebugLogA(logBuf);
+                DebugLogA(logBuf, LOG_ERROR);
                 // Cleanup partial wraps
                 for (int j = 0; j < n; j++) {
                     if (ss.wrappedBackBuffers[j]) {
@@ -434,7 +434,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         }
 
         if (monW <= 0 || monH <= 0) {
-            DebugLogA("InitDisplayOutput: Invalid monitor rect, skipping\n");
+            DebugLogA("InitDisplayOutput: Invalid monitor rect, skipping\n", LOG_WARN);
             out.monitorState.reset();
             return;
         }
@@ -453,7 +453,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             rc.left, rc.top, monW, monH,
             nullptr, nullptr, GetModuleHandle(NULL), nullptr);
         if (!ms.hWnd) {
-            DebugLogA("InitDisplayOutput: CreateWindowExW failed for mirror\n");
+            DebugLogA("InitDisplayOutput: CreateWindowExW failed for mirror\n", LOG_ERROR);
             out.monitorState.reset();
             return;
         }
@@ -468,7 +468,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         ComPtr<IDXGIFactory4> factory;
         HRESULT hr = m_lpDX->m_swapChain->GetParent(IID_PPV_ARGS(&factory));
         if (FAILED(hr)) {
-            DebugLogA("InitDisplayOutput: GetParent(IDXGIFactory4) failed\n");
+            DebugLogA("InitDisplayOutput: GetParent(IDXGIFactory4) failed\n", LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -494,7 +494,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             m_lpDX->m_commandQueue.Get(), ms.hWnd, &scDesc, nullptr, nullptr, &sc1);
         if (FAILED(hr)) {
             char logBuf[256]; sprintf(logBuf, "InitDisplayOutput: CreateSwapChainForHwnd failed (0x%08X)\n", (unsigned)hr);
-            DebugLogA(logBuf);
+            DebugLogA(logBuf, LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -502,7 +502,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         factory->MakeWindowAssociation(ms.hWnd, DXGI_MWA_NO_ALT_ENTER);
         hr = sc1.As(&ms.swapChain);
         if (FAILED(hr)) {
-            DebugLogA("InitDisplayOutput: QueryInterface IDXGISwapChain4 failed\n");
+            DebugLogA("InitDisplayOutput: QueryInterface IDXGISwapChain4 failed\n", LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -513,7 +513,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             hr = ms.swapChain->GetBuffer(i, IID_PPV_ARGS(&ms.backBuffers[i]));
             if (FAILED(hr)) {
                 char logBuf[256]; sprintf(logBuf, "InitDisplayOutput: GetBuffer(%d) failed\n", i);
-                DebugLogA(logBuf);
+                DebugLogA(logBuf, LOG_ERROR);
                 ms.swapChain.Reset();
                 DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
                 out.monitorState.reset();
@@ -581,7 +581,7 @@ void Engine::ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH)
         DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(hr)) {
         char logBuf[256]; sprintf(logBuf, "ResizeMirrorSwapChain: ResizeBuffers failed (0x%08X)\n", (unsigned)hr);
-        DebugLogA(logBuf);
+        DebugLogA(logBuf, LOG_ERROR);
         ms.bReady = false;
         return;
     }
@@ -686,7 +686,7 @@ void Engine::SendToDisplayOutputs()
             HRESULT hr = m_lpDX->m_device->CreateCommandAllocator(
                 D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_mirrorCmdAllocators[i]));
             if (FAILED(hr)) {
-                DebugLogA("SendToDisplayOutputs: CreateCommandAllocator failed\n");
+                DebugLogA("SendToDisplayOutputs: CreateCommandAllocator failed\n", LOG_ERROR);
                 return;
             }
         }
@@ -694,7 +694,7 @@ void Engine::SendToDisplayOutputs()
             0, D3D12_COMMAND_LIST_TYPE_DIRECT,
             m_mirrorCmdAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_mirrorCmdList));
         if (FAILED(hr)) {
-            DebugLogA("SendToDisplayOutputs: CreateCommandList failed\n");
+            DebugLogA("SendToDisplayOutputs: CreateCommandList failed\n", LOG_ERROR);
             return;
         }
         m_mirrorCmdList->Close();

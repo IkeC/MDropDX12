@@ -983,3 +983,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_SET_INPUTMIX_OPACITY  (WM_APP + 150)
 #define WM_MW_SET_INPUTMIX_LUMAKEY  (WM_APP + 151)
 #define WM_MW_SET_INPUTMIX_ONTOP    (WM_APP + 152)
+#define WM_MW_FULLSCREEN            (WM_APP + 160) // SIGNAL|FULLSCREEN
+#define WM_MW_WATERMARK             (WM_APP + 161) // SIGNAL|WATERMARK
+#define WM_MW_BORDERLESS_FS         (WM_APP + 162) // SIGNAL|BORDERLESS_FS
+#define WM_MW_STRETCH               (WM_APP + 163) // SIGNAL|STRETCH
+#define WM_MW_MIRROR                (WM_APP + 164) // SIGNAL|MIRROR

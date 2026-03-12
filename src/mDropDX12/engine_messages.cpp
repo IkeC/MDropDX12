@@ -2769,6 +2769,31 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(L"SHADER_SAVE_RESULT=" + result);
   }
+  else if (wcsncmp(sMessage, L"SET_LOGLEVEL=", 13) == 0) {
+    // Change log level at runtime.  Format: SET_LOGLEVEL=<0-4>
+    int newLevel = _wtoi(sMessage + 13);
+    if (newLevel < 0) newLevel = 0;
+    if (newLevel > 4) newLevel = 4;
+    m_LogLevel = newLevel;
+    DebugLogSetLevel(newLevel);
+    WritePrivateProfileIntW(newLevel, L"LogLevel", GetConfigIniFile(), L"Milkwave");
+    const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    wchar_t buf[64];
+    swprintf_s(buf, L"LOGLEVEL=%d|%s", newLevel, names[newLevel]);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+    DLOG_INFO("Log level changed to %d via IPC", newLevel);
+  }
+  else if (wcsncmp(sMessage, L"GET_LOGLEVEL", 12) == 0) {
+    // Query current log level.
+    const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = g_debugLogLevel;
+    if (lvl < 0) lvl = 0; if (lvl > 4) lvl = 4;
+    wchar_t buf[64];
+    swprintf_s(buf, L"LOGLEVEL=%d|%s", lvl, names[lvl]);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.

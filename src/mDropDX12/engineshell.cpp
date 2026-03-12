@@ -1552,7 +1552,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
       if (FAILED(hr)) {
         wchar_t msg[128];
         swprintf_s(msg, 128, L"[CaptureScreenshot] Map failed: 0x%08X", hr);
-        DebugLogW(msg);
+        DebugLogW(msg, LOG_ERROR);
       }
       if (SUCCEEDED(hr)) {
         // Save as PNG via WIC (COM must be initialized on this thread)
@@ -1560,7 +1560,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         if (FAILED(hr) && hr != RPC_E_CHANGED_MODE && hr != S_FALSE) {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] CoInitializeEx failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
         bool comInit = SUCCEEDED(hr) || hr == S_FALSE || hr == RPC_E_CHANGED_MODE;
 
@@ -1570,7 +1570,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         if (FAILED(hr)) {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] CoCreateInstance WIC failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
         if (SUCCEEDED(hr)) {
           IWICStream* pStream = nullptr;
@@ -1580,7 +1580,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
             if (FAILED(hr)) {
               wchar_t msg[512];
               swprintf_s(msg, 512, L"[CaptureScreenshot] InitializeFromFilename failed: 0x%08X path=%s", hr, m_screenshotPath);
-              DebugLogW(msg);
+              DebugLogW(msg, LOG_ERROR);
             }
             if (SUCCEEDED(hr)) {
               IWICBitmapEncoder* pEncoder = nullptr;
@@ -1625,7 +1625,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         } else {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
       }
     } else if (m_bScreenshotRequested) {

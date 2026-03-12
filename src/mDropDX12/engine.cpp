@@ -1550,7 +1550,7 @@ void Engine::MyReadConfig() {
       // No preset directory found — use the default path but don't create it.
       // Directory will be created when needed (user saves/drops a preset).
       lstrcpyW(m_szPresetDir, szDefault);
-      DebugLogA("Preset directory not found; using default path (no auto-create)");
+      DebugLogA("Preset directory not found; using default path (no auto-create)", LOG_WARN);
     }
   }
 
@@ -2430,7 +2430,8 @@ int Engine::AllocateMyDX9Stuff() {
           m_fallbackShaders_ps.warp.bytecodeBlob->GetBufferPointer(),
           (UINT)m_fallbackShaders_ps.warp.bytecodeBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-        DebugLogA(m_dx12FallbackWarpPSO ? "DX12: Fallback warp PSO created" : "DX12: Fallback warp PSO FAILED");
+        DebugLogA(m_dx12FallbackWarpPSO ? "DX12: Fallback warp PSO created" : "DX12: Fallback warp PSO FAILED",
+                  m_dx12FallbackWarpPSO ? LOG_INFO : LOG_ERROR);
       }
 
       if (m_fallbackShaders_ps.comp.bytecodeBlob && g_pCompVSBlob) {
@@ -2439,7 +2440,8 @@ int Engine::AllocateMyDX9Stuff() {
           m_fallbackShaders_ps.comp.bytecodeBlob->GetBufferPointer(),
           (UINT)m_fallbackShaders_ps.comp.bytecodeBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-        DebugLogA(m_dx12FallbackCompPSO ? "DX12: Fallback comp PSO created" : "DX12: Fallback comp PSO FAILED");
+        DebugLogA(m_dx12FallbackCompPSO ? "DX12: Fallback comp PSO created" : "DX12: Fallback comp PSO FAILED",
+                  m_dx12FallbackCompPSO ? LOG_INFO : LOG_ERROR);
       }
     }
 
@@ -2689,7 +2691,8 @@ int Engine::AllocateMyDX9Stuff() {
       UINT bbH = (UINT)max(1, m_lpDX->m_backbuffer_height);
       m_injectEffectTex = m_lpDX->CreateRenderTargetTexture(bbW, bbH, DXGI_FORMAT_R8G8B8A8_UNORM);
       m_lpDX->CreateBindingBlockForTexture(m_injectEffectTex);
-      DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED");
+      DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED",
+                m_injectEffectTex.IsValid() ? LOG_INFO : LOG_ERROR);
     }
 
     // Feedback buffers for Shadertoy temporal reprojection (ping-pong pair, VS-resolution)
@@ -2723,21 +2726,16 @@ int Engine::AllocateMyDX9Stuff() {
       if (m_dx12FeedbackD[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[0]);
       if (m_dx12FeedbackD[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[1]);
       m_nFeedbackIdx = 0;
-      DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
-                ? "DX12: Feedback buffers: created (ping-pong pair)"
-                : "DX12: Feedback buffers: FAILED");
-      DebugLogA(m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid()
-                ? "DX12: Image feedback buffers: created (ping-pong pair)"
-                : "DX12: Image feedback buffers: FAILED");
-      DebugLogA(m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid()
-                ? "DX12: FeedbackB buffers: created (ping-pong pair)"
-                : "DX12: FeedbackB buffers: FAILED");
-      DebugLogA(m_dx12FeedbackC[0].IsValid() && m_dx12FeedbackC[1].IsValid()
-                ? "DX12: FeedbackC buffers: created (ping-pong pair)"
-                : "DX12: FeedbackC buffers: FAILED");
-      DebugLogA(m_dx12FeedbackD[0].IsValid() && m_dx12FeedbackD[1].IsValid()
-                ? "DX12: FeedbackD buffers: created (ping-pong pair)"
-                : "DX12: FeedbackD buffers: FAILED");
+      { bool ok = m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid();
+        DebugLogA(ok ? "DX12: Feedback buffers: created (ping-pong pair)" : "DX12: Feedback buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid();
+        DebugLogA(ok ? "DX12: Image feedback buffers: created (ping-pong pair)" : "DX12: Image feedback buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackB buffers: created (ping-pong pair)" : "DX12: FeedbackB buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackC[0].IsValid() && m_dx12FeedbackC[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackC buffers: created (ping-pong pair)" : "DX12: FeedbackC buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackD[0].IsValid() && m_dx12FeedbackD[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackD buffers: created (ping-pong pair)" : "DX12: FeedbackD buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
     }
 
     // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
@@ -2785,7 +2783,8 @@ int Engine::AllocateMyDX9Stuff() {
           psBlob->GetBufferPointer(), (UINT)psBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
         psBlob->Release();
-        DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED");
+        DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED",
+                  m_pInjectEffectPSO ? LOG_INFO : LOG_ERROR);
       }
     }
 

@@ -245,15 +245,16 @@ void ToggleTransparency(HWND hwnd) {
 }
 
 void Engine::SetOpacity(HWND hwnd) {
-  if (IsBorderlessFullscreen(hwnd)) {
-    g_engine.m_WindowWatermarkModeOpacity = fOpacity;
-  }
-
   // Retrieve the current extended window style
   LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
   // Check if the window is currently in clickthrough mode
   bool isClickthrough = (exStyle & WS_EX_TRANSPARENT) != 0;
+
+  // Only save watermark opacity when in actual watermark mode (borderless FS + clickthrough)
+  if (IsBorderlessFullscreen(hwnd) && isClickthrough) {
+    g_engine.m_WindowWatermarkModeOpacity = fOpacity;
+  }
 
   // Ensure the window is layered (required for transparency)
   if (!(exStyle & WS_EX_LAYERED)) {

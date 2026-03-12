@@ -488,6 +488,11 @@ static const SignalEntry s_signalTable[] = {
     { L"MESSAGE_MODE",         104, false },
     { L"CAPTURE",              105, false },
     { L"SHOW_COVER",           110, false },
+    { L"FULLSCREEN",           160, false },
+    { L"WATERMARK",            161, false },
+    { L"BORDERLESS_FS",        162, false },
+    { L"STRETCH",              163, false },
+    { L"MIRROR",               164, false },
     // KEY=VALUE signals (prefix match, value parsed as int into WPARAM)
     { L"SETVIDEODEVICE",       106, true  },
     { L"ENABLEVIDEOMIX",       107, true  },

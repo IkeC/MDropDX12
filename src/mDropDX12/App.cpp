@@ -1569,9 +1569,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_MW_TOGGLE_MIRROR_MODE:
   {
     if (!g_engine.m_bMirrorsActive) {
-      if (!fullscreen) ToggleFullScreen(hWnd);
-      g_engine.m_bMirrorsActive = true;
-      g_engine.AddNotification(L"Mirror outputs active");
+      auto result = g_engine.TryActivateMirrors(hWnd);
+      if (result != Engine::MirrorCancelled) {
+        if (!fullscreen) ToggleFullScreen(hWnd);
+      }
+      if (result == Engine::MirrorActivated) {
+        g_engine.m_bMirrorsActive = true;
+        g_engine.AddNotification(L"Mirror outputs active");
+      }
     } else {
       g_engine.m_bMirrorsActive = false;
       if (fullscreen) ToggleFullScreen(hWnd);
@@ -1728,6 +1733,36 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     ToggleBorderlessWindow(hWnd);
     break;
   }
+
+  case WM_MW_FULLSCREEN:
+    ToggleFullScreen(hWnd);
+    return 0;
+
+  case WM_MW_WATERMARK:
+  {
+    // Watermark: borderless FS + always on top + clickthrough + low opacity
+    if (!g_engine.IsBorderlessFullscreen(hWnd))
+      ToggleBorderlessFullscreen(hWnd);
+    g_engine.m_bAlwaysOnTop = true;
+    g_engine.ToggleAlwaysOnTop(hWnd);
+    if (!clickthrough)
+      ToggleClickThrough(hWnd);
+    g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
+    g_engine.SetOpacity(hWnd);
+    return 0;
+  }
+
+  case WM_MW_BORDERLESS_FS:
+    ToggleBorderlessFullscreen(hWnd);
+    return 0;
+
+  case WM_MW_STRETCH:
+    ToggleStretch(hWnd);
+    return 0;
+
+  case WM_MW_MIRROR:
+    PostMessage(hWnd, WM_MW_TOGGLE_MIRROR_MODE, 0, 0);
+    return 0;
 
   default:
     return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
