@@ -1278,6 +1278,7 @@ public:
   void    SendPresetChangedInfoToMDropDX12Remote();
   void    SendPresetWaveInfoToMDropDX12Remote();
   void    SendSettingsInfoToMDropDX12Remote();
+  void    SendTrackInfoToMDropDX12Remote();
   void    SetWaveParamsFromMessage(std::wstring& message);
   void		ReadCustomMessages();
   void		LaunchSongTitleAnim(int supertextIndex);

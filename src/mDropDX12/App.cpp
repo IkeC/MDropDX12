@@ -2128,6 +2128,7 @@ void RenderFrame() {
       ShowSongInfoOverlay();
     }
 
+    g_engine.SendTrackInfoToMDropDX12Remote();
     mdropdx12.updated = false;
   }
 

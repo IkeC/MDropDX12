@@ -2462,6 +2462,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     SendMessageToMDropDX12Remote((L"OPACITY=" + std::to_wstring(display)).c_str());
     SendPresetChangedInfoToMDropDX12Remote();
     SendSettingsInfoToMDropDX12Remote();
+    SendTrackInfoToMDropDX12Remote();
     if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG) {
       PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
     }
@@ -2806,6 +2807,14 @@ void Engine::SendPresetChangedInfoToMDropDX12Remote() {
   std::wstring msg = L"PRESET=" + std::wstring(m_szCurrentPresetFile);
   SendMessageToMDropDX12Remote(msg.c_str(), true);
   SendPresetWaveInfoToMDropDX12Remote();
+}
+
+void Engine::SendTrackInfoToMDropDX12Remote() {
+  extern MDropDX12 mdropdx12;
+  std::wstring msg = L"TRACK|artist=" + mdropdx12.currentArtist
+                   + L"|title=" + mdropdx12.currentTitle
+                   + L"|album=" + mdropdx12.currentAlbum;
+  SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
 void Engine::SendPresetWaveInfoToMDropDX12Remote() {
