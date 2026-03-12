@@ -1396,6 +1396,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     case HK_ALWAYS_ON_TOP:
       g_engine.m_bAlwaysOnTop = !g_engine.m_bAlwaysOnTop;
       g_engine.ToggleAlwaysOnTop(hWnd);
+      g_engine.SaveSettingToINI(SET_ALWAYS_ON_TOP);
       g_engine.AddNotification(g_engine.m_bAlwaysOnTop
           ? L"Always On Top enabled" : L"Always On Top disabled");
       break;

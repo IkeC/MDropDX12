@@ -123,6 +123,9 @@ void Engine::SaveSettingToINI(int id) {
   case SET_AUDIO_SENSITIVITY: swprintf(val, L"%g", (double)m_fAudioSensitivity); break;
   case SET_BLEND_TIME:        swprintf(val, L"%f", m_fBlendTimeAuto); break;
   case SET_TIME_BETWEEN:      swprintf(val, L"%f", m_fTimeBetweenPresets); break;
+  case SET_SPRITES_MESSAGES:
+    swprintf(val, L"%d", m_nSpriteMessagesMode);
+    break;
   case SET_HARD_CUTS:
   case SET_PRESET_LOCK:
   case SET_SEQ_ORDER:
@@ -131,9 +134,6 @@ void Engine::SaveSettingToINI(int id) {
   case SET_SHOW_FPS:
   case SET_ALWAYS_ON_TOP:
   case SET_BORDERLESS:
-  case SET_SPRITES_MESSAGES:
-    swprintf(val, L"%d", m_nSpriteMessagesMode);
-    break;
   case SET_SPOUT: {
     bool bVal = false;
     switch (id) {
