@@ -2448,8 +2448,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         inp = WholeWordReplace(inp, "ang", "_st_ang");
         replaceAll(inp, "iTimeDelta", "xTimeDelta"); // protect from iTime replace
         replaceAll(inp, "iTime", "_c2.x");  // Direct ref to avoid local 'time' shadowing #define
-        // Rename remaining 'time' tokens (local vars/params) to avoid #define time _c2.x collision
-        inp = WholeWordReplace(inp, "time", "_st_time");
+        // Note: 'time' already renamed to 'time_conv' at line 2435, so no further rename needed
         // iResolution: Shadertoy vec3(width, height, pixelAspect=1.0)
         // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
         // Inline-expand so iResolution.z → float3(...).z → 1.0
@@ -3024,7 +3023,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     if (inComment) continue;
                     if (!trimmed.empty() || !prevLine.empty()) {
                         // GLSL 'const' at line start → HLSL 'static const'
-                        if (trimmed.substr(0, 6) == "const ")
+                        // But not 'const in' — that's a function parameter qualifier on a continuation line
+                        if (trimmed.substr(0, 6) == "const " && trimmed.substr(0, 9) != "const in ")
                             trimmed = "static " + trimmed;
                         clean << trimmed << "\n";
                     }
