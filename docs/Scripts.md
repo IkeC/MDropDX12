@@ -549,6 +549,27 @@ See the [Messages](#messages) section above for the full list of MSG parameters 
 | `CLEARTEXTS` | Remove all active text overlays |
 | `LINK=N` | Link Remote to preset index N |
 
+### Preset Lists and Directory (IPC)
+
+These commands manage saved preset lists and the active preset directory.
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `LOAD_LIST=<name>` | `LOAD_LIST_RESULT=OK\|<name>` or `ERROR\|...` | Load a saved preset list by name (without `.txt` extension) |
+| `CLEAR_LIST` | `CLEAR_LIST_RESULT=OK` | Clear the active preset list and revert to directory scanning |
+| `ENUM_LISTS` | `ENUM_LISTS_RESULT=name1\|name2\|...` | Enumerate all available saved preset lists |
+| `SET_DIR=<path>` | `SET_DIR_RESULT=OK\|<path>` or `ERROR\|...` | Change the preset directory to `<path>` |
+| `SET_DIR=<path>\|recursive` | `SET_DIR_RESULT=OK\|<path>` or `ERROR\|...` | Change directory with recursive subdirectory scanning enabled |
+
+**Examples:**
+
+```text
+ENUM_LISTS
+LOAD_LIST=favorites
+SET_DIR=C:\MyPresets\collection1|recursive
+CLEAR_LIST
+```
+
 ### Shader Import (IPC)
 
 These commands provide headless GLSL→HLSL shader import and conversion via the pipe. All are bidirectional — the visualizer sends a response back through the pipe. The `ShaderImportWindow` is created lazily if needed and does not need to be open.

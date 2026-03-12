@@ -2644,6 +2644,70 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     m_fFFTDecayGlobal = max(0.0f, min(1.0f, m_fFFTDecayGlobal));
     m_bFFTSmoothingActive = true;
   }
+  else if (wcsncmp(sMessage, L"LOAD_LIST=", 10) == 0) {
+    // Load a saved preset list by name.  Format: LOAD_LIST=<listname>
+    std::wstring listName(sMessage + 10);
+    wchar_t szDir[MAX_PATH];
+    GetPresetListDir(szDir, MAX_PATH);
+    wchar_t szPath[MAX_PATH];
+    swprintf(szPath, MAX_PATH, L"%s%s.txt", szDir, listName.c_str());
+    extern PipeServer g_pipeServer;
+    if (LoadPresetList(szPath)) {
+      WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), GetConfigIniFile());
+      g_pipeServer.Send(L"LOAD_LIST_RESULT=OK|" + listName);
+    } else {
+      g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|list not found: " + listName);
+    }
+  }
+  else if (wcsncmp(sMessage, L"CLEAR_LIST", 10) == 0) {
+    // Clear the active preset list and revert to directory scan
+    m_szActivePresetList.clear();
+    WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
+    m_bRecursivePresets = (m_nSubdirMode == 1);
+    UpdatePresetList(true, true);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"CLEAR_LIST_RESULT=OK");
+  }
+  else if (wcsncmp(sMessage, L"ENUM_LISTS", 10) == 0) {
+    // Enumerate available preset lists.  Returns pipe-separated list names.
+    std::vector<std::wstring> names;
+    EnumPresetLists(names);
+    std::wstring result = L"ENUM_LISTS_RESULT=";
+    for (size_t i = 0; i < names.size(); i++) {
+      if (i > 0) result += L"|";
+      result += names[i];
+    }
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(result);
+  }
+  else if (wcsncmp(sMessage, L"SET_DIR=", 8) == 0) {
+    // Change preset directory.  Format: SET_DIR=<path>[|recursive]
+    std::wstring value(sMessage + 8);
+    bool bRecursive = false;
+    size_t pipePos = value.find(L'|');
+    if (pipePos != std::wstring::npos) {
+      std::wstring opts = value.substr(pipePos + 1);
+      if (_wcsicmp(opts.c_str(), L"recursive") == 0)
+        bRecursive = true;
+      value = value.substr(0, pipePos);
+    }
+    // Ensure trailing backslash
+    if (!value.empty() && value.back() != L'\\')
+      value += L'\\';
+    wchar_t szNewDir[MAX_PATH];
+    lstrcpynW(szNewDir, value.c_str(), MAX_PATH);
+    extern PipeServer g_pipeServer;
+    if (GetFileAttributesW(szNewDir) != INVALID_FILE_ATTRIBUTES) {
+      m_szActivePresetList.clear();
+      ChangePresetDir(szNewDir, m_szPresetDir);
+      m_bRecursivePresets = bRecursive;
+      m_nCurrentPreset = -1;
+      UpdatePresetList(true, true);
+      g_pipeServer.Send(L"SET_DIR_RESULT=OK|" + value);
+    } else {
+      g_pipeServer.Send(L"SET_DIR_RESULT=ERROR|directory not found: " + value);
+    }
+  }
   else if (wcsncmp(sMessage, L"SHADER_IMPORT=", 14) == 0) {
     // Load JSON, convert GLSL→HLSL, apply.  Format: SHADER_IMPORT=<path>
     std::wstring filePath(sMessage + 14);

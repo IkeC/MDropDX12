@@ -1027,7 +1027,7 @@ void Engine::MyRenderUI(
             }
 
             wchar_t szFile[MAX_PATH];
-            swprintf(szFile, L"%s%s", m_szPresetDir, m_presets[m_nMashPreset[mash]].szFilename.c_str());
+            BuildPresetPath(m_nMashPreset[mash], szFile, MAX_PATH);
 
             m_pState->Import(szFile, GetTime(), m_pState, ApplyFlags);
 

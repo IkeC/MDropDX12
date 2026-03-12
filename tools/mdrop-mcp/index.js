@@ -390,6 +390,62 @@ server.tool(
   }
 );
 
+// Tool: Load preset list
+server.tool(
+  'mdrop_load_list',
+  'Load a saved preset list by name, or clear the active list to revert to directory scanning',
+  {
+    list_name: z.string().optional().describe('Name of the preset list to load (without .txt). Omit to clear the active list.'),
+  },
+  async ({ list_name }) => {
+    try {
+      if (!list_name) {
+        const response = await send('CLEAR_LIST', true);
+        return { content: [{ type: 'text', text: response || 'Cleared preset list' }] };
+      }
+      const response = await send(`LOAD_LIST=${list_name}`, true);
+      return { content: [{ type: 'text', text: response || `Loaded list: ${list_name}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Enumerate preset lists
+server.tool(
+  'mdrop_enum_lists',
+  'List all available saved preset lists',
+  {},
+  async () => {
+    try {
+      const response = await send('ENUM_LISTS', true);
+      return { content: [{ type: 'text', text: response || '(no lists found)' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Set preset directory
+server.tool(
+  'mdrop_set_dir',
+  'Change the preset directory and optionally enable recursive subdirectory scanning',
+  {
+    directory: z.string().describe('Full path to the preset directory'),
+    recursive: z.boolean().optional().describe('Enable recursive subdirectory scanning (default: false)'),
+  },
+  async ({ directory, recursive }) => {
+    try {
+      let cmd = `SET_DIR=${directory}`;
+      if (recursive) cmd += '|recursive';
+      const response = await send(cmd, true);
+      return { content: [{ type: 'text', text: response || `Set directory: ${directory}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
 // Tool: Raw command (escape hatch)
 server.tool(
   'mdrop_command',

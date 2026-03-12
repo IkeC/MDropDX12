@@ -197,6 +197,19 @@ void Engine::dumpmsg(wchar_t* s, int level) {
   DebugLogW(s, level);
 }
 
+// Returns the full path for a preset at index idx.
+// If szFilename is already absolute (e.g., loaded from a saved list), uses it as-is.
+// Otherwise prepends m_szPresetDir.
+void Engine::BuildPresetPath(int idx, wchar_t* szOut, int nMax) const {
+  const wchar_t* fn = m_presets[idx].szFilename.c_str();
+  // Check for absolute path (drive letter or UNC)
+  bool bAbsolute = (fn[0] && fn[1] == L':') || (fn[0] == L'\\' && fn[1] == L'\\');
+  if (bAbsolute)
+    lstrcpynW(szOut, fn, nMax);
+  else
+    swprintf(szOut, nMax, L"%s%s", m_szPresetDir, fn);
+}
+
 void Engine::PrevPreset(float fBlendTime) {
   if (m_RemotePresetLink) {
     PostMessageToMDropDX12Remote(WM_USER_PREV_PRESET);
@@ -211,8 +224,7 @@ void Engine::PrevPreset(float fBlendTime) {
       m_nCurrentPreset = m_nDirs;
 
     wchar_t szFile[MAX_PATH];
-    lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
-    lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
+    BuildPresetPath(m_nCurrentPreset, szFile, MAX_PATH);
 
     LoadPreset(szFile, fBlendTime);
   }
@@ -352,8 +364,7 @@ void Engine::LoadRandomPreset(float fBlendTime) {
   // m_pPresetAddr[m_nCurrentPreset] points to the preset file to load (w/o the path);
   // first prepend the path, then load section [preset00] within that file
   wchar_t szFile[MAX_PATH] = { 0 };
-  lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
-  lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
+  BuildPresetPath(m_nCurrentPreset, szFile, MAX_PATH);
 
   DLOG_INFO("LoadRandomPreset: idx=%d/%d file=%ls", m_nCurrentPreset, m_nPresets, m_presets[m_nCurrentPreset].szFilename.c_str());
 

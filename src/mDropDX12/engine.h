@@ -835,6 +835,7 @@ public:
   int m_presetHistoryPos;
   int m_presetHistoryBackFence;
   int m_presetHistoryFwdFence;
+  void BuildPresetPath(int idx, wchar_t* szOut, int nMax) const;  // absolute path from m_presets[idx]
   void PrevPreset(float fBlendTime);
   void NextPreset(float fBlendTime);  // if not retracing our former steps, it will choose a random one.
   void OnFinishedLoadingPreset();
