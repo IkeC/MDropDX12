@@ -939,6 +939,8 @@ public:
   int m_nAudioDeviceRequestType = 0; // 0: Undefined, 1: Capture (in), 2: Render (out)
   int m_nAudioDeviceActiveType = 2;   // 0: Unknown, 1: Capture (in), 2: Render (out)
   int m_nAudioDevicePreviousType = 2;
+  int m_nSMTCSessionMode = 0;                  // 0=Auto (Smart), 1=Manual
+  wchar_t m_szSMTCSelectedAppId[256] = {};      // persisted AUMID for manual mode
   float		m_fRandStart[4];
 
   // DIRECTX 9 (legacy — kept for compilation; always nullptr at runtime):

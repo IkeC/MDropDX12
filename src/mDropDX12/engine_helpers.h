@@ -619,6 +619,11 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_LOGOUTPUT_FILE   2202   // Checkbox: Log Output to File (About tab)
 #define IDC_MW_LOGOUTPUT_ODS    2203   // Checkbox: Log Output to Debug Messages (About tab)
 
+// SMTC Media Session controls (Settings System tab)
+#define IDC_MW_SMTC_SESSION_MODE   2210  // Combo: Auto (Smart) / Manual
+#define IDC_MW_SMTC_SESSION_LIST   2211  // Combo: enumerated sessions
+#define IDC_MW_SMTC_ACTIVE_LABEL   2212  // Static: "Active: Spotify (Playing)"
+
 // Button Board window controls (9000-9019)
 #define IDC_MW_BOARD_PIN          9000
 #define IDC_MW_BOARD_FONT_PLUS    9001

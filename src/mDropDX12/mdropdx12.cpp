@@ -1,6 +1,8 @@
 #include "mdropdx12.h"
 #include <locale>
 #include <codecvt>
+#include <algorithm>
+#include <cctype>
 
 MDropDX12::MDropDX12() {}
 
@@ -19,22 +21,183 @@ void MDropDX12::Init(wchar_t* exePath) {
   coverSpriteFilePath = spritesDir / "cover.png";
 }
 
+// --- SMTC session enumeration + smart selection ---
+
+/*static*/ std::wstring MDropDX12::GetFriendlyName(const std::wstring& appId) {
+  // Known AUMIDs → friendly names
+  static const struct { const wchar_t* sub; const wchar_t* name; } known[] = {
+    { L"Spotify",         L"Spotify" },
+    { L"foobar2000",      L"foobar2000" },
+    { L"AIMP",            L"AIMP" },
+    { L"Winamp",          L"Winamp" },
+    { L"MusicBee",        L"MusicBee" },
+    { L"TIDAL",           L"TIDAL" },
+    { L"iTunes",          L"iTunes" },
+    { L"MediaMonkey",     L"MediaMonkey" },
+    { L"Plexamp",         L"Plexamp" },
+    { L"ZuneMusic",       L"Groove Music" },
+    { L"VLC",             L"VLC" },
+    { L"mpv",             L"mpv" },
+    { L"chrome",          L"Chrome" },
+    { L"msedge",          L"Edge" },
+    { L"firefox",         L"Firefox" },
+    { L"opera",           L"Opera" },
+    { L"brave",           L"Brave" },
+  };
+  for (auto& k : known) {
+    // Case-insensitive substring search
+    std::wstring lower = appId;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    std::wstring sub = k.sub;
+    std::transform(sub.begin(), sub.end(), sub.begin(), ::towlower);
+    if (lower.find(sub) != std::wstring::npos) return k.name;
+  }
+  // UWP: extract portion before first '_'
+  auto upos = appId.find(L'_');
+  if (upos != std::wstring::npos) {
+    // Take last segment after '.' before '_' (e.g., "Microsoft.ZuneMusic" → "ZuneMusic")
+    auto dotpos = appId.rfind(L'.', upos);
+    if (dotpos != std::wstring::npos && dotpos + 1 < upos)
+      return appId.substr(dotpos + 1, upos - dotpos - 1);
+    return appId.substr(0, upos);
+  }
+  // Exe path: extract stem
+  auto bslash = appId.rfind(L'\\');
+  auto fslash = appId.rfind(L'/');
+  size_t start = 0;
+  if (bslash != std::wstring::npos) start = bslash + 1;
+  if (fslash != std::wstring::npos && fslash + 1 > start) start = fslash + 1;
+  std::wstring stem = appId.substr(start);
+  // Remove .exe extension
+  if (stem.size() > 4) {
+    std::wstring ext = stem.substr(stem.size() - 4);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    if (ext == L".exe") stem = stem.substr(0, stem.size() - 4);
+  }
+  if (stem.empty() || stem.size() > 40) {
+    // Fallback: truncated raw AUMID
+    if (appId.size() > 40) return appId.substr(0, 40) + L"...";
+    return appId;
+  }
+  return stem;
+}
+
+static SMTCSessionInfo BuildSessionInfo(const GlobalSystemMediaTransportControlsSession& session) {
+  SMTCSessionInfo info;
+  try { info.appId = session.SourceAppUserModelId().c_str(); } catch (...) { info.appId = L"(unknown)"; }
+  info.displayName = MDropDX12::GetFriendlyName(info.appId);
+  try {
+    auto pbInfo = session.GetPlaybackInfo();
+    auto pbStatus = pbInfo ? pbInfo.PlaybackStatus() : GlobalSystemMediaTransportControlsSessionPlaybackStatus::Closed;
+    info.playbackStatus = (int)(int32_t)pbStatus;
+  } catch (...) { info.playbackStatus = 0; }
+  return info;
+}
+
+// Music app detection: case-insensitive match against priority list
+static bool IsMusicApp(const std::wstring& appId) {
+  static const wchar_t* musicApps[] = {
+    L"spotify", L"foobar2000", L"aimp", L"winamp", L"musicbee",
+    L"tidal", L"itunes", L"mediamonkey", L"plexamp", L"zunemusic",
+    L"groove", L"vlc", L"mpv", L"musicapp",
+  };
+  std::wstring lower = appId;
+  std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+  for (auto& m : musicApps) {
+    if (lower.find(m) != std::wstring::npos) return true;
+  }
+  return false;
+}
+
+void MDropDX12::EnumerateSessions(const GlobalSystemMediaTransportControlsSessionManager& manager) {
+  std::vector<SMTCSessionInfo> list;
+  try {
+    auto sessions = manager.GetSessions();
+    uint32_t count = sessions.Size();
+    if (count == 0) {
+      auto current = manager.GetCurrentSession();
+      if (current)
+        list.push_back(BuildSessionInfo(current));
+    } else {
+      list.reserve(count);
+      for (uint32_t i = 0; i < count; i++)
+        list.push_back(BuildSessionInfo(sessions.GetAt(i)));
+    }
+  } catch (const winrt::hresult_error&) {
+    try { auto current = manager.GetCurrentSession(); if (current) list.push_back(BuildSessionInfo(current)); } catch (...) {}
+  } catch (const std::exception&) {
+    try { auto current = manager.GetCurrentSession(); if (current) list.push_back(BuildSessionInfo(current)); } catch (...) {}
+  } catch (...) {
+    try { auto current = manager.GetCurrentSession(); if (current) list.push_back(BuildSessionInfo(current)); } catch (...) {}
+  }
+  std::lock_guard<std::mutex> lock(m_smtcMutex);
+  m_smtcSessions.swap(list);
+}
+
+GlobalSystemMediaTransportControlsSession MDropDX12::SelectBestSession(const GlobalSystemMediaTransportControlsSessionManager& manager) {
+  // Use cached session info for smart selection, return session via GetCurrentSession()
+  // (GetSessions() may throw on MTA — avoid calling it again)
+  std::wstring chosenAppId;
+  {
+    std::lock_guard<std::mutex> lock(m_smtcMutex);
+
+    // Manual mode: find selected session by AUMID
+    if (m_nSMTCSessionMode == 1 && m_szSMTCSelectedAppId[0] != L'\0') {
+      for (auto& s : m_smtcSessions) {
+        if (s.appId == m_szSMTCSelectedAppId) {
+          chosenAppId = s.appId;
+          break;
+        }
+      }
+    }
+
+    // Auto mode
+    if (chosenAppId.empty() && !m_smtcSessions.empty()) {
+      const SMTCSessionInfo* bestPlayingMusic = nullptr;
+      const SMTCSessionInfo* bestPlaying = nullptr;
+      const SMTCSessionInfo* bestPausedMusic = nullptr;
+
+      for (auto& s : m_smtcSessions) {
+        bool music = IsMusicApp(s.appId);
+        if (s.playbackStatus == 4) { // Playing
+          if (music && !bestPlayingMusic) bestPlayingMusic = &s;
+          if (!bestPlaying) bestPlaying = &s;
+        } else if (s.playbackStatus == 5) { // Paused
+          if (music && !bestPausedMusic) bestPausedMusic = &s;
+        }
+      }
+
+      if (bestPlayingMusic) chosenAppId = bestPlayingMusic->appId;
+      else if (bestPlaying) chosenAppId = bestPlaying->appId;
+      else if (bestPausedMusic) chosenAppId = bestPausedMusic->appId;
+      else chosenAppId = m_smtcSessions[0].appId; // first available
+    }
+  }
+
+  // Always use GetCurrentSession() to get the actual session object (works on MTA).
+  // The chosenAppId is informational for the UI.
+  auto current = manager.GetCurrentSession();
+  if (current) {
+    m_szActiveSessionAppId = current.SourceAppUserModelId().c_str();
+  } else {
+    m_szActiveSessionAppId.clear();
+  }
+  return current;
+}
+
 void MDropDX12::PollMediaInfo() {
 
   if (!doPoll && !doPollExplicit) return;
 
   try {
-    // Get the current time
     auto current_time = std::chrono::steady_clock::now();
-
-    // Calculate the elapsed time in seconds
     auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
 
-    // Check if 2 seconds have passed or manual poll requested
     if (elapsed_seconds >= 2 || doPollExplicit) {
 
-      auto smtcManager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
-      auto currentSession = smtcManager.GetCurrentSession();
+      auto smtcManager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+      EnumerateSessions(smtcManager);
+      auto currentSession = SelectBestSession(smtcManager);
       updated = false;
       if (currentSession) {
         auto properties = currentSession.TryGetMediaPropertiesAsync().get();
@@ -62,7 +225,6 @@ void MDropDX12::PollMediaInfo() {
         }
       }
 
-      // Reset the start time to the current time
       start_time = current_time;
     }
   } catch (const std::exception& e) {

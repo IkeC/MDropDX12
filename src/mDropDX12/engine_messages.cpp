@@ -2776,6 +2776,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     if (newLevel > 4) newLevel = 4;
     m_LogLevel = newLevel;
     DebugLogSetLevel(newLevel);
+    if (mdropdx12) mdropdx12->logLevel = newLevel;
     WritePrivateProfileIntW(newLevel, L"LogLevel", GetConfigIniFile(), L"Milkwave");
     const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
     wchar_t buf[64];

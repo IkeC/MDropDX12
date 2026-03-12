@@ -415,6 +415,7 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDia
 }
 
 void SettingsWindow::DoDestroy() {
+  KillTimer(m_hWnd, 9998);
   m_pEngine->CleanupSettingsThemeBrushes();
 }
 
@@ -505,6 +506,33 @@ LRESULT SettingsWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lP
     if (wParam == 9999) {
       KillTimer(hWnd, 9999);
       SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      return 0;
+    }
+    if (wParam == 9998) {
+      // Refresh SMTC active session label
+      HWND hLabel = GetDlgItem(hWnd, IDC_MW_SMTC_ACTIVE_LABEL);
+      if (hLabel && m_pEngine->mdropdx12) {
+        std::wstring text = L"Active: ";
+        std::wstring appId = m_pEngine->mdropdx12->m_szActiveSessionAppId;
+        if (appId.empty()) {
+          text += L"(none)";
+        } else {
+          text += MDropDX12::GetFriendlyName(appId);
+          // Find playback status from cached sessions
+          std::lock_guard<std::mutex> lock(m_pEngine->mdropdx12->m_smtcMutex);
+          for (auto& s : m_pEngine->mdropdx12->m_smtcSessions) {
+            if (s.appId == appId) {
+              switch (s.playbackStatus) {
+                case 4: text += L" (Playing)"; break;
+                case 5: text += L" (Paused)"; break;
+                case 1: text += L" (Stopped)"; break;
+              }
+              break;
+            }
+          }
+        }
+        SetWindowTextW(hLabel, text.c_str());
+      }
       return 0;
     }
     break;
@@ -880,15 +908,61 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // Open Hotkeys window
-    if (id == IDC_MW_OPEN_HOTKEYS && code == BN_CLICKED) {
-      p->OpenHotkeysWindow();
+    // SMTC Session Mode combo
+    if (id == IDC_MW_SMTC_SESSION_MODE && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessageW((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel != CB_ERR) {
+        p->m_nSMTCSessionMode = sel;
+        if (p->mdropdx12) p->mdropdx12->m_nSMTCSessionMode = sel;
+        // Enable/disable session list combo
+        HWND hList = GetDlgItem(hWnd, IDC_MW_SMTC_SESSION_LIST);
+        if (hList) EnableWindow(hList, sel == 1);
+        WritePrivateProfileIntW(sel, L"SMTCSessionMode", p->GetConfigIniFile(), L"Milkwave");
+      }
       return 0;
     }
 
-    // Open MIDI window
-    if (id == IDC_MW_OPEN_MIDI && code == BN_CLICKED) {
-      p->OpenMidiWindow();
+    // SMTC Session List combo — populate on dropdown (fresh enumeration)
+    if (id == IDC_MW_SMTC_SESSION_LIST && code == CBN_DROPDOWN) {
+      HWND hCombo = (HWND)lParam;
+      SendMessageW(hCombo, CB_RESETCONTENT, 0, 0);
+      if (p->mdropdx12) {
+        // Do a fresh SMTC enumeration from the UI thread
+        try {
+          auto mgr = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+          p->mdropdx12->EnumerateSessions(mgr);
+        } catch (...) {}
+        std::lock_guard<std::mutex> lock(p->mdropdx12->m_smtcMutex);
+        for (size_t i = 0; i < p->mdropdx12->m_smtcSessions.size(); i++) {
+          auto& s = p->mdropdx12->m_smtcSessions[i];
+          const wchar_t* statusStr = L"";
+          switch (s.playbackStatus) {
+            case 4: statusStr = L" (Playing)"; break;
+            case 5: statusStr = L" (Paused)"; break;
+            case 3: statusStr = L" (Stopped)"; break;
+          }
+          std::wstring item = s.displayName + statusStr;
+          int idx = (int)SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)item.c_str());
+          SendMessageW(hCombo, CB_SETITEMDATA, idx, (LPARAM)i);
+        }
+      }
+      return 0;
+    }
+
+    // SMTC Session List combo — selection changed
+    if (id == IDC_MW_SMTC_SESSION_LIST && code == CBN_SELCHANGE) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel != CB_ERR && p->mdropdx12) {
+        int idx = (int)SendMessageW(hCombo, CB_GETITEMDATA, sel, 0);
+        std::lock_guard<std::mutex> lock(p->mdropdx12->m_smtcMutex);
+        if (idx >= 0 && idx < (int)p->mdropdx12->m_smtcSessions.size()) {
+          auto& appId = p->mdropdx12->m_smtcSessions[idx].appId;
+          wcsncpy_s(p->m_szSMTCSelectedAppId, appId.c_str(), _TRUNCATE);
+          wcsncpy_s(p->mdropdx12->m_szSMTCSelectedAppId, appId.c_str(), _TRUNCATE);
+          WritePrivateProfileStringW(L"Milkwave", L"SMTCSessionAppId", p->m_szSMTCSelectedAppId, p->GetConfigIniFile());
+        }
+      }
       return 0;
     }
 
@@ -930,6 +1004,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
         p->m_LogLevel = newLevel;
         DebugLogSetLevel(newLevel);
+        if (p->mdropdx12) p->mdropdx12->logLevel = newLevel;
         WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
         return 0;
       }
@@ -1364,13 +1439,45 @@ void SettingsWindow::DoBuildControls() {
   }
   y += lineH + gap + 8;
 
-  // Keyboard Shortcuts / MIDI
+  // Media Session
+  PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Media Session", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
   {
-    int btnW = MulDiv(100, lineH, 26);
-    int midiW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - midiW - 16, lineH, hFontBold, false));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"MIDI...", IDC_MW_OPEN_MIDI, x + rw - btnW - midiW - 8, y, midiW, lineH, hFont));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
+    int lblW = MulDiv(60, lineH, 26);
+    // Mode combo: Auto (Smart) / Manual
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Mode:", x, y, lblW, lineH, hFont, false));
+    {
+      HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+        x + lblW + 4, y, rw - lblW - 4, 100, hw, (HMENU)(INT_PTR)IDC_MW_SMTC_SESSION_MODE, GetModuleHandle(NULL), NULL);
+      if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Auto (Smart)");
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Manual");
+      SendMessageW(hCombo, CB_SETCURSEL, m_pEngine->m_nSMTCSessionMode, 0);
+      PAGE_CTRL(SP_SYSTEM, hCombo);
+    }
+    y += lineH + gap;
+
+    // Session list combo (enabled only in Manual mode)
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Session:", x, y, lblW, lineH, hFont, false));
+    {
+      HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+        WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+        x + lblW + 4, y, rw - lblW - 4, 200, hw, (HMENU)(INT_PTR)IDC_MW_SMTC_SESSION_LIST, GetModuleHandle(NULL), NULL);
+      if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+      EnableWindow(hCombo, m_pEngine->m_nSMTCSessionMode == 1);
+      PAGE_CTRL(SP_SYSTEM, hCombo);
+    }
+    y += lineH + gap;
+
+    // Active session label
+    {
+      HWND hLabel = CreateWindowExW(0, L"STATIC", L"Active: (none)",
+        WS_CHILD | SS_LEFT,
+        x, y, rw, lineH, hw, (HMENU)(INT_PTR)IDC_MW_SMTC_ACTIVE_LABEL, GetModuleHandle(NULL), NULL);
+      if (hLabel && hFont) SendMessage(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(SP_SYSTEM, hLabel);
+    }
   }
   y += lineH + gap + 8;
 
@@ -1758,6 +1865,9 @@ void SettingsWindow::DoBuildControls() {
   #undef GetConfigIniFile
 
   SelectInitialTab();
+
+  // Timer to refresh SMTC active session label every 2 seconds
+  SetTimer(hw, 9998, 2000, NULL);
 }
 
 void SettingsWindow::LayoutControls() {

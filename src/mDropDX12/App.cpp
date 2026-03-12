@@ -2870,6 +2870,8 @@ int StartThreads(HINSTANCE instance) {
     // early assignment so we can use logging
     // mdropdx12.Init() may only be called after the window is created due to threading issues
     mdropdx12.logLevel = g_engine.m_LogLevel;
+    mdropdx12.m_nSMTCSessionMode = g_engine.m_nSMTCSessionMode;
+    wcscpy_s(mdropdx12.m_szSMTCSelectedAppId, g_engine.m_szSMTCSelectedAppId);
     g_engine.mdropdx12 = &mdropdx12;
 
     mdropdx12.LogInfo(L"MDropDX12 initialized, LogLevel=" + std::to_wstring(mdropdx12.logLevel)

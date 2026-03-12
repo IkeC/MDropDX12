@@ -14,14 +14,23 @@
 // Win RT
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <filesystem>
+#include <vector>
+#include <mutex>
 
 using namespace winrt;
 using namespace winrt::Windows::Media::Control;
 using namespace std::chrono_literals;
+
+struct SMTCSessionInfo {
+  std::wstring appId;        // SourceAppUserModelId
+  std::wstring displayName;  // Human-friendly name
+  int playbackStatus;        // GlobalSystemMediaTransportControlsSessionPlaybackStatus enum
+};
 
 extern float mdropdx12_amp_left;
 extern float mdropdx12_amp_right;
@@ -47,6 +56,13 @@ public:
   bool coverUpdated = false;
   int logLevel = 1; // 0 = Off, 1 = Error, 2 = Info
 
+  // SMTC session selection
+  std::vector<SMTCSessionInfo> m_smtcSessions;  // cached session list (refreshed every poll)
+  std::mutex m_smtcMutex;                        // guards m_smtcSessions (render thread writes, UI thread reads)
+  std::wstring m_szActiveSessionAppId;           // AUMID of session actually being used
+  int m_nSMTCSessionMode = 0;                    // 0=Auto (Smart), 1=Manual
+  wchar_t m_szSMTCSelectedAppId[256] = {};       // persisted AUMID for manual mode
+
   MDropDX12();
   void Init(wchar_t* exePath);
   void LogInfo(const wchar_t* info);
@@ -56,4 +72,9 @@ public:
   void LogException(const wchar_t* context, const std::exception& e, bool showMessage);
   void PollMediaInfo();
   bool SaveThumbnailToFile(const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties& properties);
+
+  // SMTC session enumeration + selection
+  void EnumerateSessions(const GlobalSystemMediaTransportControlsSessionManager& manager);
+  GlobalSystemMediaTransportControlsSession SelectBestSession(const GlobalSystemMediaTransportControlsSessionManager& manager);
+  static std::wstring GetFriendlyName(const std::wstring& appId);
 };
