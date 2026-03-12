@@ -4,7 +4,7 @@ MDropDX12 can receive live video from a webcam, play a video file, or accept an 
 
 ## Quick Start
 
-1. Open **Settings** (F8) → **Displays** tab
+1. Open **Settings** (F8) -> **Displays** tab
 2. Under **Video Input**, set **Source** to one of:
    - **Webcam** — capture from a connected camera
    - **Video File** — play a video file from disk

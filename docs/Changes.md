@@ -6,13 +6,13 @@ Major milestone release. MDropDX12 2.0 marks the point where the engine has been
 
 Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milkwave](https://github.com/IkeC/Milkwave) — the inspiration, testing, feedback, and collaboration that made this project possible.
 
-### Shadertoy Import & GLSL→HLSL Converter
+### Shadertoy Import & GLSL->HLSL Converter
 
 - Full Shadertoy rendering pipeline with `.milk3` JSON preset format
-- Multi-pass rendering: Buffer A → Buffer B → Buffer C → Buffer D → Image, with Common shared code
+- Multi-pass rendering: Buffer A -> Buffer B -> Buffer C -> Buffer D -> Image, with Common shared code
 - SM5.0 (`ps_5_0`) shader compilation for all Shadertoy presets
 - FLOAT32 ping-pong feedback buffers for temporal accumulation effects
-- Comprehensive GLSL→HLSL converter handling matrices, structs, vector comparisons, array params, over-specified constructors, and more
+- Comprehensive GLSL->HLSL converter handling matrices, structs, vector comparisons, array params, over-specified constructors, and more
 - Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
 - Channel auto-detection: self-feedback, audio, noise textures, and JSON channel names
 - Shadertoy-compatible `iMouse`, `iDate`, `iResolution`, `iTime`, `iChannel0–3` uniforms
@@ -76,7 +76,7 @@ Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milk
 - Button Board with slot images, hotkeys, JSON layouts, drag-drop
 - Text Animations window with DX12 warped text, color/font pickers, animation profiles
 - Cover art sprite system with IPC signal
-- File association registration for .milk/.milk2 (Settings → About, no admin required)
+- File association registration for .milk/.milk2 (Settings -> About, no admin required)
 - Command-line preset loading (double-click .milk/.milk2/.milk3 in Explorer)
 - Welcome window with first-run setup options
 
@@ -142,7 +142,7 @@ Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milk
 - Added documentation for all ToolWindows including Controller, Error Display, Annotations, Workspace Layout, Video Effects, VFX Profiles, Button Board
 - Updated IPC protocol references from WM_COPYDATA to Named Pipes throughout docs
 - Added IPC commands reference section to Scripts.md
-- Fixed blur level count in Textures.md (6 → 3)
+- Fixed blur level count in Textures.md (6 -> 3)
 - Added presets.json to Install.md configuration files list
 
 ## v1.7.5 (2026-03-10)
@@ -221,7 +221,7 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 
 ## v1.7.2 (2026-03-09)
 
-### GLSL→HLSL Converter
+### GLSL->HLSL Converter
 
 - Unified non-square matrix conversion to use mul-swap strategy (same as square matrices) — fixes `M[i]` indexing returning wrong vector type/size
 - Fixed audio channel auto-detection overriding JSON `CHAN_FEEDBACK` assignment — `texelFetch(iChannel, ivec2(x,0))` false positive
@@ -485,10 +485,10 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 - Two-panel Shader Import UI: pass listbox (left) with shader editor (right)
 - Multi-pass support: add/remove Buffer A, Buffer B, Common, and Image passes
 - Per-pass channel input combos (ch0–ch3) with auto-detection from GLSL source
-- Convert & Apply button: GLSL→HLSL conversion + live preview in one click
+- Convert & Apply button: GLSL->HLSL conversion + live preview in one click
 - Save .milk3 button: export converted shaders as portable JSON presets
 - Automatic .milk3 name suggestion from Shadertoy project name
-- Comprehensive GLSL→HLSL converter handling matrices, structs, vector comparisons, array params, and more
+- Comprehensive GLSL->HLSL converter handling matrices, structs, vector comparisons, array params, and more
 - Error display with scrollable output showing conversion and compilation diagnostics
 
 ### Video Effects Window
@@ -509,7 +509,7 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 - Checkbox grid for selecting which tool windows to open and tile
 - Apply Layout button opens selected windows and arranges them in a grid
 - Reset to Defaults button restores default layout
-- Accessible from Welcome window and Settings → About tab
+- Accessible from Welcome window and Settings -> About tab
 
 ### ToolWindow System
 
@@ -557,7 +557,7 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 ### Native MIDI Input
 
 - Added native MIDI input system with 50 mapping slots (Button/Knob actions)
-- MIDI window accessible from Settings → System → MIDI button, runs on its own ToolWindow thread
+- MIDI window accessible from Settings -> System -> MIDI button, runs on its own ToolWindow thread
 - Device selector with Scan button, Enable checkbox, and configurable buffer delay
 - Learn mode: select a row, click Learn, then press a MIDI button or turn a knob to auto-assign
 - Button actions: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP, FULLSCREEN, STRETCH, SETTINGS, PRESETINFO, BLACKOUT, and all IPC commands
@@ -702,7 +702,7 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 
 ### Documentation & Project
 
-- Clarified project attribution and derivation chain (MilkDrop2 → BeatDrop → Milkwave → MDropDX12)
+- Clarified project attribution and derivation chain (MilkDrop2 -> BeatDrop -> Milkwave -> MDropDX12)
 - Rewrote bundled README.txt for MDropDX12 with correct maintainer and project info
 - Removed ambiguous first-person references inherited from upstream projects
 
@@ -759,7 +759,7 @@ Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.c
 
 ### Project
 
-- Refactored source directory: `vis_milk2/` → `mDropDX12/`, `Milkdrop2PcmVisualizer` → `App`
+- Refactored source directory: `vis_milk2/` -> `mDropDX12/`, `Milkdrop2PcmVisualizer` -> `App`
 - Unified license under CC-BY-NC 4.0 (third-party components retain original licenses)
 - Renamed project from MDropDX12Visualizer to MDropDX12
 

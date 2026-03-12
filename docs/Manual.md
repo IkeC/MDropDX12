@@ -405,7 +405,7 @@ Presets are `.milk` or `.milk2` files that define visual behavior through per-fr
 - Navigate into subdirectories; BACKSPACE to go up one level
 - **Drag and drop** a .milk or .milk2 file from Explorer onto the window
 - **Double-click** a .milk or .milk2 file in Explorer to load it directly (if MDropDX12 is already running, the preset is forwarded to the existing instance via Named Pipe)
-- **File association**: Use Settings → About → "Register .milk / .milk2 / .milk3" to enable double-click loading (no admin required)
+- **File association**: Use Settings -> About -> "Register .milk / .milk2 / .milk3" to enable double-click loading (no admin required)
 
 ### Preset Transitions
 
@@ -863,7 +863,7 @@ Note that this is an MDropDX12-specific change that does not port to other MilkD
 
 ## GLSL-to-HLSL Shader Conversion
 
-MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings → Tools tab**, or from the Welcome window on first run.
+MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings -> Tools tab**, or from the Welcome window on first run.
 
 ### Shadertoy Examples
 
@@ -881,14 +881,14 @@ Some Shadertoy shaders that can be converted to MDropDX12 presets:
 ### Shader Import Workflow
 
 1. **Load Import** — load a `.json` project file containing GLSL source for each pass
-2. **Convert** — runs the GLSL→HLSL converter pipeline
+2. **Convert** — runs the GLSL->HLSL converter pipeline
 3. **Apply** — compiles HLSL and activates the Shadertoy render path
 4. **Save** — exports as `.milk3` (Shadertoy preset format)
 5. **Save Import** — saves the project back to `.json` for later editing
 
 Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` format stores converted HLSL and is what the visualizer loads at runtime.
 
-The converter automatically handles: `mix`→`lerp`, `mod`→`fmod`, `atan(a,b)`→`atan2(a,b)`, matrix constructors, `texture()`→`tex2D()`, `vec`→`float`, type casts, and many other GLSL→HLSL differences. Multi-pass shaders (Buffer A, Buffer B, Common, Image) are supported.
+The converter automatically handles: `mix`->`lerp`, `mod`->`fmod`, `atan(a,b)`->`atan2(a,b)`, matrix constructors, `texture()`->`tex2D()`, `vec`->`float`, type casts, and many other GLSL->HLSL differences. Multi-pass shaders (Buffer A, Buffer B, Common, Image) are supported.
 
 ### Known GLSL-to-HLSL Limitations
 

@@ -496,7 +496,7 @@ Expected: 0 warnings, 0 errors
 **Step 2: Manual testing checklist**
 
 1. Launch app — verify errors show for 8s by default (trigger with a bad preset or shader error)
-2. Open Settings → About tab → click "Error Display Settings..."
+2. Open Settings -> About tab -> click "Error Display Settings..."
 3. Verify modal opens with default values populated
 4. Click "Test" in Normal section — verify error appears in correct corner with configured font/color
 5. Click "Test" in LOUD section — verify large centered pulsing text appears

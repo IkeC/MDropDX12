@@ -1,8 +1,8 @@
-# GLSL→HLSL Converter Debugging
+# GLSL->HLSL Converter Debugging
 
 ## Overview
 
-This document tracks debugging of the GLSL→HLSL converter (`engine_shader_import_ui.cpp`) for Shadertoy shader import. The converter translates Shadertoy GLSL into MilkDrop-compatible HLSL for the Shadertoy render pipeline (`.milk3` format).
+This document tracks debugging of the GLSL->HLSL converter (`engine_shader_import_ui.cpp`) for Shadertoy shader import. The converter translates Shadertoy GLSL into MilkDrop-compatible HLSL for the Shadertoy render pipeline (`.milk3` format).
 
 ## Fixed Issues
 
@@ -78,13 +78,13 @@ sampler2D sampler_audio : register(s10);
 
 **Root cause**: JSON channel mapping had `ch1:9` (CHAN_BUFFER_B) for Buffer A, but iChannel1 should be self-feedback (CHAN_FEEDBACK). The shader uses `textureLod(iChannel1, .../iResolution.xy, 0.0)` for screen-space reads — not `texelFetch` — so the old Pattern 2d validation didn't catch it.
 
-**Fix**: New Pattern 2d in `AnalyzeChannels()` detects `textureLod(iChannelN, .../iResolution)` as screen-space self-reads for Buffer A. Uses balanced parenthesis matching to extract the full `textureLod()` call text. Added `textureLod` to whitespace normalization. Renumbered old Pattern 2d → 2e.
+**Fix**: New Pattern 2d in `AnalyzeChannels()` detects `textureLod(iChannelN, .../iResolution)` as screen-space self-reads for Buffer A. Uses balanced parenthesis matching to extract the full `textureLod()` call text. Added `textureLod` to whitespace normalization. Renumbered old Pattern 2d -> 2e.
 
 ### 8. Hardcoded resolution constants (FIXED)
 
 **Symptom**: DoF blur in selfie Buffer B was 33% too wide at non-720p resolutions due to `texture(iChannel0, q + off/vec2(1280.0,720.0))`.
 
-**Fix**: Converter auto-replaces common hardcoded resolutions (`float2(1280.0,720.0)`, `float2(1920.0,1080.0)`, etc.) with `texsize.xy`. Runs after `vec2`→`float2` replacement, so matches HLSL form.
+**Fix**: Converter auto-replaces common hardcoded resolutions (`float2(1280.0,720.0)`, `float2(1920.0,1080.0)`, etc.) with `texsize.xy`. Runs after `vec2`->`float2` replacement, so matches HLSL form.
 
 ### 9. Incomplete block warnings (ADDED)
 
@@ -94,7 +94,7 @@ Post-conversion validation counts braces, parentheses, and `#if`/`#endif` blocks
 
 **Symptom**: Shader fails to compile with `error X3000: unrecognized identifier 'precision'`. Renders as visible triangles (triangle strip seam of fallback textured quad PSO).
 
-**Root cause**: Phase 1 stripped qualifier words (`highp`, `mediump`, `lowp`) but not the `precision` keyword itself. `precision highp float;` → (strip `highp`) → `precision float;` which is invalid HLSL.
+**Root cause**: Phase 1 stripped qualifier words (`highp`, `mediump`, `lowp`) but not the `precision` keyword itself. `precision highp float;` -> (strip `highp`) -> `precision float;` which is invalid HLSL.
 
 **Fix**: After stripping qualifier words, also strip the remaining `precision float;\n` and `precision int;\n` lines.
 
@@ -138,7 +138,7 @@ Two sampler name tables exist:
 - `kChannelSamplers[]` — MilkDrop noise names (cubically interpolated, centered-range)
 - `kChannelSamplers_ST[]` — Shadertoy-compatible noise names (`_st` suffix: uniform white noise, full [0,255], deterministic seed)
 
-Shadertoy imports use `kChannelSamplers_ST[]` for iChannel→sampler mapping.
+Shadertoy imports use `kChannelSamplers_ST[]` for iChannel->sampler mapping.
 
 **Defaults**: ShaderPass initializes to `{NOISE_LQ, NOISE_LQ, NOISE_MQ, NOISE_HQ}`.
 When adding Buffer A, only **Image ch0** is set to CHAN_FEEDBACK (reads Buffer A output).
@@ -148,14 +148,14 @@ Buffer A ch0 stays at CHAN_NOISE_LQ (most Shadertoy shaders use noise, not self-
 
 **Elevated shader example:**
 
-- **Buffer A**: iChannel0 → `sampler_noise_lq_st` (256x256 noise for terrain generation)
-- **Image**: iChannel0 → `sampler_feedback` (reads Buffer A output for motion blur)
+- **Buffer A**: iChannel0 -> `sampler_noise_lq_st` (256x256 noise for terrain generation)
+- **Image**: iChannel0 -> `sampler_feedback` (reads Buffer A output for motion blur)
 
 **Selfie shader example (multi-pass):**
 
-- **Buffer A**: iChannel0 → `sampler_noisevol_lq_st` (3D noise), iChannel1 → `sampler_feedback` (self-feedback for temporal accumulation + camera reprojection), iChannel2/3 → `sampler_noisevol_lq_st` (3D noise)
-- **Buffer B**: iChannel0 → `sampler_feedback` (reads Buffer A output for DoF blur)
-- **Image**: iChannel0 → `sampler_feedback` (reads Buffer A), iChannel1 → `sampler_bufferB` (reads Buffer B)
+- **Buffer A**: iChannel0 -> `sampler_noisevol_lq_st` (3D noise), iChannel1 -> `sampler_feedback` (self-feedback for temporal accumulation + camera reprojection), iChannel2/3 -> `sampler_noisevol_lq_st` (3D noise)
+- **Buffer B**: iChannel0 -> `sampler_feedback` (reads Buffer A output for DoF blur)
+- **Image**: iChannel0 -> `sampler_feedback` (reads Buffer A), iChannel1 -> `sampler_bufferB` (reads Buffer B)
 
 **Important:** Buffer A iChannel1 must be `sampler_feedback` (self), NOT `sampler_bufferB`. The shader stores camera matrices in pixel row 0 and reads them back via `textureLod(iChannel1, vec2(x,0.5)/iResolution.xy, 0.0)` for temporal reprojection. Pattern 2d detects this `/iResolution` pattern as screen-space self-reads.
 
@@ -175,7 +175,7 @@ float4 texelFetch_conv(sampler2D s, int2 c, int l) {
 }
 ```
 
-Specialization runs AFTER iChannel→sampler replacement and whitespace normalization.
+Specialization runs AFTER iChannel->sampler replacement and whitespace normalization.
 Both regular and `_st` noise sampler names are specialized:
 
 ```cpp
@@ -200,17 +200,17 @@ s15     : sampler_image
 ## Conversion Pipeline Order
 
 1. Comment stripping and line ending normalization
-2. **Phase 1**: Global text replacements (GLSL→HLSL types, functions, uniforms)
-   - `texelFetch(` → `texelFetch_conv(` (then normalize whitespace, then specialize for noise)
-   - iChannel0-3 → configured sampler names from ShaderPass::channels[]
-   - Matrix type replacements (mat2→float2x2, etc.)
+2. **Phase 1**: Global text replacements (GLSL->HLSL types, functions, uniforms)
+   - `texelFetch(` -> `texelFetch_conv(` (then normalize whitespace, then specialize for noise)
+   - iChannel0-3 -> configured sampler names from ShaderPass::channels[]
+   - Matrix type replacements (mat2->float2x2, etc.)
 3. **Phase 1b**: Matrix variable/function collection, mul-swap for square matrices
 4. **Phase 2**: Extract `mainImage()` body, build `shader_body` wrapper with helpers
 5. **Phase 3**: Per-line processing (FixMatrixMultiplication, FixFloatNumberOfArguments, FixAtan)
 6. Backslash continuation joining
 7. Post-processing:
    - Vector l-value fix (`_setComp` helpers)
-   - Over-specified constructors (`float3(expr,expr,expr)` → `((float3)(expr))`)
+   - Over-specified constructors (`float3(expr,expr,expr)` -> `((float3)(expr))`)
    - Inout struct parameter transformation
 
 ## Diagnostic Files
@@ -232,9 +232,9 @@ Per-pass diagnostic dumps written to `m_szBaseDir` (same dir as exe / debug.log)
 
 ```text
 Frame N:
-  Buffer A: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackA[write]   (FLOAT32)
-  Buffer B: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackB[write]   (FLOAT32)
-  Image:    reads FeedbackA[write] + FeedbackB[write] → writes backbuffer        (UNORM)
+  Buffer A: reads FeedbackA[read] + FeedbackB[read] -> writes FeedbackA[write]   (FLOAT32)
+  Buffer B: reads FeedbackA[read] + FeedbackB[read] -> writes FeedbackB[write]   (FLOAT32)
+  Image:    reads FeedbackA[write] + FeedbackB[write] -> writes backbuffer        (UNORM)
   Swap feedback indices (m_nFeedbackIdx ^= 1)
 ```
 
@@ -269,11 +269,11 @@ Generated in `engine_textures.cpp`, registered as built-in in `kBuiltinNoise[]` 
 
 | File | Role |
 | --- | --- |
-| `src/mDropDX12/engine_shader_import_ui.cpp` | GLSL→HLSL converter, UI, save/load |
+| `src/mDropDX12/engine_shader_import_ui.cpp` | GLSL->HLSL converter, UI, save/load |
 | `src/mDropDX12/tool_window.h` | ShaderPass struct, ShaderEditorWindow, ShaderImportWindow |
 | `src/mDropDX12/engine_helpers.h` | Control IDs for shader import/editor UI |
 | `src/mDropDX12/embedded_shaders.h` | Sampler declarations with register assignments |
 | `src/mDropDX12/engine_textures.cpp` | Noise texture generation (including `_st` variants) |
 | `src/mDropDX12/engine_shaders.cpp` | Shader compilation, texture binding, `kBuiltinNoise[]` |
 | `src/mDropDX12/milkdropfs.cpp` | Shadertoy render pipeline (`RenderFrameShadertoy`) |
-| `docs/GLSL_importing.md` | General GLSL→HLSL conversion reference |
+| `docs/GLSL_importing.md` | General GLSL->HLSL conversion reference |

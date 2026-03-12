@@ -120,20 +120,20 @@ Delete the folder. No registry entries or system files are affected.
 
 ### Black screen / no visuals
 
-- Ensure your GPU supports DirectX 12. Check with `dxdiag` (Start → type "dxdiag").
+- Ensure your GPU supports DirectX 12. Check with `dxdiag` (Start -> type "dxdiag").
 - Update your graphics drivers to the latest version.
 - Try pressing **SPACE** to load a different preset — some presets may fail to compile on certain GPUs.
 
 ### No audio response
 
 - MDropDX12 captures audio from your default output device. Make sure audio is actually playing.
-- Open Settings (F8) → General tab and verify the correct audio device is selected.
+- Open Settings (F8) -> General tab and verify the correct audio device is selected.
 - If using a virtual audio cable or routing software, ensure audio is passing through the default device.
 
 ### GPU timeout / TDR crash
 
 - MDropDX12 includes TDR recovery and will automatically restart the GPU device.
-- If crashes persist, open Settings (F8) → System tab and enable "Skip Heavy Presets" or reduce the shader timeout.
+- If crashes persist, open Settings (F8) -> System tab and enable "Skip Heavy Presets" or reduce the shader timeout.
 - Some complex presets may exceed your GPU's capabilities — press SPACE to skip them.
 
 ### Visualizer won't start
@@ -146,7 +146,7 @@ Delete the folder. No registry entries or system files are affected.
 ### Presets not showing up
 
 - Presets must be `.milk`, `.milk2`, or `.milk3` files placed inside `resources/presets/` or a subdirectory.
-- Open Settings (F8) → Files tab to verify the preset directory path.
+- Open Settings (F8) -> Files tab to verify the preset directory path.
 - Check the Settings preset browser to confirm presets are listed.
 
 ## Support

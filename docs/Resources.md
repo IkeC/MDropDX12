@@ -50,7 +50,7 @@ Presets that use texture mixing (filenames containing "texture mix", "random tex
 
 MDropDX12 supports:
 - **JPEG**, **PNG**, **BMP**, **TGA**, **DDS** texture formats
-- Fallback texture search paths (configurable in Settings → Files)
+- Fallback texture search paths (configurable in Settings -> Files)
 - A dedicated **Random Textures Directory** for texture-mixing presets
 - Drag-and-drop: drop texture files or folders directly onto the visualizer window
 

@@ -253,7 +253,7 @@ MDropDX12 has a leveled logging system controlled via `settings.ini`:
 | `LogLevel`  | 0–4    | 3       | 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose     |
 | `LogOutput` | 1–3    | 3       | 1=File only, 2=OutputDebugString only, 3=Both  |
 
-These can also be changed at runtime via **Settings → About** tab (log level radio buttons and output checkboxes).
+These can also be changed at runtime via **Settings -> About** tab (log level radio buttons and output checkboxes).
 
 Log output goes to `debug.log` in the base directory (rotated to `debug.prev.log` on startup).
 
@@ -273,8 +273,8 @@ When `LogLevel=4` (Verbose), diagnostic dump files are written to the base direc
 | ---- | -------- |
 | `diag_comp_shader.txt` | Assembled comp/Image shader HLSL sent to compiler |
 | `diag_warp_shader.txt` | Assembled warp shader HLSL sent to compiler |
-| `diag_converter_image.txt` | GLSL→HLSL converter output for Image pass |
-| `diag_converter_bufferA.txt` | GLSL→HLSL converter output for Buffer A pass |
+| `diag_converter_image.txt` | GLSL->HLSL converter output for Image pass |
+| `diag_converter_bufferA.txt` | GLSL->HLSL converter output for Buffer A pass |
 | `diag_cacheparams.txt` | Shader constant/sampler binding diagnostics |
 | `diag_bindings.txt` | Resource binding slot assignments |
 
@@ -287,14 +287,14 @@ When debugging Shadertoy imports, the project name from the loaded `.json` file 
 The Shader Import window (opened from Settings) converts Shadertoy GLSL to HLSL for live preview:
 
 1. **Load Import** — loads a `.json` project file containing GLSL source for each pass
-2. **Convert** — runs the GLSL→HLSL converter pipeline
+2. **Convert** — runs the GLSL->HLSL converter pipeline
 3. **Apply** — compiles HLSL and activates the Shadertoy render path
 4. **Save** — exports as `.milk3` (Shadertoy preset) or `.milk` (legacy)
 5. **Save Import** — saves the project back to `.json` for later editing
 
 Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` preset format stores converted HLSL and is what the visualizer loads at runtime.
 
-See `docs/GLSL_importing.md` for details on the GLSL→HLSL conversion pipeline.
+See `docs/GLSL_importing.md` for details on the GLSL->HLSL conversion pipeline.
 
 ## Coding Patterns
 
@@ -314,7 +314,7 @@ Examples: `engine_midi.cpp` (MIDI persistence, device lifecycle, knob/button dis
 | DX12 rendering, shader passes | `milkdropfs.cpp` |
 | Preset loading/parsing/blending | `engine_presets.cpp` |
 | Shader compilation, text assembly | `engine_shaders.cpp` |
-| GLSL→HLSL conversion | `engine_shader_import_ui.cpp` |
+| GLSL->HLSL conversion | `engine_shader_import_ui.cpp` |
 | Settings persistence, theme, user defaults, folder picker | `engine_config.cpp` |
 | Sprite lifecycle, INI I/O | `engine_sprites.cpp` |
 | MIDI persistence, device lifecycle, dispatch | `engine_midi.cpp` |
@@ -402,9 +402,9 @@ MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with
 
 Two render targets (VS[0] and VS[1]) ping-pong each frame:
 
-1. **Warp pass**: Reads VS[0] → applies warp mesh distortion → writes to VS[1]
+1. **Warp pass**: Reads VS[0] -> applies warp mesh distortion -> writes to VS[1]
 2. **Shape/wave injection**: Custom shapes and waves drawn directly into VS[1]
-3. **Comp pass**: Reads VS[1] → applies comp mesh + comp shader → writes to backbuffer
+3. **Comp pass**: Reads VS[1] -> applies comp mesh + comp shader -> writes to backbuffer
 
 ### Binding Layout
 

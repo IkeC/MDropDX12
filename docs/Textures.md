@@ -47,7 +47,7 @@ The sibling `textures\` folder (priority 3) makes this work automatically — pr
 
 ### Configuring Texture Paths
 
-Open **Settings** (F8) → **Files** tab:
+Open **Settings** (F8) -> **Files** tab:
 
 - **Content Base Path** — A directory to search for textures (and other content). Useful if you keep all your textures in one central folder.
 - **Fallback Paths** — Additional directories to search. Add as many as you need.
@@ -106,7 +106,7 @@ The number after `rand` (00–15) identifies a slot. Each slot picks a random fi
 
 ### Random Texture Search Order
 
-1. **Random Textures Directory** (if configured in Settings → Files)
+1. **Random Textures Directory** (if configured in Settings -> Files)
 2. **Content Base Path** (if configured)
 3. **Fallback Paths**
 4. **Built-in textures directory** (`<MDropDX12>\textures\`)
@@ -117,7 +117,7 @@ Random textures are re-scanned each time a preset loads, so adding files to your
 
 When a texture file can't be found in any search path, MDropDX12 substitutes a fallback texture instead of crashing or showing a black screen.
 
-Configure the fallback style in **Settings** (F8) → **Files** tab → **Fallback Texture for Missing Textures**:
+Configure the fallback style in **Settings** (F8) -> **Files** tab -> **Fallback Texture for Missing Textures**:
 
 | Style | Name | Description |
 |-------|------|-------------|
@@ -162,7 +162,7 @@ When you load a preset that needs many textures, older textures from previous pr
 
 ## Settings Reference
 
-All texture settings are in `settings.ini`. Configure via **Settings** (F8) → **Files** tab.
+All texture settings are in `settings.ini`. Configure via **Settings** (F8) -> **Files** tab.
 
 | Setting | INI Section | INI Key | Description |
 |---------|-------------|---------|-------------|

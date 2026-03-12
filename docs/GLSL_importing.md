@@ -64,13 +64,13 @@ MDropDX12 automatically detects the correct iChannel mappings when you import sh
 
 **Pattern priority chain (AnalyzeChannels):**
 
-1. **Pattern 1 — Audio**: `texelFetch(iChannelN, ivec2(...))` with small integer coords → `CHAN_AUDIO`
-2. **Pattern 2 — 3D texture**: `iChannelN` used with `vec3`/`float3` coordinates → `CHAN_NOISEVOL_LQ`
-3. **Pattern 2b — sampler3D functions**: `iChannelN` used in `tex3D`, `tex3Dlod`, `fbm1` etc. → `CHAN_NOISEVOL_LQ`
-4. **Pattern 2c — Buffer B cross-ref**: Buffer A referencing Buffer B or vice versa → `CHAN_BUFFER_B`
+1. **Pattern 1 — Audio**: `texelFetch(iChannelN, ivec2(...))` with small integer coords -> `CHAN_AUDIO`
+2. **Pattern 2 — 3D texture**: `iChannelN` used with `vec3`/`float3` coordinates -> `CHAN_NOISEVOL_LQ`
+3. **Pattern 2b — sampler3D functions**: `iChannelN` used in `tex3D`, `tex3Dlod`, `fbm1` etc. -> `CHAN_NOISEVOL_LQ`
+4. **Pattern 2c — Buffer B cross-ref**: Buffer A referencing Buffer B or vice versa -> `CHAN_BUFFER_B`
 5. **Pattern 2d — Screen-space self-feedback**: Buffer A channel uses `textureLod(iChannelN, .../iResolution)` — reading at screen-space coordinates is strong evidence of self-feedback (temporal accumulation, reprojection, stored camera matrices). Overrides any JSON value.
-6. **Pattern 2e — JSON feedback validation**: `CHAN_FEEDBACK` in Buffer A without matching `texelFetch(iChannelN)` or screen-space `textureLod` → downgraded to noise default
-7. **Pattern 3 — Self-feedback guess** (skipped for JSON): heuristic based on `textureLod`/`texture` usage → `CHAN_FEEDBACK`
+6. **Pattern 2e — JSON feedback validation**: `CHAN_FEEDBACK` in Buffer A without matching `texelFetch(iChannelN)` or screen-space `textureLod` -> downgraded to noise default
+7. **Pattern 3 — Self-feedback guess** (skipped for JSON): heuristic based on `textureLod`/`texture` usage -> `CHAN_FEEDBACK`
 
 For most Shadertoy shaders, you can just paste the GLSL for each tab and the channels will be configured correctly. If the auto-detection gets it wrong, you can always override by selecting a different channel in the combo box.
 
@@ -115,7 +115,7 @@ Your Shadertoy GLSL
 
 ### 1. Matrices — The Hardest Problem
 
-GLSL and HLSL store matrices in opposite order. GLSL is column-major, HLSL is row-major. A naive find-and-replace of `mat3(` → `float3x3(` gives you a **transposed** matrix — every multiplication comes out wrong.
+GLSL and HLSL store matrices in opposite order. GLSL is column-major, HLSL is row-major. A naive find-and-replace of `mat3(` -> `float3x3(` gives you a **transposed** matrix — every multiplication comes out wrong.
 
 The converter uses two different strategies depending on the matrix shape:
 
@@ -144,7 +144,7 @@ Most of these are straightforward find-and-replace:
 | GLSL | HLSL | Notes |
 |------|------|-------|
 | `vec2/3/4` | `float2/3/4` | |
-| `ivec2/3/4` | `int2/3/4` | Replaced **before** `vec` → `float` so `ivec2` doesn't become `ifloat2` |
+| `ivec2/3/4` | `int2/3/4` | Replaced **before** `vec` -> `float` so `ivec2` doesn't become `ifloat2` |
 | `mat2/3/4` | `float2x2/3x3/4x4` | See matrix section above |
 | `fract()` | `frac()` | |
 | `mix()` | `lerp()` | |
@@ -172,7 +172,7 @@ Most of these are straightforward find-and-replace:
 
 MDropDX12 uses `#define` macros for audio data like `bass`, `mid`, `treb`, and `vol`. If your shader has a variable called `mid` (super common — think "midpoint"), it gets macro-expanded into a constant buffer swizzle and everything breaks.
 
-The converter auto-renames these: `mid` → `_st_mid`, `bass` → `_st_bass`, etc. Same deal with `time` → `time_conv` since `time` is already a MDropDX12 uniform.
+The converter auto-renames these: `mid` -> `_st_mid`, `bass` -> `_st_bass`, etc. Same deal with `time` -> `time_conv` since `time` is already a MDropDX12 uniform.
 
 ### 5. Vector Component Writing (X3500 Error)
 
@@ -254,9 +254,9 @@ Shadertoy imports run on a completely separate render path from regular MilkDrop
 
 ```
 Frame N:
-  Buffer A: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackA[write]   (FLOAT32)
-  Buffer B: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackB[write]   (FLOAT32)
-  Image:    reads FeedbackA[write] + FeedbackB[write] → writes backbuffer        (UNORM)
+  Buffer A: reads FeedbackA[read] + FeedbackB[read] -> writes FeedbackA[write]   (FLOAT32)
+  Buffer B: reads FeedbackA[read] + FeedbackB[read] -> writes FeedbackB[write]   (FLOAT32)
+  Image:    reads FeedbackA[write] + FeedbackB[write] -> writes backbuffer        (UNORM)
   Swap feedback indices (m_nFeedbackIdx ^= 1)
 ```
 
@@ -270,7 +270,7 @@ All passes use Shader Model 5.0 (`ps_5_0`) — the full DirectX 11+ feature set,
 
 ### Common Tab
 
-The Common tab contains shared GLSL code (helper functions, constants, struct definitions) that gets prepended to all other passes **before** GLSL→HLSL conversion. It's not a render pass — it just holds shared code. Stored as the `common` key in `.milk3` JSON.
+The Common tab contains shared GLSL code (helper functions, constants, struct definitions) that gets prepended to all other passes **before** GLSL->HLSL conversion. It's not a render pass — it just holds shared code. Stored as the `common` key in `.milk3` JSON.
 
 ---
 
@@ -282,7 +282,7 @@ The Common tab contains shared GLSL code (helper functions, constants, struct de
 | Cubemap inputs | Not supported |
 | `iDate` | Not mapped |
 | `iTimeDelta` | Not mapped |
-| `iChannelResolution` | Partial — `textureSize()` → `_texSize()` returns render target size (2D) or hardcoded 32 (3D) |
+| `iChannelResolution` | Partial — `textureSize()` -> `_texSize()` returns render target size (2D) or hardcoded 32 (3D) |
 | Keyboard input | Not supported |
 | Video/webcam as iChannel | Not connected to Shadertoy pipeline |
 | `precision` declarations | Stripped automatically (`precision highp float;` etc.) |
