@@ -720,11 +720,15 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
   }
 
   if (id == IDC_MW_HOTKEYS_RESET && code == BN_CLICKED) {
-    p->ResetHotkeyDefaults();
-    SaveAndReRegister(p);
-    RefreshHotkeyList(m_hList, p);
-    ListView_SetItemState(m_hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    p->AddNotification(L"Built-in hotkeys reset to defaults (user entries kept)");
+    int result = MessageBoxW(hWnd, L"Reset all built-in hotkeys to their default bindings?\n\nUser-added entries will be kept.",
+                             L"Reset Hotkeys", MB_YESNO | MB_ICONQUESTION);
+    if (result == IDYES) {
+      p->ResetHotkeyDefaults();
+      SaveAndReRegister(p);
+      RefreshHotkeyList(m_hList, p);
+      ListView_SetItemState(m_hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      p->AddNotification(L"Built-in hotkeys reset to defaults (user entries kept)");
+    }
     return 0;
   }
 

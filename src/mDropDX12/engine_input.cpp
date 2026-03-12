@@ -1024,19 +1024,6 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
     switch (wParam) {
     case VK_F2:
-      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
-          (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
-        // Ctrl+Shift+F2: reset all hotkeys to defaults
-        ResetHotkeyDefaults();
-        SaveHotkeySettings();
-        GenerateHelpText();
-        g_nHelpLineCount = m_nHelpLineCount;
-        HWND hRender = GetPluginWindow();
-        if (hRender)
-          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
-        AddNotification(L"All hotkeys reset to defaults");
-        return 0;
-      }
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
         // Ctrl+F2: kill switch — disable all display outputs + reset open windows
         EnqueueRenderCmd(RenderCmd::DisableAllOutputs);

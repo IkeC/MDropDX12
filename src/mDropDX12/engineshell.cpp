@@ -909,9 +909,9 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   m_start_fullscreen = 0;
   m_start_desktop = 0;
   m_fake_fullscreen_mode = 0;
-  m_max_fps_fs = 144;
-  m_max_fps_dm = 144;
-  m_max_fps_w = 144;
+  m_max_fps_fs = 60;
+  m_max_fps_dm = 60;
+  m_max_fps_w = 60;
   m_show_press_f1_msg = 1;
   m_allow_page_tearing_w = 1;
   m_allow_page_tearing_fs = 0;
@@ -1182,11 +1182,7 @@ void EngineShell::ReadConfig() {
   int old_ver = GetPrivateProfileIntW(L"Settings", L"version", -1, m_szConfigIniFile);
   int old_subver = GetPrivateProfileIntW(L"Settings", L"subversion", -1, m_szConfigIniFile);
 
-  // nuke old settings from prev. version:
-  if (old_ver < INT_VERSION)
-    return;
-  else if (old_subver < INT_SUBVERSION)
-    return;
+  // Legacy MilkDrop version guard removed — these settings are always valid in MDropDX12
 
   // m_multisample_* removed in DX12 migration (MSAA configured via PSO instead)
 
