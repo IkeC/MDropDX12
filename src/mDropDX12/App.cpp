@@ -214,6 +214,8 @@ static bool fullscreen = false;
 static bool stretch = false;
 static bool borderless = false;
 static bool clickthrough = false;
+static bool watermarkMode = false;
+static float watermarkPrevOpacity = 1.0f;
 static RECT lastRect = { 0 };
 
 static HMODULE module = nullptr;
@@ -1746,15 +1748,30 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_MW_WATERMARK:
   {
-    // Watermark: borderless FS + always on top + clickthrough + low opacity
-    if (!g_engine.IsBorderlessFullscreen(hWnd))
-      ToggleBorderlessFullscreen(hWnd);
-    g_engine.m_bAlwaysOnTop = true;
-    g_engine.ToggleAlwaysOnTop(hWnd);
-    if (!clickthrough)
-      ToggleClickThrough(hWnd);
-    g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
-    g_engine.SetOpacity(hWnd);
+    if (!watermarkMode) {
+      // Enter watermark: borderless FS + always on top + clickthrough + low opacity
+      watermarkPrevOpacity = g_engine.fOpacity;
+      if (!g_engine.IsBorderlessFullscreen(hWnd))
+        ToggleBorderlessFullscreen(hWnd);
+      g_engine.m_bAlwaysOnTop = true;
+      g_engine.ToggleAlwaysOnTop(hWnd);
+      if (!clickthrough)
+        ToggleClickThrough(hWnd);
+      g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
+      g_engine.SetOpacity(hWnd);
+      watermarkMode = true;
+    } else {
+      // Exit watermark: restore clickthrough, opacity, always-on-top, borderless
+      if (clickthrough)
+        ToggleClickThrough(hWnd);
+      g_engine.fOpacity = watermarkPrevOpacity;
+      g_engine.SetOpacity(hWnd);
+      g_engine.m_bAlwaysOnTop = false;
+      g_engine.ToggleAlwaysOnTop(hWnd);
+      if (g_engine.IsBorderlessFullscreen(hWnd))
+        ToggleBorderlessFullscreen(hWnd);
+      watermarkMode = false;
+    }
     return 0;
   }
 
@@ -2870,8 +2887,6 @@ int StartThreads(HINSTANCE instance) {
     // early assignment so we can use logging
     // mdropdx12.Init() may only be called after the window is created due to threading issues
     mdropdx12.logLevel = g_engine.m_LogLevel;
-    mdropdx12.m_nSMTCSessionMode = g_engine.m_nSMTCSessionMode;
-    wcscpy_s(mdropdx12.m_szSMTCSelectedAppId, g_engine.m_szSMTCSelectedAppId);
     g_engine.mdropdx12 = &mdropdx12;
 
     mdropdx12.LogInfo(L"MDropDX12 initialized, LogLevel=" + std::to_wstring(mdropdx12.logLevel)

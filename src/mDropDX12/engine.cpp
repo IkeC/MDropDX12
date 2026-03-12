@@ -1559,8 +1559,6 @@ void Engine::MyReadConfig() {
   // MDropDX12:
   GetPrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, m_szAudioDevice, sizeof(m_szAudioDevice), pIni);
   m_nAudioDeviceRequestType = GetPrivateProfileIntW(L"Milkwave", L"AudioDeviceRequestType", m_nAudioDeviceRequestType, pIni);
-  m_nSMTCSessionMode = GetPrivateProfileIntW(L"Milkwave", L"SMTCSessionMode", m_nSMTCSessionMode, pIni);
-  GetPrivateProfileStringW(L"Milkwave", L"SMTCSessionAppId", L"", m_szSMTCSelectedAppId, _countof(m_szSMTCSelectedAppId), pIni);
   m_nTrackInfoSource = GetPrivateProfileIntW(L"Milkwave", L"TrackInfoSource", m_nTrackInfoSource, pIni);
   if (m_nTrackInfoSource < 0 || m_nTrackInfoSource > 2) m_nTrackInfoSource = TRACK_SOURCE_SMTC;
   m_bSongInfoOverlay = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoOverlay", m_bSongInfoOverlay, pIni);
@@ -1836,8 +1834,6 @@ void Engine::MyWriteConfig() {
   // MDropDX12:
   WritePrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, pIni);
   WritePrivateProfileIntW(m_nAudioDeviceRequestType, L"AudioDeviceRequestType", pIni, L"Milkwave");
-  WritePrivateProfileIntW(m_nSMTCSessionMode, L"SMTCSessionMode", pIni, L"Milkwave");
-  WritePrivateProfileStringW(L"Milkwave", L"SMTCSessionAppId", m_szSMTCSelectedAppId, pIni);
   { wchar_t asBuf[32]; swprintf(asBuf, 32, L"%g", (double)m_fAudioSensitivity);
     WritePrivateProfileStringW(L"Milkwave", L"AudioSensitivity", asBuf, pIni); }
   WritePrivateProfileIntW(m_nTrackInfoSource, L"TrackInfoSource", pIni, L"Milkwave");

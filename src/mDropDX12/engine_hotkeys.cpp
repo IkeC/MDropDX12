@@ -799,7 +799,7 @@ bool Engine::DispatchHotkeyAction(int actionId)
         OpenTextAnimWindow();
         return true;
     case HK_OPEN_REMOTE:
-        OpenMDropDX12Remote();
+        OpenRemoteWindow();
         return true;
     case HK_OPEN_VISUAL:
         OpenVisualWindow();
