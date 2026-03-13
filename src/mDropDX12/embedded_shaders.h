@@ -187,6 +187,57 @@ SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
 
 #define lum(x) (dot(x,float3(0.32,0.49,0.29)))
 
+// NaN-safe normalize: DX9 SM3.0 normalize(0) returns 0; DX12 SM5.0 returns NaN.
+// Preset code that calls normalize() on a zero-length vector/scalar would get NaN
+// in DX12, propagating through the feedback loop and darkening the image.
+float  _safe_normalize(float  x) { return sign(x); }
+float2 _safe_normalize(float2 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(d) : (float2)0; }
+float3 _safe_normalize(float3 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(d) : (float3)0; }
+float4 _safe_normalize(float4 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(d) : (float4)0; }
+
+// NaN-safe sqrt: DX9 sqrt(negative) returns sqrt(abs(x)) on NVIDIA hardware;
+// DX12 returns NaN (IEEE 754). Using abs(x) matches DX9 NVIDIA behavior and
+// keeps the result finite (unlike max(0,x) which gives sqrt(0)=0 → division
+// by zero → infinity in expressions like 1/sqrt(x)).
+float  _safe_sqrt(float  x) { return sqrt(abs(x)); }
+float2 _safe_sqrt(float2 x) { return sqrt(abs(x)); }
+float3 _safe_sqrt(float3 x) { return sqrt(abs(x)); }
+float4 _safe_sqrt(float4 x) { return sqrt(abs(x)); }
+
+// NaN-safe log: DX9 log(x<=0) returns a large negative; DX12 returns -inf or NaN.
+// Clamp to a tiny positive value to avoid -inf/NaN propagation.
+float  _safe_log(float  x) { return log(max(1e-30, x)); }
+float2 _safe_log(float2 x) { return log(max(1e-30, x)); }
+float3 _safe_log(float3 x) { return log(max(1e-30, x)); }
+float4 _safe_log(float4 x) { return log(max(1e-30, x)); }
+
+// NaN-safe tan: tan() returns ±inf at poles (π/2 + nπ). In DX9, inf*0 often
+// returned 0 (non-IEEE). In DX12, inf*0 = NaN (IEEE 754), which propagates
+// through UV calculations and creates black holes in the feedback loop.
+// Clamp to large finite value so inf*0 → large*0 = 0 instead of NaN.
+float  _safe_tan(float  x) { return clamp(tan(x), -1e4, 1e4); }
+float2 _safe_tan(float2 x) { return clamp(tan(x), -1e4, 1e4); }
+float3 _safe_tan(float3 x) { return clamp(tan(x), -1e4, 1e4); }
+float4 _safe_tan(float4 x) { return clamp(tan(x), -1e4, 1e4); }
+
+// NaN-safe pow: pow(negative, non-integer) returns NaN in DX12.
+// DX9 often returned abs(x)^y or 0 for negative bases.
+float  _safe_pow(float  x, float  y) { return pow(abs(x), y); }
+float2 _safe_pow(float2 x, float2 y) { return pow(abs(x), y); }
+float3 _safe_pow(float3 x, float3 y) { return pow(abs(x), y); }
+float4 _safe_pow(float4 x, float4 y) { return pow(abs(x), y); }
+
+// NaN-safe asin/acos: return NaN for inputs outside [-1,1] in DX12.
+// DX9 hardware typically clamped internally.
+float  _safe_asin(float  x) { return asin(clamp(x, -1.0, 1.0)); }
+float2 _safe_asin(float2 x) { return asin(clamp(x, -1.0, 1.0)); }
+float3 _safe_asin(float3 x) { return asin(clamp(x, -1.0, 1.0)); }
+float4 _safe_asin(float4 x) { return asin(clamp(x, -1.0, 1.0)); }
+float  _safe_acos(float  x) { return acos(clamp(x, -1.0, 1.0)); }
+float2 _safe_acos(float2 x) { return acos(clamp(x, -1.0, 1.0)); }
+float3 _safe_acos(float3 x) { return acos(clamp(x, -1.0, 1.0)); }
+float4 _safe_acos(float4 x) { return acos(clamp(x, -1.0, 1.0)); }
+
 #define GetMain(uv) (tex2D(sampler_main,uv).xyz)
 #define GetPixel(uv) (tex2D(sampler_main,uv).xyz)
 #define GetBlur1(uv) (sampler_blur1.Sample(_samp_lc,uv).xyz*_c5.x + _c5.y)
@@ -287,20 +338,31 @@ float3 shiftHSV(float3 c)
     }
     return rgb;
 }
+
+// Redirect NaN-producing intrinsics to safe versions for preset code.
+// Defined AFTER _safe_* functions so the real intrinsics are used inside their bodies
+// (preprocessor macros only affect later text in the translation unit).
+#define sqrt _safe_sqrt
+#define log _safe_log
+#define tan _safe_tan
+#define pow _safe_pow
+#define asin _safe_asin
+#define acos _safe_acos
 )";
 
 static const char k_warp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
          float4 vDiffuseIn : COLOR,
-         float4 uv_in      : TEXCOORD0,  // .xy = warped UVs, .zw = orig UVs
-         float2 rad_ang_in : TEXCOORD1,  // .x = rad, .y = ang
+         float2 uv_in      : TEXCOORD0,  // warped UVs (tu, tv)
+         float2 uv_orig_in : TEXCOORD1,  // original UVs (tu_orig, tv_orig)
+         float2 rad_ang_in : TEXCOORD2,  // .x = rad, .y = ang
      out float4 vPosProj   : POSITION,
      out float4 _vDiffuse  : COLOR,
-     out float4 _uv        : TEXCOORD0,
+     out float4 _uv        : TEXCOORD0,  // .xy = warped UVs, .zw = orig UVs
      out float2 _rad_ang   : TEXCOORD1 )
 {
     vPosProj = float4(vPosIn.x, vPosIn.y, vPosIn.z, 1);
     _vDiffuse = vDiffuseIn;
-    _uv = uv_in.xyzw;
+    _uv = float4(uv_in.xy, uv_orig_in.xy);
     _rad_ang = rad_ang_in.xy;
 }
 )";
@@ -327,16 +389,17 @@ static const char k_warp_ps_fx[] = R"(shader_body
 
 static const char k_comp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
          float4 vDiffuseIn : COLOR,
-         float4 uv_in      : TEXCOORD0,  // .xy = UVs to use (unwarped), .zw = IGNORE
-         float2 rad_ang_in : TEXCOORD1,  // .x = rad, .y = ang
+         float2 uv_in      : TEXCOORD0,  // tu, tv (current UVs)
+         float2 uv_orig_in : TEXCOORD1,  // tu_orig, tv_orig (original UVs)
+         float2 rad_ang_in : TEXCOORD2,  // .x = rad, .y = ang
      out float4 vPosProj   : POSITION,
      out float4 _vDiffuse  : COLOR,
-     out float2 _uv        : TEXCOORD0,
+     out float4 _uv        : TEXCOORD0,  // .xy = current UVs, .zw = original UVs
      out float2 _rad_ang   : TEXCOORD1 )
 {
     vPosProj = float4(vPosIn.x, vPosIn.y, vPosIn.z, 1);
     _vDiffuse = vDiffuseIn;
-    _uv = uv_in.xy;
+    _uv = float4(uv_in.xy, uv_orig_in.xy);
     _rad_ang = rad_ang_in.xy;
 })";
 

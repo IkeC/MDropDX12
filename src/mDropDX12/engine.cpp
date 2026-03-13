@@ -1875,6 +1875,8 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_DisplayCover, L"DisplayCover", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_DisplayCoverWhenPressingB, L"DisplayCoverWhenPressingB", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_bSongInfoAlwaysShow, L"SongInfoAlwaysShow", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bShowNotifications, L"ShowNotifications", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_HideNotificationsWhenRemoteActive, L"HideNotificationsWhenRemoteActive", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_blackmode, L"BlackMode", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_CheckDirectXOnStartup, L"CheckDirectXOnStartup", pIni, L"Milkwave");
 
@@ -3212,22 +3214,16 @@ int Engine::AllocateMyDX9Stuff() {
     if (m_szActivePresetList.empty())
       UpdatePresetList(true); //...just does its initial burst!
     if (m_bEnablePresetStartup && wcslen(m_szPresetStartup) > 0) {
+      DLOG_INFO("StartupPreset: loading '%ls'", m_szPresetStartup);
       LoadPreset(m_szPresetStartup, 0.0f);
 
       std::wstring message(m_szPresetStartup);
       size_t pos = message.find_last_of(L"\\/");
-      std::wstring sPath;
       std::wstring sFilename;
-      if (pos != std::wstring::npos) {
-        // Extract the path up to and including the last separator
-        sPath = message.substr(0, pos + 1);
-        // Extract the filename after the last separator
+      if (pos != std::wstring::npos)
         sFilename = message.substr(pos + 1);
-      }
-      else {
-        // If no separator is found, assume the fullPath is just a filename
+      else
         sFilename = message;
-      }
 
       // try to set the current preset index (match full path first, then filename only)
       for (size_t i = 0; i < m_presets.size(); i++) {
@@ -3247,8 +3243,10 @@ int Engine::AllocateMyDX9Stuff() {
           }
         }
       }
+      DLOG_INFO("StartupPreset: index=%d, filename='%ls', presets=%d", m_nCurrentPreset, sFilename.c_str(), (int)m_presets.size());
     }
     else {
+      DLOG_INFO("StartupPreset: none configured, loading random (enabled=%d, path='%ls')", m_bEnablePresetStartup, m_szPresetStartup);
       LoadRandomPreset(0.0f);
     }
     // Load VFX profile on startup
@@ -3649,13 +3647,20 @@ void Engine::MyRenderFn(int redraw) {
       AddError(L"Preset directory not found. Press F8 to open Settings.", 8.0f, ERR_MISC, true);
     }
 
-    // First run or self-bootstrap: show Welcome window to let user choose resources folder
-    // Force UI_REGULAR first — LoadRandomPreset may have set UI_LOAD when preset dir is empty
+    // First run or self-bootstrap: show Welcome window only if no presets were found.
+    // Skip it when the user already has presets (e.g., fresh portable copy with presets dir).
     if (m_bSelfBootstrapped || m_bFirstRun) {
       m_bSelfBootstrapped = false;
       m_bFirstRun = false; // only once per session
-      m_UI_mode = UI_REGULAR;
-      OpenWelcomeWindow();
+      bool bHasPresets = (m_nPresets > m_nDirs); // preset count minus directory entries
+      if (!bHasPresets) {
+        m_UI_mode = UI_REGULAR;
+        OpenWelcomeWindow();
+      } else {
+        // Presets exist — mark as configured so Welcome won't trigger next time
+        WritePrivateProfileStringW(L"Settings", L"bConfigured", L"1", GetConfigIniFile());
+        DLOG_INFO("FirstRun: skipped Welcome — %d presets found", m_nPresets - m_nDirs);
+      }
     }
 
     float dt = GetTime() - m_prev_time;

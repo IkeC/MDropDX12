@@ -2966,6 +2966,12 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(L"LOGS_CLEARED");
   }
+  else if (wcsncmp(sMessage, L"SHUTDOWN", 8) == 0) {
+    // Clean shutdown via WM_CLOSE — saves settings, stops render thread, exits
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHUTTING_DOWN");
+    PostMessage(GetPluginWindow(), WM_CLOSE, 0, 0);
+  }
   else if (wcsncmp(sMessage, L"SET_AUDIO_GAIN=", 15) == 0) {
     float val = (float)_wtof(sMessage + 15);
     if (val <= 0.0f) val = 1.0f;
@@ -3064,6 +3070,8 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       L"|zoom=%.6f|rot=%.6f|warp=%.6f|cx=%.6f|cy=%.6f|dx=%.6f|dy=%.6f|sx=%.6f|sy=%.6f|zoomexp=%.6f"
       L"|q1=%.6f|q2=%.6f|q3=%.6f|q4=%.6f|q5=%.6f|q6=%.6f|q7=%.6f|q8=%.6f"
       L"|q9=%.6f|q10=%.6f|q11=%.6f|q12=%.6f|q13=%.6f|q14=%.6f|q15=%.6f|q16=%.6f"
+      L"|q17=%.6f|q18=%.6f|q19=%.6f|q20=%.6f|q21=%.6f|q22=%.6f|q23=%.6f|q24=%.6f"
+      L"|q25=%.6f|q26=%.6f|q27=%.6f|q28=%.6f|q29=%.6f|q30=%.6f|q31=%.6f|q32=%.6f"
       L"|bass_rel=%.6f|mid_rel=%.6f|treb_rel=%.6f"
       L"|bass_imm=%.6f|mid_imm=%.6f|treb_imm=%.6f"
       L"|bass_avg=%.6f|mid_avg=%.6f|treb_avg=%.6f"
@@ -3092,6 +3100,22 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       m_pState->var_pf_q[13] ? (float)*m_pState->var_pf_q[13] : 0.f,
       m_pState->var_pf_q[14] ? (float)*m_pState->var_pf_q[14] : 0.f,
       m_pState->var_pf_q[15] ? (float)*m_pState->var_pf_q[15] : 0.f,
+      m_pState->var_pf_q[16] ? (float)*m_pState->var_pf_q[16] : 0.f,
+      m_pState->var_pf_q[17] ? (float)*m_pState->var_pf_q[17] : 0.f,
+      m_pState->var_pf_q[18] ? (float)*m_pState->var_pf_q[18] : 0.f,
+      m_pState->var_pf_q[19] ? (float)*m_pState->var_pf_q[19] : 0.f,
+      m_pState->var_pf_q[20] ? (float)*m_pState->var_pf_q[20] : 0.f,
+      m_pState->var_pf_q[21] ? (float)*m_pState->var_pf_q[21] : 0.f,
+      m_pState->var_pf_q[22] ? (float)*m_pState->var_pf_q[22] : 0.f,
+      m_pState->var_pf_q[23] ? (float)*m_pState->var_pf_q[23] : 0.f,
+      m_pState->var_pf_q[24] ? (float)*m_pState->var_pf_q[24] : 0.f,
+      m_pState->var_pf_q[25] ? (float)*m_pState->var_pf_q[25] : 0.f,
+      m_pState->var_pf_q[26] ? (float)*m_pState->var_pf_q[26] : 0.f,
+      m_pState->var_pf_q[27] ? (float)*m_pState->var_pf_q[27] : 0.f,
+      m_pState->var_pf_q[28] ? (float)*m_pState->var_pf_q[28] : 0.f,
+      m_pState->var_pf_q[29] ? (float)*m_pState->var_pf_q[29] : 0.f,
+      m_pState->var_pf_q[30] ? (float)*m_pState->var_pf_q[30] : 0.f,
+      m_pState->var_pf_q[31] ? (float)*m_pState->var_pf_q[31] : 0.f,
       mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2],
       mysound.imm[0], mysound.imm[1], mysound.imm[2],
       mysound.avg[0], mysound.avg[1], mysound.avg[2],

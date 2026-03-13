@@ -1110,6 +1110,87 @@ static void FixMatrixVarMultiply(char* szShaderText) {
   free(tmp);
 }
 
+// Preprocessor: fix self-referencing variable redeclarations.
+// Some presets redeclare variables with self-initialization like:
+//   float3 ret1, ...;    (initial declaration)
+//   ...
+//   float3 ret1 = ret1;  (redeclaration with self-init)
+// The DX9 compiler (d3dx9_43.dll) handles this by initializing the new variable
+// from the outer scope. D3DCompile (d3dcompiler_47.dll) sees the RHS as the new
+// (uninitialized) variable, causing X4000 error. Fix by removing the redundant
+// type specifier, converting `float3 ret1 = ret1;` to `ret1 = ret1;` (a no-op).
+static void FixSelfRedeclarations(char* szShaderText) {
+  static const char* types[] = {
+    "float4x4", "float4x3", "float3x3", "float3x4",
+    "float4", "float3", "float2", "float",
+    "half4", "half3", "half2", "half",
+    "int4", "int3", "int2", "int",
+    "uint4", "uint3", "uint2", "uint",
+    "double4", "double3", "double2", "double",
+  };
+
+  auto isIdentChar = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  for (auto& type : types) {
+    int typeLen = (int)strlen(type);
+    char* p = szShaderText;
+
+    while ((p = strstr(p, type)) != nullptr) {
+      // Ensure word boundary before the type
+      if (p > szShaderText && isIdentChar(*(p - 1))) { p += typeLen; continue; }
+      // Ensure word boundary after the type
+      if (isIdentChar(p[typeLen])) { p += typeLen; continue; }
+
+      char* typeStart = p;
+      char* afterType = p + typeLen;
+
+      // Skip whitespace after type
+      char* ws1 = afterType;
+      while (*ws1 == ' ' || *ws1 == '\t') ws1++;
+      if (!isIdentChar(*ws1) || (*ws1 >= '0' && *ws1 <= '9')) { p = ws1; continue; }
+
+      // Extract variable name
+      char* nameStart = ws1;
+      char* nameEnd = nameStart;
+      while (isIdentChar(*nameEnd)) nameEnd++;
+      int nameLen = (int)(nameEnd - nameStart);
+      if (nameLen <= 0 || nameLen > 64) { p = nameEnd; continue; }
+
+      // Skip whitespace after name
+      char* ws2 = nameEnd;
+      while (*ws2 == ' ' || *ws2 == '\t') ws2++;
+
+      // Must have '=' (not '==')
+      if (*ws2 != '=' || ws2[1] == '=') { p = ws2; continue; }
+      ws2++; // skip '='
+
+      // Skip whitespace after '='
+      while (*ws2 == ' ' || *ws2 == '\t') ws2++;
+
+      // Check if RHS starts with the same variable name at word boundary
+      if (strncmp(ws2, nameStart, nameLen) != 0) { p = ws2; continue; }
+      if (isIdentChar(ws2[nameLen])) { p = ws2; continue; }
+
+      // Skip whitespace after RHS name
+      char* afterRHS = ws2 + nameLen;
+      while (*afterRHS == ' ' || *afterRHS == '\t') afterRHS++;
+
+      // Must end with ';' — this is `type name = name;`
+      if (*afterRHS != ';') { p = afterRHS; continue; }
+
+      // Found a self-referencing redeclaration! Blank out the type keyword with spaces.
+      DLOG_INFO("FixSelfRedeclarations: removing redundant '%.*s' from '%.*s'",
+                typeLen, type, (int)(afterRHS + 1 - typeStart), typeStart);
+      for (int i = 0; i < typeLen; i++)
+        typeStart[i] = ' ';
+
+      p = afterRHS + 1;
+    }
+  }
+}
+
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
 // Many MilkDrop presets use patterns like `float2 pow = float2(pow(x,y)...)` which
 // fails in SM3.0+ because the local variable shadows the intrinsic. We rename the
@@ -1231,10 +1312,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   const char szCompDefines[] = "#define rad _rad_ang.x\n"
     "#define ang _rad_ang.y\n"
     "#define uv _uv.xy\n"
-    "#define uv_orig _uv.xy\n" //[sic]
+    "#define uv_orig _uv.xy\n"
     "#define hue_shader _vDiffuse.xyz\n";
   const char szWarpParams[] = "float4 _vDiffuse : COLOR, float4 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
-  const char szCompParams[] = "float4 _vDiffuse : COLOR, float2 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
+  const char szCompParams[] = "float4 _vDiffuse : COLOR, float4 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
   const char szFirstLine[] = "    float3 ret = 0;";
 
   char szWhichShader[64];
@@ -1503,8 +1584,38 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
 
+  // Fix self-referencing variable redeclarations (e.g. float3 ret1 = ret1;)
+  FixSelfRedeclarations(szShaderText);
+
   // Fix matrix * vector multiplication (HLSL requires mul())
   FixMatrixVarMultiply(szShaderText);
+
+  // Replace normalize() with _safe_normalize() to prevent NaN from zero-length vectors.
+  // DX9 SM3.0 normalize(0) returns 0; DX12 SM5.0 returns NaN which propagates through
+  // the feedback loop and darkens the image over time.
+  {
+    const char* src = "normalize(";
+    const char* dst = "_safe_normalize(";
+    int srcLen = (int)strlen(src);
+    int dstLen = (int)strlen(dst);
+    int diff = dstLen - srcLen;
+    char* p = szShaderText;
+    while ((p = strstr(p, src)) != nullptr) {
+      // Word boundary check: skip if preceded by alphanumeric or underscore
+      if (p > szShaderText) {
+        char prev = *(p - 1);
+        if ((prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') || prev == '_') {
+          p += srcLen;
+          continue;
+        }
+      }
+      // Expand buffer to fit the longer replacement
+      int tailLen = (int)strlen(p + srcLen);
+      memmove(p + dstLen, p + srcLen, tailLen + 1);
+      memcpy(p, dst, dstLen);
+      p += dstLen;
+    }
+  }
 
   // Replace tex2D/tex2Dlod calls for samplers that need non-default addressing modes.
   // The generic tex2D macro uses _samp_lw (LINEAR+WRAP). These replacements bypass
