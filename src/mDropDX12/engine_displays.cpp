@@ -51,7 +51,7 @@ static BOOL CALLBACK FindMonitorCB(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
 
 struct EnumMonitorCtx {
     Engine* engine;
-    HMONITOR hRenderMonitor; // exclude the monitor hosting the render window
+    HMONITOR hRenderMonitor; // the monitor hosting the render window (for bSkippedSameMonitor)
 };
 
 static BOOL CALLBACK EnumMonitorCB(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
@@ -62,16 +62,17 @@ static BOOL CALLBACK EnumMonitorCB(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
     if (!GetMonitorInfoW(hMon, &mi))
         return TRUE;
 
-    // Skip the monitor that hosts the main render window
-    if (hMon == ctx->hRenderMonitor)
-        return TRUE;
-
     DisplayOutput out;
     out.config.type = DisplayOutputType::Monitor;
     out.config.bEnabled = false;
     out.config.bFullscreen = true;
     out.config.rcMonitor = mi.rcMonitor;
     wcsncpy_s(out.config.szDeviceName, mi.szDevice, _TRUNCATE);
+
+    // Mark the render window's monitor as skipped (dynamic check in SendToDisplayOutputs
+    // will update this at runtime when the render window moves between monitors)
+    if (hMon == ctx->hRenderMonitor)
+        out.bSkippedSameMonitor = true;
 
     // Get friendly display name from DISPLAY_DEVICEW
     DISPLAY_DEVICEW dd = { sizeof(dd) };
@@ -91,6 +92,29 @@ static BOOL CALLBACK EnumMonitorCB(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
 
 void Engine::EnumerateDisplayOutputs()
 {
+    // Save existing monitor configs so we can preserve enabled state after re-enumeration
+    struct SavedMonitorConfig {
+        wchar_t szDeviceName[32];
+        RECT rcMonitor;  // Match by display rect (more reliable than device names)
+        bool bEnabled;
+        bool bFullscreen;
+        int nOpacity;
+        bool bClickThrough;
+    };
+    std::vector<SavedMonitorConfig> saved;
+    for (auto& o : m_displayOutputs) {
+        if (o.config.type == DisplayOutputType::Monitor) {
+            SavedMonitorConfig s = {};
+            wcsncpy_s(s.szDeviceName, o.config.szDeviceName, _TRUNCATE);
+            s.rcMonitor = o.config.rcMonitor;
+            s.bEnabled = o.config.bEnabled;
+            s.bFullscreen = o.config.bFullscreen;
+            s.nOpacity = o.config.nOpacity;
+            s.bClickThrough = o.config.bClickThrough;
+            saved.push_back(s);
+        }
+    }
+
     // Remove existing monitor entries (keep Spout outputs)
     m_displayOutputs.erase(
         std::remove_if(m_displayOutputs.begin(), m_displayOutputs.end(),
@@ -104,6 +128,25 @@ void Engine::EnumerateDisplayOutputs()
 
     EnumMonitorCtx ctx = { this, hRenderMon };
     EnumDisplayMonitors(NULL, NULL, EnumMonitorCB, reinterpret_cast<LPARAM>(&ctx));
+
+    // Restore saved config for monitors that still exist (match by display rect first,
+    // fall back to device name — Windows can reassign device names across enumerations)
+    for (auto& out : m_displayOutputs) {
+        if (out.config.type != DisplayOutputType::Monitor) continue;
+        for (auto& s : saved) {
+            bool rectMatch = (out.config.rcMonitor.left == s.rcMonitor.left &&
+                              out.config.rcMonitor.top == s.rcMonitor.top &&
+                              out.config.rcMonitor.right == s.rcMonitor.right &&
+                              out.config.rcMonitor.bottom == s.rcMonitor.bottom);
+            if (rectMatch || wcscmp(out.config.szDeviceName, s.szDeviceName) == 0) {
+                out.config.bEnabled = s.bEnabled;
+                out.config.bFullscreen = s.bFullscreen;
+                out.config.nOpacity = s.nOpacity;
+                out.config.bClickThrough = s.bClickThrough;
+                break;
+            }
+        }
+    }
 }
 
 // ─── Mirror Activation Failsafe ──────────────────────────────────────────────
@@ -129,58 +172,12 @@ Engine::MirrorActivateResult Engine::TryActivateMirrors(HWND hRenderWnd)
     if (totalMonitors == 0)
         return MirrorFullscreenOnly;
 
-    // Case 3: Monitors exist but none enabled
-    if (m_bMirrorPromptDisabled) {
-        // Auto-enable all monitors
-        for (auto& o : m_displayOutputs)
-            if (o.config.type == DisplayOutputType::Monitor)
-                o.config.bEnabled = true;
-        SaveDisplayOutputSettings();
-        return MirrorActivated;
-    }
-
-    // Guard: only one prompt at a time
-    if (m_bMirrorPromptActive)
-        return MirrorCancelled;
-    m_bMirrorPromptActive = true;
-
-    // Show timed prompt — auto-accepts "Yes" after 5 seconds
-    wchar_t msg[256];
-    swprintf(msg, 256,
-        L"No mirrors enabled.\nFound %d display(s).\n\nMirror to all?\n(Auto-accepting in 5 seconds...)",
-        totalMonitors);
-
-    // Use MessageBoxTimeout (undocumented ntdll/user32 export) for auto-dismiss
-    // Fallback: timer callback closes the MessageBox after 5 seconds
-    static UINT_PTR s_timerId = 0;
-    s_timerId = SetTimer(NULL, 0, 5000, [](HWND, UINT, UINT_PTR idEvent, DWORD) {
-        KillTimer(NULL, idEvent);
-        // Find and dismiss the prompt by pressing Yes
-        HWND hMB = FindWindowW(L"#32770", L"MDropDX12");
-        if (hMB) {
-            EndDialog(hMB, IDYES);
-        }
-    });
-
-    int result = MessageBoxW(hRenderWnd, msg, L"MDropDX12",
-        MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST);
-
-    KillTimer(NULL, s_timerId);
-    s_timerId = 0;
-    m_bMirrorPromptActive = false;
-
-    if (result == IDYES) {
-        for (auto& o : m_displayOutputs)
-            if (o.config.type == DisplayOutputType::Monitor)
-                o.config.bEnabled = true;
-        SaveDisplayOutputSettings();
-        return MirrorActivated;
-    }
-
-    if (result == IDNO)
-        return MirrorFullscreenOnly;
-
-    return MirrorCancelled;
+    // Case 3: Monitors exist but none enabled — auto-enable all
+    for (auto& o : m_displayOutputs)
+        if (o.config.type == DisplayOutputType::Monitor)
+            o.config.bEnabled = true;
+    SaveDisplayOutputSettings();
+    return MirrorActivated;
 }
 
 // ─── INI Persistence ──────────────────────────────────────────────────────────
@@ -357,7 +354,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                 (IUnknown**)m_lpDX->m_commandQueue.GetAddressOf())) {
             char logBuf[512];
             sprintf(logBuf, "InitDisplayOutput: OpenDirectX12 failed for '%s'\n", senderNameA);
-            DebugLogA(logBuf);
+            DebugLogA(logBuf, LOG_ERROR);
             return;
         }
 
@@ -368,7 +365,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                     D3D12_RESOURCE_STATE_RENDER_TARGET)) {
                 char logBuf[512];
                 sprintf(logBuf, "InitDisplayOutput: WrapDX12Resource failed [%d]\n", n);
-                DebugLogA(logBuf);
+                DebugLogA(logBuf, LOG_ERROR);
                 // Cleanup partial wraps
                 for (int j = 0; j < n; j++) {
                     if (ss.wrappedBackBuffers[j]) {
@@ -387,6 +384,13 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         if (!m_lpDX || !m_lpDX->m_device.Get() || !m_lpDX->m_swapChain.Get())
             return;
 
+        {
+            char logBuf[512];
+            sprintf(logBuf, "InitDisplayOutput: Starting init for %ls (%ls)\n",
+                out.config.szName, out.config.szDeviceName);
+            DebugLogA(logBuf, LOG_WARN);
+        }
+
         // Safety: don't mirror the monitor hosting the render window
         if (m_lpDX->GetHwnd()) {
             HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
@@ -394,11 +398,26 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                 MONITORINFOEXW mi = { sizeof(mi) };
                 if (GetMonitorInfoW(hRenderMon, &mi) &&
                     wcscmp(mi.szDevice, out.config.szDeviceName) == 0) {
-                    DebugLogA("InitDisplayOutput: Skipping mirror on render window's monitor\n");
+                    char logBuf[256];
+                    sprintf(logBuf, "InitDisplayOutput: Skipping %ls — render window's monitor\n",
+                        out.config.szDeviceName);
+                    DebugLogA(logBuf, LOG_WARN);
                     out.bSkippedSameMonitor = true;
                     return;
                 }
             }
+        }
+
+        // Flush GPU so CreateSwapChainForHwnd has a clean command queue
+        m_lpDX->WaitForGpu();
+
+        // Drain any pending messages on this thread before creating windows/swap chains.
+        // Without this, re-activation after DestroyWindow can deadlock in CreateSwapChainForHwnd
+        // because DXGI may SendMessage to the window and stall on unprocessed messages.
+        {
+            MSG msg;
+            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+                DispatchMessage(&msg);
         }
 
         out.monitorState = std::make_unique<MonitorMirrorState>();
@@ -421,6 +440,11 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         EnumDisplayMonitors(NULL, NULL, FindMonitorCB, reinterpret_cast<LPARAM>(&fmc));
         if (fmc.bFound) {
             out.config.rcMonitor = fmc.rcResult;
+        } else {
+            char logBuf[256];
+            sprintf(logBuf, "InitDisplayOutput: WARNING — monitor %ls not found by EnumDisplayMonitors!\n",
+                out.config.szDeviceName);
+            DebugLogA(logBuf, LOG_WARN);
         }
 
         RECT rc = out.config.rcMonitor;
@@ -428,13 +452,14 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         int monH = rc.bottom - rc.top;
         {
             char logBuf[512];
-            sprintf(logBuf, "InitDisplayOutput: Monitor rect = (%d,%d)-(%d,%d) size %dx%d\n",
+            sprintf(logBuf, "InitDisplayOutput: %ls rect = (%d,%d)-(%d,%d) size %dx%d\n",
+                out.config.szDeviceName,
                 (int)rc.left, (int)rc.top, (int)rc.right, (int)rc.bottom, monW, monH);
-            DebugLogA(logBuf);
+            DebugLogA(logBuf, LOG_WARN);
         }
 
         if (monW <= 0 || monH <= 0) {
-            DebugLogA("InitDisplayOutput: Invalid monitor rect, skipping\n");
+            DebugLogA("InitDisplayOutput: Invalid monitor rect, skipping\n", LOG_WARN);
             out.monitorState.reset();
             return;
         }
@@ -453,7 +478,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             rc.left, rc.top, monW, monH,
             nullptr, nullptr, GetModuleHandle(NULL), nullptr);
         if (!ms.hWnd) {
-            DebugLogA("InitDisplayOutput: CreateWindowExW failed for mirror\n");
+            DebugLogA("InitDisplayOutput: CreateWindowExW failed for mirror\n", LOG_ERROR);
             out.monitorState.reset();
             return;
         }
@@ -468,7 +493,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         ComPtr<IDXGIFactory4> factory;
         HRESULT hr = m_lpDX->m_swapChain->GetParent(IID_PPV_ARGS(&factory));
         if (FAILED(hr)) {
-            DebugLogA("InitDisplayOutput: GetParent(IDXGIFactory4) failed\n");
+            DebugLogA("InitDisplayOutput: GetParent(IDXGIFactory4) failed\n", LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -494,7 +519,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             m_lpDX->m_commandQueue.Get(), ms.hWnd, &scDesc, nullptr, nullptr, &sc1);
         if (FAILED(hr)) {
             char logBuf[256]; sprintf(logBuf, "InitDisplayOutput: CreateSwapChainForHwnd failed (0x%08X)\n", (unsigned)hr);
-            DebugLogA(logBuf);
+            DebugLogA(logBuf, LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -502,7 +527,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         factory->MakeWindowAssociation(ms.hWnd, DXGI_MWA_NO_ALT_ENTER);
         hr = sc1.As(&ms.swapChain);
         if (FAILED(hr)) {
-            DebugLogA("InitDisplayOutput: QueryInterface IDXGISwapChain4 failed\n");
+            DebugLogA("InitDisplayOutput: QueryInterface IDXGISwapChain4 failed\n", LOG_ERROR);
             DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
             out.monitorState.reset();
             return;
@@ -513,7 +538,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             hr = ms.swapChain->GetBuffer(i, IID_PPV_ARGS(&ms.backBuffers[i]));
             if (FAILED(hr)) {
                 char logBuf[256]; sprintf(logBuf, "InitDisplayOutput: GetBuffer(%d) failed\n", i);
-                DebugLogA(logBuf);
+                DebugLogA(logBuf, LOG_ERROR);
                 ms.swapChain.Reset();
                 DestroyWindow(ms.hWnd); ms.hWnd = nullptr;
                 out.monitorState.reset();
@@ -522,7 +547,12 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         }
 
         ms.bReady = true;
-        DebugLogA("InitDisplayOutput: Mirror window created and ready\n");
+        {
+            char logBuf[256];
+            sprintf(logBuf, "InitDisplayOutput: Mirror %ls READY (hwnd=%p, swapchain=%p, %dx%d)\n",
+                out.config.szDeviceName, (void*)ms.hWnd, (void*)ms.swapChain.Get(), ms.width, ms.height);
+            DebugLogA(logBuf, LOG_WARN);
+        }
     }
 }
 
@@ -581,7 +611,7 @@ void Engine::ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH)
         DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(hr)) {
         char logBuf[256]; sprintf(logBuf, "ResizeMirrorSwapChain: ResizeBuffers failed (0x%08X)\n", (unsigned)hr);
-        DebugLogA(logBuf);
+        DebugLogA(logBuf, LOG_ERROR);
         ms.bReady = false;
         return;
     }
@@ -626,8 +656,11 @@ void Engine::SendToDisplayOutputs()
         if (out.config.type == DisplayOutputType::Monitor) {
             if ((!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState) {
                 DestroyDisplayOutput(out);
-                out.bSkippedSameMonitor = false;  // Re-evaluate on next activation
             }
+            // Always clear skip flag when mirrors deactivate or output disabled —
+            // the render window may have moved to a different monitor since the flag was set
+            if (!m_bMirrorsActive || !out.config.bEnabled)
+                out.bSkippedSameMonitor = false;
         }
         else {
             if (!out.config.bEnabled && out.spoutState)
@@ -639,6 +672,47 @@ void Engine::SendToDisplayOutputs()
     int mainH = m_lpDX->m_client_height;
     UINT fi = m_lpDX->m_frameIndex;
     bool hasActiveMonitors = false;
+
+    // Dynamically re-check which monitor the render window is on.
+    // If the render window moved, clear stale skip flags and mark the new monitor.
+    if (m_bMirrorsActive && m_lpDX->GetHwnd()) {
+        HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
+        MONITORINFOEXW rmi = { sizeof(rmi) };
+        bool gotInfo = hRenderMon && GetMonitorInfoW(hRenderMon, &rmi);
+        for (auto& out : m_displayOutputs) {
+            if (out.config.type != DisplayOutputType::Monitor || !out.config.bEnabled)
+                continue;
+            bool isRenderMon = gotInfo && wcscmp(rmi.szDevice, out.config.szDeviceName) == 0;
+            if (isRenderMon && !out.bSkippedSameMonitor) {
+                // Render window moved TO this monitor — skip it and destroy its mirror
+                out.bSkippedSameMonitor = true;
+                if (out.monitorState) {
+                    m_lpDX->WaitForGpu();
+                    DestroyDisplayOutput(out);
+                }
+            } else if (!isRenderMon && out.bSkippedSameMonitor) {
+                // Render window moved AWAY — clear skip so mirror can be created
+                out.bSkippedSameMonitor = false;
+            }
+        }
+    }
+
+    // Check if any mirrors need initialization — flush GPU first so
+    // CreateSwapChainForHwnd doesn't race with in-flight render commands.
+    // Without this, some drivers produce non-functional swap chains.
+    if (m_bMirrorsActive) {
+        bool needsInit = false;
+        for (auto& out : m_displayOutputs) {
+            if (out.config.bEnabled &&
+                out.config.type == DisplayOutputType::Monitor &&
+                !out.bSkippedSameMonitor && !out.monitorState) {
+                needsInit = true;
+                break;
+            }
+        }
+        if (needsInit)
+            m_lpDX->WaitForGpu();
+    }
 
     for (auto& out : m_displayOutputs) {
         if (!out.config.bEnabled)
@@ -657,9 +731,14 @@ void Engine::SendToDisplayOutputs()
             // Skip mirror creation when mirrors are globally deactivated (F9)
             if (!m_bMirrorsActive)
                 continue;
-            // Skip if already determined to be on render window's monitor
+            // Skip if on render window's monitor (updated dynamically above)
             if (out.bSkippedSameMonitor)
                 continue;
+            // Destroy stale mirrors (e.g. Present failed) so they can be re-created
+            if (out.monitorState && !out.monitorState->bReady) {
+                m_lpDX->WaitForGpu();
+                DestroyDisplayOutput(out);
+            }
             // Lazy init
             if (!out.monitorState) {
                 InitDisplayOutput(out);
@@ -686,7 +765,7 @@ void Engine::SendToDisplayOutputs()
             HRESULT hr = m_lpDX->m_device->CreateCommandAllocator(
                 D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_mirrorCmdAllocators[i]));
             if (FAILED(hr)) {
-                DebugLogA("SendToDisplayOutputs: CreateCommandAllocator failed\n");
+                DebugLogA("SendToDisplayOutputs: CreateCommandAllocator failed\n", LOG_ERROR);
                 return;
             }
         }
@@ -694,7 +773,7 @@ void Engine::SendToDisplayOutputs()
             0, D3D12_COMMAND_LIST_TYPE_DIRECT,
             m_mirrorCmdAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_mirrorCmdList));
         if (FAILED(hr)) {
-            DebugLogA("SendToDisplayOutputs: CreateCommandList failed\n");
+            DebugLogA("SendToDisplayOutputs: CreateCommandList failed\n", LOG_ERROR);
             return;
         }
         m_mirrorCmdList->Close();
@@ -760,7 +839,15 @@ void Engine::SendToDisplayOutputs()
             continue;
         if (!out.monitorState || !out.monitorState->bReady)
             continue;
-        out.monitorState->swapChain->Present(0, 0);
+        HRESULT hr = out.monitorState->swapChain->Present(0, 0);
+        if (FAILED(hr)) {
+            char logBuf[256];
+            sprintf(logBuf, "Mirror Present failed (0x%08X) on %ls — destroying\n",
+                    (unsigned)hr, out.config.szDeviceName);
+            DebugLogA(logBuf, LOG_ERROR);
+            // Mark as not ready; cleanup will happen next frame
+            out.monitorState->bReady = false;
+        }
     }
 }
 

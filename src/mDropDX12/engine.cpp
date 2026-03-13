@@ -1442,11 +1442,13 @@ void Engine::MyReadConfig() {
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
   m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < -1.0f) m_fAudioSensitivity = -1.0f;
+  if (m_fAudioSensitivity < -2.0f) m_fAudioSensitivity = -2.0f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  if (m_fAudioSensitivity == -1.0f) {
+  if (m_fAudioSensitivity <= -1.0f) {
+    // -1 = improved adaptive (average-tracking, preserves transients)
+    // -2 = legacy adaptive (peak-tracking, compresses transients)
     mdropdx12_audio_adaptive = true;
-    mdropdx12_audio_sensitivity = 1.0f;   // fallback, not used in adaptive mode
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;  // pass through so FltToInt can distinguish
   } else {
     mdropdx12_audio_adaptive = false;
     if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
@@ -1548,7 +1550,7 @@ void Engine::MyReadConfig() {
       // No preset directory found — use the default path but don't create it.
       // Directory will be created when needed (user saves/drops a preset).
       lstrcpyW(m_szPresetDir, szDefault);
-      DebugLogA("Preset directory not found; using default path (no auto-create)");
+      DebugLogA("Preset directory not found; using default path (no auto-create)", LOG_WARN);
     }
   }
 
@@ -1707,8 +1709,8 @@ void Engine::MyReadConfig() {
     m_nGridY = MAX_GRID_Y;
   if (m_fTimeBetweenPresetsRand < 0)
     m_fTimeBetweenPresetsRand = 0;
-  if (m_fTimeBetweenPresets < 0.1f)
-    m_fTimeBetweenPresets = 0.1f;
+  if (m_fTimeBetweenPresets < 0)
+    m_fTimeBetweenPresets = 0;
 
   // DERIVED SETTINGS
   m_bPresetLockedByUser = m_bPresetLockOnAtStartup;
@@ -1899,7 +1901,11 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileStringW(L"Milkwave", L"LastRemoteExePath", m_szLastRemoteExePath, pIni);
 
   WritePrivateProfileFloatW(m_WindowWatermarkModeOpacity, L"WindowWatermarkModeOpacity", pIni, L"Milkwave");
-  WritePrivateProfileFloatW(fOpacity, L"WindowOpacity", pIni, L"Milkwave");
+  // Don't persist the watermark mode's reduced opacity — save 1.0 (or whatever the
+  // pre-watermark value was). The watermark handlers write prevOpacity to INI
+  // on entry, so if the app exits during watermark mode the correct value is already there.
+  if (!m_bMirrorWatermarkActive && !m_bWatermarkActive)
+    WritePrivateProfileFloatW(fOpacity, L"WindowOpacity", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowX, L"WindowX", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowY, L"WindowY", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowWidth, L"WindowWidth", pIni, L"Milkwave");
@@ -1918,6 +1924,11 @@ void Engine::MyWriteConfig() {
 }
 
 void Engine::SaveWindowSizeAndPosition(HWND hwnd) {
+  // Don't save the watermark-mode window position — the render window is
+  // temporarily on a different monitor at full size. The correct position
+  // was already saved in m_WindowX/Y/W/H by the watermark entry handler.
+  if (m_bMirrorWatermarkActive || m_bWatermarkActive)
+    return;
   RECT rect;
   if (GetWindowRect(hwnd, &rect)) {
     m_WindowX = rect.left;
@@ -2428,7 +2439,8 @@ int Engine::AllocateMyDX9Stuff() {
           m_fallbackShaders_ps.warp.bytecodeBlob->GetBufferPointer(),
           (UINT)m_fallbackShaders_ps.warp.bytecodeBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-        DebugLogA(m_dx12FallbackWarpPSO ? "DX12: Fallback warp PSO created" : "DX12: Fallback warp PSO FAILED");
+        DebugLogA(m_dx12FallbackWarpPSO ? "DX12: Fallback warp PSO created" : "DX12: Fallback warp PSO FAILED",
+                  m_dx12FallbackWarpPSO ? LOG_INFO : LOG_ERROR);
       }
 
       if (m_fallbackShaders_ps.comp.bytecodeBlob && g_pCompVSBlob) {
@@ -2437,7 +2449,8 @@ int Engine::AllocateMyDX9Stuff() {
           m_fallbackShaders_ps.comp.bytecodeBlob->GetBufferPointer(),
           (UINT)m_fallbackShaders_ps.comp.bytecodeBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-        DebugLogA(m_dx12FallbackCompPSO ? "DX12: Fallback comp PSO created" : "DX12: Fallback comp PSO FAILED");
+        DebugLogA(m_dx12FallbackCompPSO ? "DX12: Fallback comp PSO created" : "DX12: Fallback comp PSO FAILED",
+                  m_dx12FallbackCompPSO ? LOG_INFO : LOG_ERROR);
       }
     }
 
@@ -2687,7 +2700,8 @@ int Engine::AllocateMyDX9Stuff() {
       UINT bbH = (UINT)max(1, m_lpDX->m_backbuffer_height);
       m_injectEffectTex = m_lpDX->CreateRenderTargetTexture(bbW, bbH, DXGI_FORMAT_R8G8B8A8_UNORM);
       m_lpDX->CreateBindingBlockForTexture(m_injectEffectTex);
-      DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED");
+      DebugLogA(m_injectEffectTex.IsValid() ? "DX12: Inject effect texture: created" : "DX12: Inject effect texture: FAILED",
+                m_injectEffectTex.IsValid() ? LOG_INFO : LOG_ERROR);
     }
 
     // Feedback buffers for Shadertoy temporal reprojection (ping-pong pair, VS-resolution)
@@ -2721,21 +2735,16 @@ int Engine::AllocateMyDX9Stuff() {
       if (m_dx12FeedbackD[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[0]);
       if (m_dx12FeedbackD[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[1]);
       m_nFeedbackIdx = 0;
-      DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
-                ? "DX12: Feedback buffers: created (ping-pong pair)"
-                : "DX12: Feedback buffers: FAILED");
-      DebugLogA(m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid()
-                ? "DX12: Image feedback buffers: created (ping-pong pair)"
-                : "DX12: Image feedback buffers: FAILED");
-      DebugLogA(m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid()
-                ? "DX12: FeedbackB buffers: created (ping-pong pair)"
-                : "DX12: FeedbackB buffers: FAILED");
-      DebugLogA(m_dx12FeedbackC[0].IsValid() && m_dx12FeedbackC[1].IsValid()
-                ? "DX12: FeedbackC buffers: created (ping-pong pair)"
-                : "DX12: FeedbackC buffers: FAILED");
-      DebugLogA(m_dx12FeedbackD[0].IsValid() && m_dx12FeedbackD[1].IsValid()
-                ? "DX12: FeedbackD buffers: created (ping-pong pair)"
-                : "DX12: FeedbackD buffers: FAILED");
+      { bool ok = m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid();
+        DebugLogA(ok ? "DX12: Feedback buffers: created (ping-pong pair)" : "DX12: Feedback buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid();
+        DebugLogA(ok ? "DX12: Image feedback buffers: created (ping-pong pair)" : "DX12: Image feedback buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackB buffers: created (ping-pong pair)" : "DX12: FeedbackB buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackC[0].IsValid() && m_dx12FeedbackC[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackC buffers: created (ping-pong pair)" : "DX12: FeedbackC buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
+      { bool ok = m_dx12FeedbackD[0].IsValid() && m_dx12FeedbackD[1].IsValid();
+        DebugLogA(ok ? "DX12: FeedbackD buffers: created (ping-pong pair)" : "DX12: FeedbackD buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
     }
 
     // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
@@ -2783,7 +2792,8 @@ int Engine::AllocateMyDX9Stuff() {
           psBlob->GetBufferPointer(), (UINT)psBlob->GetBufferSize(),
           g_MyVertexLayout, _countof(g_MyVertexLayout), false);
         psBlob->Release();
-        DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED");
+        DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED",
+                  m_pInjectEffectPSO ? LOG_INFO : LOG_ERROR);
       }
     }
 
@@ -3228,11 +3238,22 @@ int Engine::AllocateMyDX9Stuff() {
         sFilename = message;
       }
 
-      // try to set the current preset index
+      // try to set the current preset index (match full path first, then filename only)
       for (size_t i = 0; i < m_presets.size(); i++) {
-        if (wcscmp(m_presets[i].szFilename.c_str(), sFilename.c_str()) == 0) {
+        if (_wcsicmp(m_presets[i].szFilename.c_str(), m_szPresetStartup) == 0) {
           m_nCurrentPreset = (int)i;
           break;
+        }
+      }
+      if (m_nCurrentPreset < 0) {
+        // Fallback: match by filename only (for lists with absolute paths)
+        for (size_t i = 0; i < m_presets.size(); i++) {
+          const wchar_t* fn = wcsrchr(m_presets[i].szFilename.c_str(), L'\\');
+          fn = fn ? fn + 1 : m_presets[i].szFilename.c_str();
+          if (_wcsicmp(fn, sFilename.c_str()) == 0) {
+            m_nCurrentPreset = (int)i;
+            break;
+          }
         }
       }
     }

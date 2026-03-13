@@ -328,6 +328,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SONG_WT_LABEL       2171  // Static label: "Window Title:" (for show/hide)
 #define IDC_MW_WT_PROFILE          2172  // ComboBox: profile selector (General tab)
 #define IDC_MW_WT_EDIT_PARSER      2173  // Button: "Edit Parser..." (General tab)
+#define IDC_MW_SONG_ANIM_COMBO    2175  // ComboBox: song title animation profile
+#define IDC_MW_SONG_PUSH_TITLE    2176  // Button: "Push Title"
+#define IDC_MW_SONG_EDIT_PROFILES 2177  // Button: "Edit Profiles..."
 
 // Window Title Parser popup controls
 #define IDC_MW_WTP_PROFILE         2180  // ComboBox: profile selector
@@ -609,6 +612,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
 #define IDC_MW_DISP_SAVE_PROFILE   7016 // Button: save display profile
 #define IDC_MW_DISP_LOAD_PROFILE   7017 // Button: load display profile
+#define IDC_MW_DISP_MIRROR_WM     7018 // Button: toggle mirror watermark mode
 
 // About tab
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
@@ -980,3 +984,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_SET_INPUTMIX_OPACITY  (WM_APP + 150)
 #define WM_MW_SET_INPUTMIX_LUMAKEY  (WM_APP + 151)
 #define WM_MW_SET_INPUTMIX_ONTOP    (WM_APP + 152)
+#define WM_MW_FULLSCREEN            (WM_APP + 160) // SIGNAL|FULLSCREEN
+#define WM_MW_WATERMARK             (WM_APP + 161) // SIGNAL|WATERMARK
+#define WM_MW_BORDERLESS_FS         (WM_APP + 162) // SIGNAL|BORDERLESS_FS
+#define WM_MW_STRETCH               (WM_APP + 163) // SIGNAL|STRETCH
+#define WM_MW_MIRROR                (WM_APP + 164) // SIGNAL|MIRROR
+#define WM_MW_MIRROR_WM             (WM_APP + 165) // SIGNAL|MIRROR_WM

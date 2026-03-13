@@ -245,15 +245,16 @@ void ToggleTransparency(HWND hwnd) {
 }
 
 void Engine::SetOpacity(HWND hwnd) {
-  if (IsBorderlessFullscreen(hwnd)) {
-    g_engine.m_WindowWatermarkModeOpacity = fOpacity;
-  }
-
   // Retrieve the current extended window style
   LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
   // Check if the window is currently in clickthrough mode
   bool isClickthrough = (exStyle & WS_EX_TRANSPARENT) != 0;
+
+  // Only save watermark opacity when in actual watermark mode (borderless FS + clickthrough)
+  if (IsBorderlessFullscreen(hwnd) && isClickthrough) {
+    g_engine.m_WindowWatermarkModeOpacity = fOpacity;
+  }
 
   // Ensure the window is layered (required for transparency)
   if (!(exStyle & WS_EX_LAYERED)) {
@@ -1023,19 +1024,6 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
     switch (wParam) {
     case VK_F2:
-      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
-          (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
-        // Ctrl+Shift+F2: reset all hotkeys to defaults
-        ResetHotkeyDefaults();
-        SaveHotkeySettings();
-        GenerateHelpText();
-        g_nHelpLineCount = m_nHelpLineCount;
-        HWND hRender = GetPluginWindow();
-        if (hRender)
-          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
-        AddNotification(L"All hotkeys reset to defaults");
-        return 0;
-      }
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
         // Ctrl+F2: kill switch — disable all display outputs + reset open windows
         EnqueueRenderCmd(RenderCmd::DisableAllOutputs);
@@ -1694,10 +1682,9 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           // LOAD NEW PRESET
           m_nCurrentPreset = m_nPresetListCurPos;
 
-          // first take the filename and prepend the path.  (already has extension)
+          // build full path (handles both relative and absolute paths from preset lists)
           wchar_t s[MAX_PATH];
-          lstrcpyW(s, GetPresetDir());	// note: m_szPresetDir always ends with '\'
-          lstrcatW(s, m_presets[m_nCurrentPreset].szFilename.c_str());
+          BuildPresetPath(m_nCurrentPreset, s, MAX_PATH);
 
           // now load (and blend to) the new preset
           m_presetHistoryPos = (m_presetHistoryPos + 1) % PRESET_HIST_LEN;

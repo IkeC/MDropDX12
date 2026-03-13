@@ -386,7 +386,7 @@ void Engine::CompileSpoutInputPSO()
         psBlob->GetBufferPointer(), (UINT)psBlob->GetBufferSize(),
         g_MyVertexLayout, _countof(g_MyVertexLayout), true /*alphaBlend*/);
     psBlob->Release();
-    DebugLogA(m_pSpoutInputPSO ? "DX12: Spout Input PSO: created" : "DX12: Spout Input PSO: create FAILED");
+    DebugLogA(m_pSpoutInputPSO ? "DX12: Spout Input PSO: created" : "DX12: Spout Input PSO: create FAILED", m_pSpoutInputPSO ? LOG_INFO : LOG_ERROR);
 }
 
 // ---------------------------------------------------------------------------

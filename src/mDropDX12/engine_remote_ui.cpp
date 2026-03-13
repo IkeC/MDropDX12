@@ -194,14 +194,11 @@ LRESULT RemoteWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
     int seq = g_lastIPCMessageSeq.load();
     if (seq != m_lastSeenIPCSeq) {
       m_lastSeenIPCSeq = seq;
-      HWND hList = GetDlgItem(hWnd, IDC_MW_IPC_LIST);
-      int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-      if (sel != LB_ERR) {
-        wchar_t header[64];
-        swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
-      }
+      RefreshIPCList();
+      wchar_t header[64];
+      swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
     }
     return 0;
   }

@@ -142,6 +142,7 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_CONTROLLER, 0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Controller",       L"OpenController");
     HK_DEF(i++, HK_OPEN_ANNOTATIONS,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Annotations",      L"OpenAnnotations");
     HK_DEF(i++, HK_POLL_TRACK_INFO, 0,                     0,            HKSCOPE_LOCAL, HKCAT_MEDIA, L"Poll Track Info",       L"PollTrackInfo");
+    HK_DEF(i++, HK_MIRROR_WATERMARK,0,                    0,            HKSCOPE_LOCAL, HKCAT_WINDOW,L"Mirror Watermark",      L"MirrorWatermark");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -799,7 +800,7 @@ bool Engine::DispatchHotkeyAction(int actionId)
         OpenTextAnimWindow();
         return true;
     case HK_OPEN_REMOTE:
-        OpenMDropDX12Remote();
+        OpenRemoteWindow();
         return true;
     case HK_OPEN_VISUAL:
         OpenVisualWindow();
@@ -815,6 +816,9 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_POLL_TRACK_INFO:
         if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
+    case HK_MIRROR_WATERMARK:
+        if (hRender) PostMessage(hRender, WM_MW_MIRROR_WM, 0, 0);
         return true;
 
     // ── Shader/Effects ──

@@ -9,6 +9,7 @@
 #include "engine_helpers.h"
 #include "tool_window.h"
 #include "pipe_server.h"
+#include <thread>
 #include "utility.h"
 #include "AutoCharFn.h"
 #include "support.h"
@@ -2461,6 +2462,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     SendMessageToMDropDX12Remote((L"OPACITY=" + std::to_wstring(display)).c_str());
     SendPresetChangedInfoToMDropDX12Remote();
     SendSettingsInfoToMDropDX12Remote();
+    SendTrackInfoToMDropDX12Remote();
     if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG) {
       PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
     }
@@ -2477,8 +2479,8 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
   }
   else if (wcsncmp(sMessage, L"CONFIG", 6) == 0) {
     ReadConfig();
-    // to update fonts
-    AllocateDX9Stuff();
+    // to update fonts — use ResetBufferAndFonts for proper SRV cleanup
+    ResetBufferAndFonts();
   }
   else if (wcsncmp(sMessage, L"SETTINGS", 8) == 0) {
     m_fTimeBetweenPresets = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenPresets", m_fTimeBetweenPresets, GetConfigIniFile());
@@ -2645,43 +2647,53 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     m_bFFTSmoothingActive = true;
   }
   else if (wcsncmp(sMessage, L"LOAD_LIST=", 10) == 0) {
-    // Load a saved preset list by name.  Format: LOAD_LIST=<listname>
+    // Offloaded from render thread — file I/O + CancelThread can block up to 500ms
     std::wstring listName(sMessage + 10);
-    wchar_t szDir[MAX_PATH];
-    GetPresetListDir(szDir, MAX_PATH);
-    wchar_t szPath[MAX_PATH];
-    swprintf(szPath, MAX_PATH, L"%s%s.txt", szDir, listName.c_str());
-    extern PipeServer g_pipeServer;
-    if (LoadPresetList(szPath)) {
-      WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), GetConfigIniFile());
-      g_pipeServer.Send(L"LOAD_LIST_RESULT=OK|" + listName);
-    } else {
-      g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|list not found: " + listName);
-    }
+    std::thread([this, listName]() {
+      extern PipeServer g_pipeServer;
+      if (listName.find_first_of(L"\\/:") != std::wstring::npos ||
+          listName.find(L"..") != std::wstring::npos) {
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|invalid list name");
+        return;
+      }
+      wchar_t szDir[MAX_PATH];
+      GetPresetListDir(szDir, MAX_PATH);
+      wchar_t szPath[MAX_PATH];
+      swprintf(szPath, MAX_PATH, L"%s%s.txt", szDir, listName.c_str());
+      if (LoadPresetList(szPath)) {
+        WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), GetConfigIniFile());
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=OK|" + listName);
+      } else {
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|list not found: " + listName);
+      }
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"CLEAR_LIST", 10) == 0) {
-    // Clear the active preset list and revert to directory scan
-    m_szActivePresetList.clear();
-    WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
-    m_bRecursivePresets = (m_nSubdirMode == 1);
-    UpdatePresetList(true, true);
-    extern PipeServer g_pipeServer;
-    g_pipeServer.Send(L"CLEAR_LIST_RESULT=OK");
+    // Offloaded from render thread — INI write + UpdatePresetList
+    std::thread([this]() {
+      m_szActivePresetList.clear();
+      WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
+      UpdatePresetList(true, true);
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(L"CLEAR_LIST_RESULT=OK");
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"ENUM_LISTS", 10) == 0) {
-    // Enumerate available preset lists.  Returns pipe-separated list names.
-    std::vector<std::wstring> names;
-    EnumPresetLists(names);
-    std::wstring result = L"ENUM_LISTS_RESULT=";
-    for (size_t i = 0; i < names.size(); i++) {
-      if (i > 0) result += L"|";
-      result += names[i];
-    }
-    extern PipeServer g_pipeServer;
-    g_pipeServer.Send(result);
+    // Offloaded from render thread — directory scan
+    std::thread([this]() {
+      std::vector<std::wstring> names;
+      EnumPresetLists(names);
+      std::wstring result = L"ENUM_LISTS_RESULT=";
+      for (size_t i = 0; i < names.size(); i++) {
+        if (i > 0) result += L"|";
+        result += names[i];
+      }
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(result);
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"SET_DIR=", 8) == 0) {
-    // Change preset directory.  Format: SET_DIR=<path>[|recursive]
+    // Offloaded from render thread — dir validation + ChangePresetDir (INI write + UpdatePresetList)
     std::wstring value(sMessage + 8);
     bool bRecursive = false;
     size_t pipePos = value.find(L'|');
@@ -2691,22 +2703,23 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
         bRecursive = true;
       value = value.substr(0, pipePos);
     }
-    // Ensure trailing backslash
     if (!value.empty() && value.back() != L'\\')
       value += L'\\';
-    wchar_t szNewDir[MAX_PATH];
-    lstrcpynW(szNewDir, value.c_str(), MAX_PATH);
-    extern PipeServer g_pipeServer;
-    if (GetFileAttributesW(szNewDir) != INVALID_FILE_ATTRIBUTES) {
-      m_szActivePresetList.clear();
-      ChangePresetDir(szNewDir, m_szPresetDir);
-      m_bRecursivePresets = bRecursive;
-      m_nCurrentPreset = -1;
-      UpdatePresetList(true, true);
-      g_pipeServer.Send(L"SET_DIR_RESULT=OK|" + value);
-    } else {
-      g_pipeServer.Send(L"SET_DIR_RESULT=ERROR|directory not found: " + value);
-    }
+    std::thread([this, value, bRecursive]() {
+      wchar_t szNewDir[MAX_PATH];
+      lstrcpynW(szNewDir, value.c_str(), MAX_PATH);
+      extern PipeServer g_pipeServer;
+      if (GetFileAttributesW(szNewDir) != INVALID_FILE_ATTRIBUTES) {
+        m_szActivePresetList.clear();
+        WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
+        m_nSubdirMode = bRecursive ? 1 : 0;
+        m_nCurrentPreset = -1;
+        ChangePresetDir(szNewDir, m_szPresetDir);
+        g_pipeServer.Send(L"SET_DIR_RESULT=OK|" + value);
+      } else {
+        g_pipeServer.Send(L"SET_DIR_RESULT=ERROR|directory not found: " + value);
+      }
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"SHADER_IMPORT=", 14) == 0) {
     // Load JSON, convert GLSL→HLSL, apply.  Format: SHADER_IMPORT=<path>
@@ -2757,6 +2770,191 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(L"SHADER_SAVE_RESULT=" + result);
   }
+  else if (wcsncmp(sMessage, L"SET_LOGLEVEL=", 13) == 0) {
+    // Change log level at runtime.  Format: SET_LOGLEVEL=<0-4>
+    int newLevel = _wtoi(sMessage + 13);
+    if (newLevel < 0) newLevel = 0;
+    if (newLevel > 4) newLevel = 4;
+    m_LogLevel = newLevel;
+    DebugLogSetLevel(newLevel);
+    if (mdropdx12) mdropdx12->logLevel = newLevel;
+    WritePrivateProfileIntW(newLevel, L"LogLevel", GetConfigIniFile(), L"Milkwave");
+    const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    wchar_t buf[64];
+    swprintf_s(buf, L"LOGLEVEL=%d|%s", newLevel, names[newLevel]);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+    DLOG_INFO("Log level changed to %d via IPC", newLevel);
+  }
+  else if (wcsncmp(sMessage, L"DIAG_MIRRORS", 12) == 0) {
+    // Dump mirror state for diagnostics
+    extern PipeServer g_pipeServer;
+    std::wstring response = L"MIRRORS|active=";
+    response += m_bMirrorsActive ? L"1" : L"0";
+    // Report which monitor the render window is on
+    if (m_lpDX && m_lpDX->GetHwnd()) {
+      HMONITOR hMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
+      if (hMon) {
+        MONITORINFOEXW mi = { sizeof(mi) };
+        if (GetMonitorInfoW(hMon, &mi)) {
+          response += L"|render_on=";
+          response += mi.szDevice;
+          RECT wr;
+          GetWindowRect(m_lpDX->GetHwnd(), &wr);
+          wchar_t buf[128];
+          swprintf_s(buf, L",renderwin=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+          response += buf;
+          // Render window opacity and style
+          swprintf_s(buf, L",opacity=%.2f,fs=%d",
+            fOpacity, IsBorderlessFullscreen(m_lpDX->GetHwnd()) ? 1 : 0);
+          response += buf;
+          LONG_PTR exStyle = GetWindowLongPtr(m_lpDX->GetHwnd(), GWL_EXSTYLE);
+          response += (exStyle & WS_EX_TRANSPARENT) ? L",clickthru=1" : L",clickthru=0";
+        }
+      }
+    }
+    int idx = 0;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      response += L"|mon";
+      response += std::to_wstring(idx);
+      response += L"=";
+      response += out.config.szDeviceName;
+      response += L",enabled=";
+      response += out.config.bEnabled ? L"1" : L"0";
+      response += L",opacity=";
+      response += std::to_wstring(out.config.nOpacity);
+      response += L",clickthru=";
+      response += out.config.bClickThrough ? L"1" : L"0";
+      response += L",skipped=";
+      response += out.bSkippedSameMonitor ? L"1" : L"0";
+      // Display area from enumeration
+      auto& rc = out.config.rcMonitor;
+      wchar_t rcBuf[128];
+      swprintf_s(rcBuf, L",display=(%d,%d)-(%d,%d) %dx%d",
+        rc.left, rc.top, rc.right, rc.bottom,
+        rc.right - rc.left, rc.bottom - rc.top);
+      response += rcBuf;
+      if (out.monitorState) {
+        auto& ms = *out.monitorState;
+        response += L",ready=";
+        response += ms.bReady ? L"1" : L"0";
+        response += L",hwnd=";
+        wchar_t hwndBuf[32];
+        swprintf_s(hwndBuf, L"%p", (void*)ms.hWnd);
+        response += hwndBuf;
+        response += L",swapsize=";
+        response += std::to_wstring(ms.width);
+        response += L"x";
+        response += std::to_wstring(ms.height);
+        // Check if window is actually visible
+        if (ms.hWnd) {
+          RECT wr;
+          GetWindowRect(ms.hWnd, &wr);
+          swprintf_s(rcBuf, L",winrect=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+          response += rcBuf;
+          response += IsWindowVisible(ms.hWnd) ? L",visible=1" : L",visible=0";
+        }
+      } else {
+        response += L",state=none";
+      }
+      idx++;
+    }
+    g_pipeServer.Send(response.c_str());
+  }
+  else if (wcsncmp(sMessage, L"SET_MIRROR_OPACITY=", 19) == 0) {
+    // Set opacity for all monitor mirrors.  Format: SET_MIRROR_OPACITY=<1-100>
+    int val = _wtoi(sMessage + 19);
+    if (val < 1) val = 1;
+    if (val > 100) val = 100;
+    for (auto& out : m_displayOutputs)
+      if (out.config.type == DisplayOutputType::Monitor)
+        out.config.nOpacity = val;
+    m_bMirrorStylesDirty.store(true);
+    SaveDisplayOutputSettings();
+    RefreshDisplaysTab();
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"SET_MIRROR_CLICKTHRU=", 21) == 0) {
+    // Set click-through for all monitor mirrors.  Format: SET_MIRROR_CLICKTHRU=<0|1>
+    bool val = (_wtoi(sMessage + 21) != 0);
+    for (auto& out : m_displayOutputs)
+      if (out.config.type == DisplayOutputType::Monitor)
+        out.config.bClickThrough = val;
+    m_bMirrorStylesDirty.store(true);
+    SaveDisplayOutputSettings();
+    RefreshDisplaysTab();
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MIRROR_CLICKTHRU=%d", val ? 1 : 0);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"MOVE_TO_DISPLAY=", 16) == 0) {
+    // Move render window to center of display N (1-based).  Format: MOVE_TO_DISPLAY=<N>
+    int idx = _wtoi(sMessage + 16) - 1; // convert 1-based to 0-based
+    int monIdx = 0;
+    extern PipeServer g_pipeServer;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      if (monIdx == idx) {
+        RECT rc = out.config.rcMonitor;
+        int cx = (rc.left + rc.right) / 2;
+        int cy = (rc.top + rc.bottom) / 2;
+        HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+        if (hRender) {
+          RECT wr;
+          GetWindowRect(hRender, &wr);
+          int ww = wr.right - wr.left;
+          int wh = wr.bottom - wr.top;
+          SetWindowPos(hRender, nullptr, cx - ww/2, cy - wh/2, 0, 0,
+              SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+          wchar_t buf[128];
+          swprintf_s(buf, L"MOVED_TO=%ls", out.config.szDeviceName);
+          g_pipeServer.Send(buf);
+        }
+        break;
+      }
+      monIdx++;
+    }
+  }
+  else if (wcsncmp(sMessage, L"SET_WINDOW=", 11) == 0) {
+    // Set render window position and size.  Format: SET_WINDOW=<x>,<y>,<w>,<h>
+    int x, y, w, h;
+    if (swscanf_s(sMessage + 11, L"%d,%d,%d,%d", &x, &y, &w, &h) == 4) {
+      HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+      if (hRender) {
+        UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        if (w <= 0 || h <= 0) flags |= SWP_NOSIZE;
+        SetWindowPos(hRender, nullptr, x, y,
+            (w > 0 ? w : 0), (h > 0 ? h : 0), flags);
+        RECT wr;
+        GetWindowRect(hRender, &wr);
+        extern PipeServer g_pipeServer;
+        wchar_t buf[128];
+        swprintf_s(buf, L"WINDOW=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+        g_pipeServer.Send(buf);
+      }
+    }
+  }
+  else if (wcsncmp(sMessage, L"GET_LOGLEVEL", 12) == 0) {
+    // Query current log level.
+    const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = g_debugLogLevel;
+    if (lvl < 0) lvl = 0; if (lvl > 4) lvl = 4;
+    wchar_t buf[64];
+    swprintf_s(buf, L"LOGLEVEL=%d|%s", lvl, names[lvl]);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.
@@ -2768,6 +2966,14 @@ void Engine::SendPresetChangedInfoToMDropDX12Remote() {
   std::wstring msg = L"PRESET=" + std::wstring(m_szCurrentPresetFile);
   SendMessageToMDropDX12Remote(msg.c_str(), true);
   SendPresetWaveInfoToMDropDX12Remote();
+}
+
+void Engine::SendTrackInfoToMDropDX12Remote() {
+  extern MDropDX12 mdropdx12;
+  std::wstring msg = L"TRACK|artist=" + mdropdx12.currentArtist
+                   + L"|title=" + mdropdx12.currentTitle
+                   + L"|album=" + mdropdx12.currentAlbum;
+  SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
 void Engine::SendPresetWaveInfoToMDropDX12Remote() {

@@ -880,17 +880,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // Open Hotkeys window
-    if (id == IDC_MW_OPEN_HOTKEYS && code == BN_CLICKED) {
-      p->OpenHotkeysWindow();
-      return 0;
-    }
-
-    // Open MIDI window
-    if (id == IDC_MW_OPEN_MIDI && code == BN_CLICKED) {
-      p->OpenMidiWindow();
-      return 0;
-    }
 
     // Close button
     if (id == IDC_MW_CLOSE && code == BN_CLICKED) {
@@ -930,6 +919,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
         p->m_LogLevel = newLevel;
         DebugLogSetLevel(newLevel);
+        if (p->mdropdx12) p->mdropdx12->logLevel = newLevel;
         WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
         return 0;
       }
@@ -1361,16 +1351,6 @@ void SettingsWindow::DoBuildControls() {
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
     EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
     PAGE_CTRL(SP_SYSTEM, hCombo);
-  }
-  y += lineH + gap + 8;
-
-  // Keyboard Shortcuts / MIDI
-  {
-    int btnW = MulDiv(100, lineH, 26);
-    int midiW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw - btnW - midiW - 16, lineH, hFontBold, false));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"MIDI...", IDC_MW_OPEN_MIDI, x + rw - btnW - midiW - 8, y, midiW, lineH, hFont));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Hotkeys...", IDC_MW_OPEN_HOTKEYS, x + rw - btnW, y, btnW, lineH, hFont));
   }
   y += lineH + gap + 8;
 

@@ -371,6 +371,29 @@ server.tool(
   }
 );
 
+// Tool: Get or set log level
+server.tool(
+  'mdrop_set_loglevel',
+  'Get or set the visualizer log level (0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose)',
+  {
+    level: z.number().int().min(0).max(4).optional()
+      .describe('Log level to set (0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose). Omit to query current level.'),
+  },
+  async ({ level }) => {
+    try {
+      if (level !== undefined) {
+        const response = await send(`SET_LOGLEVEL=${level}`, true);
+        return { content: [{ type: 'text', text: response || `Set log level: ${level}` }] };
+      } else {
+        const response = await send('GET_LOGLEVEL', true);
+        return { content: [{ type: 'text', text: response || 'Unknown' }] };
+      }
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
 // Tool: Shader import (load JSON, convert GLSL→HLSL, apply)
 server.tool(
   'mdrop_shader_import',

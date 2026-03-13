@@ -252,6 +252,7 @@ typedef struct td_supertext {
   float	fFontSize;			// [0..100] for custom messages, [0..4] for song titles
   float fGrowth;			// applies to custom messages only
   int		nFontSizeUsed;		// height IN PIXELS
+  int		nTextWidthUsed = 0;	// width IN PIXELS of the rendered text in the title texture
   float	fDuration;
   float	fFadeInTime; // applies to custom messages only; song title fade times are handled specially
   float	fFadeOutTime; // applies to custom messages only; song title fade times are handled specially
@@ -459,6 +460,8 @@ public:
   ComPtr<ID3D12GraphicsCommandList>  m_mirrorCmdList;
   bool m_bMirrorClassRegistered = false;
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
+  bool m_bMirrorWatermarkActive = false; // True while in mirror watermark mode (App.cpp manages)
+  bool m_bWatermarkActive = false;       // True while in single-window watermark mode (App.cpp manages)
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all
   bool m_bMirrorPromptActive = false;   // Guard: prompt already showing
@@ -784,6 +787,8 @@ public:
   //   Note that this is NOT the same as the currently-highlighted preset! (that's m_nPresetListCurPos)
   //   Be careful - this can be -1 if the user changed dir. & a new preset hasn't been loaded yet.
   wchar_t		m_szCurrentPresetFile[512];	// w/o path.  this is always valid (unless no presets were found)
+  wchar_t		m_szPendingStartupSave[512] = {};  // preset path waiting to be persisted after 5s render time
+  float		m_fPendingStartupSaveTime = 0;     // GetTime() when preset was loaded (0 = no pending save)
   PresetList  m_presets;
 
   // Pending preset data — scan thread writes, render thread swaps in
@@ -1275,6 +1280,7 @@ public:
   void    SendPresetChangedInfoToMDropDX12Remote();
   void    SendPresetWaveInfoToMDropDX12Remote();
   void    SendSettingsInfoToMDropDX12Remote();
+  void    SendTrackInfoToMDropDX12Remote();
   void    SetWaveParamsFromMessage(std::wstring& message);
   void		ReadCustomMessages();
   void		LaunchSongTitleAnim(int supertextIndex);

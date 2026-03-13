@@ -689,8 +689,13 @@ void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
     if (final_cleanup) {
       CleanUpFonts();
     }
-    // Release help overlay texture (will be re-created lazily on next F1)
-    m_helpTexture.Reset();
+    // Release help overlay texture resource (will be re-created on next AllocateDX9Stuff).
+    // Use ResetResource() to preserve SRV/binding block indices so CreateHelpTexture()
+    // reuses the existing descriptor slots instead of leaking new ones each resize.
+    if (final_cleanup)
+      m_helpTexture.Reset();          // full cleanup: free descriptor indices too
+    else
+      m_helpTexture.ResetResource();  // resize: keep srvIndex + bindingBlockStart
     m_helpUploadBuffer.Reset();
     m_helpTexturePage = 0;
   }
@@ -810,13 +815,13 @@ void EngineShell::OnUserResizeWindow() {
         }
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
-      DebugLogA("OnUserResizeWindow: calling AllocateDX9Stuff...", LOG_ERROR);
+      DebugLogA("OnUserResizeWindow: calling AllocateDX9Stuff...", LOG_INFO);
       if (!AllocateDX9Stuff()) {
         DebugLogA("OnUserResizeWindow: AllocateDX9Stuff FAILED — setting m_ready=false", LOG_ERROR);
         m_lpDX->m_ready = false;   // flag to exit
         return;
       }
-      DebugLogA("OnUserResizeWindow: AllocateDX9Stuff succeeded, resize complete", LOG_ERROR);
+      DebugLogA("OnUserResizeWindow: AllocateDX9Stuff succeeded, resize complete", LOG_INFO);
       //}
       /*if (!InitVJStuff())
       {
@@ -904,9 +909,9 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   m_start_fullscreen = 0;
   m_start_desktop = 0;
   m_fake_fullscreen_mode = 0;
-  m_max_fps_fs = 144;
-  m_max_fps_dm = 144;
-  m_max_fps_w = 144;
+  m_max_fps_fs = 60;
+  m_max_fps_dm = 60;
+  m_max_fps_w = 60;
   m_show_press_f1_msg = 1;
   m_allow_page_tearing_w = 1;
   m_allow_page_tearing_fs = 0;
@@ -1177,11 +1182,7 @@ void EngineShell::ReadConfig() {
   int old_ver = GetPrivateProfileIntW(L"Settings", L"version", -1, m_szConfigIniFile);
   int old_subver = GetPrivateProfileIntW(L"Settings", L"subversion", -1, m_szConfigIniFile);
 
-  // nuke old settings from prev. version:
-  if (old_ver < INT_VERSION)
-    return;
-  else if (old_subver < INT_SUBVERSION)
-    return;
+  // Legacy MilkDrop version guard removed — these settings are always valid in MDropDX12
 
   // m_multisample_* removed in DX12 migration (MSAA configured via PSO instead)
 
@@ -1547,7 +1548,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
       if (FAILED(hr)) {
         wchar_t msg[128];
         swprintf_s(msg, 128, L"[CaptureScreenshot] Map failed: 0x%08X", hr);
-        DebugLogW(msg);
+        DebugLogW(msg, LOG_ERROR);
       }
       if (SUCCEEDED(hr)) {
         // Save as PNG via WIC (COM must be initialized on this thread)
@@ -1555,7 +1556,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         if (FAILED(hr) && hr != RPC_E_CHANGED_MODE && hr != S_FALSE) {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] CoInitializeEx failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
         bool comInit = SUCCEEDED(hr) || hr == S_FALSE || hr == RPC_E_CHANGED_MODE;
 
@@ -1565,7 +1566,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         if (FAILED(hr)) {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] CoCreateInstance WIC failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
         if (SUCCEEDED(hr)) {
           IWICStream* pStream = nullptr;
@@ -1575,7 +1576,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
             if (FAILED(hr)) {
               wchar_t msg[512];
               swprintf_s(msg, 512, L"[CaptureScreenshot] InitializeFromFilename failed: 0x%08X path=%s", hr, m_screenshotPath);
-              DebugLogW(msg);
+              DebugLogW(msg, LOG_ERROR);
             }
             if (SUCCEEDED(hr)) {
               IWICBitmapEncoder* pEncoder = nullptr;
@@ -1620,7 +1621,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         } else {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X", hr);
-          DebugLogW(msg);
+          DebugLogW(msg, LOG_ERROR);
         }
       }
     } else if (m_bScreenshotRequested) {
@@ -2898,6 +2899,8 @@ float EngineShell::GetEffectiveRenderQuality(int width, int height) {
 }
 
 void EngineShell::ResetBufferAndFonts() {
+  if (!m_lpDX) return;
+
   RECT w, c;
   GetWindowRect(m_lpDX->GetHwnd(), &w);
   GetClientRect(m_lpDX->GetHwnd(), &c);
@@ -2911,20 +2914,21 @@ void EngineShell::ResetBufferAndFonts() {
   m_lpDX->ResizeSwapChain(newW, newH);
 
   if (newW != 0 && newH != 0) {
-    CleanUpFonts();
-    AllocateFonts();
-    // Rebuild font atlas textures (CleanUpFonts destroys them)
-    if (m_bEnableD2DText && !m_text.IsD2DReady()) {
-      m_text.Finish();
-      m_text.Init(GetDX12Device(), nullptr, 1);
-      if (m_lpDX) {
-        if (m_lpDX->m_commandQueue)
-          m_lpDX->WaitForGpu();
-        m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
-        m_lpDX->m_srvSlotBaseline = m_lpDX->m_nextFreeSrvSlot;
-        m_lpDX->m_rtvSlotBaseline = m_lpDX->m_nextFreeRtvSlot;
-      }
-    }
+    // Full cleanup/allocate cycle to avoid SRV descriptor heap leak.
+    // Old code rebuilt font atlases at m_nextFreeSrvSlot (above dynamic textures)
+    // and advanced the baseline, permanently leaking the old font atlas SRV slots
+    // and the dynamic texture slots below the new baseline.
+    CleanUpFonts();      // destroy font atlas textures
+    CleanUpDX9Stuff(0);  // release dynamic textures, WaitForGpu, ResetDynamicDescriptors
+    // Fully reset help texture so it gets fresh slots after font atlas rebuild
+    // (ResetResource from CleanUpDX9Stuff preserved its indices, but we're rewinding past them)
+    m_helpTexture.Reset();
+    // Rewind to DXContext init baseline so font atlas SRV slots are reusable
+    m_lpDX->m_srvSlotBaseline = m_lpDX->m_srvSlotInitBaseline;
+    m_lpDX->m_rtvSlotBaseline = m_lpDX->m_rtvSlotInitBaseline;
+    m_lpDX->m_nextFreeSrvSlot = m_lpDX->m_srvSlotInitBaseline;
+    m_lpDX->m_nextFreeRtvSlot = m_lpDX->m_rtvSlotInitBaseline;
+    AllocateDX9Stuff();  // rebuilds fonts, help texture, sets baseline, creates dynamic textures
   }
 }
 // ─── Render Command Queue ────────────────────────────────────────────────────
