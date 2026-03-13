@@ -507,7 +507,7 @@ void Engine::MyRenderUI(
   }
 
   // 1b. render timed preset name display (Simple mode) — centered at top
-  if (m_szPresetNameDisplay[0] && GetTime() < m_fPresetNameShowUntil) {
+  if (m_bShowNotifications && m_szPresetNameDisplay[0] && GetTime() < m_fPresetNameShowUntil) {
     SelectFont(DECORATIVE_FONT);
     float fAge = GetTime() - (m_fPresetNameShowUntil - 3.5f);
     float fAlpha = 1.0f;

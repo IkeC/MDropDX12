@@ -175,6 +175,7 @@ public:
 
 
   wchar_t      m_szBaseDir[MAX_PATH];
+  wchar_t      m_szExeDir[MAX_PATH];   // exe directory (always used for settings.ini)
 
   // DX12 screenshot capture (Phase A)
   bool         m_bScreenshotRequested = false;

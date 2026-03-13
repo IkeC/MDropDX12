@@ -3218,6 +3218,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     fs::path exeDir = fs::path(exePath).parent_path();
     fs::path dir = exeDir;
 
+    // Store exe directory (always used for settings.ini, independent of base dir)
+    {
+      std::wstring exeDirStr = exeDir.wstring();
+      if (!exeDirStr.empty() && exeDirStr.back() != L'\\')
+        exeDirStr += L'\\';
+      wcscpy_s(g_engine.m_szExeDir, MAX_PATH, exeDirStr.c_str());
+    }
+
     // Look for resources directory:
     // 1. Prefer exe directory if it has resources/ (even without data/ subfolder)
     // 2. Only walk up parent directories if exe dir has no resources/ at all

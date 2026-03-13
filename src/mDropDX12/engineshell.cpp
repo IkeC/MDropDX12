@@ -1018,11 +1018,10 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   m_szPluginsDirPath[0] = 0;  // will be set further down
   m_szConfigIniFile[0] = 0;  // will be set further down
 
-  wcscpy(m_szPluginsDirPath, m_szBaseDir);
-
-  wchar_t* p = m_szPluginsDirPath + wcslen(m_szPluginsDirPath);
-  while (p >= m_szPluginsDirPath && *p != L'\\') p--;
-  if (++p >= m_szPluginsDirPath) *p = 0;
+  // settings.ini always lives in the exe directory, not in m_szBaseDir.
+  // This prevents using a parent directory's INI when MDropDX12 is nested
+  // inside another app's folder tree (e.g., Milkwave/MDropDX12/).
+  wcscpy(m_szPluginsDirPath, m_szExeDir);
 
   swprintf(m_szConfigIniFile, L"%s%s", m_szPluginsDirPath, INIFILE);
   lstrcpyn(m_szConfigIniFileA, AutoCharFn(m_szConfigIniFile), MAX_PATH);

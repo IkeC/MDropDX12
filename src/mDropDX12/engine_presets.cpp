@@ -1986,8 +1986,8 @@ void Engine::OnFinishedLoadingPreset() {
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 
-  // Preset name display on render
-  if (m_nPresetNameAnimProfile != -1) {
+  // Preset name display on render (suppressed when ShowNotifications=0)
+  if (m_nPresetNameAnimProfile != -1 && m_bShowNotifications) {
     // Extract preset filename without path/extension
     const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
     if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
