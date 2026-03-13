@@ -1639,7 +1639,7 @@ void Engine::MyReadConfig() {
 
   // We'll put these in the settings section since other MilkDrop forks use similar settings
   m_MinPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MinPSVersion", m_MinPSVersionConfig, pIni);
-  if (m_MinPSVersionConfig < 0) m_MinPSVersionConfig = 4; // MD2_PS_3_0 minimum for DX12
+  if (m_MinPSVersionConfig < 4) m_MinPSVersionConfig = 4; // MD2_PS_3_0 minimum for DX12 (ps_2_a silently drops texture bindings)
   m_MaxPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MaxPSVersion", m_MaxPSVersionConfig, pIni);
   if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 6;
   m_nMixType = GetPrivateProfileIntW(L"Settings", L"Mixtype", m_nMixType, pIni);
@@ -1669,9 +1669,9 @@ void Engine::MyReadConfig() {
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
   // Settings window position/size now managed by ToolWindow::LoadWindowPosition()
-  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
+  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -20, pIni);
   if (m_nSettingsFontSize > -12) m_nSettingsFontSize = -12;  // min font size
-  if (m_nSettingsFontSize < -24) m_nSettingsFontSize = -24;  // max font size
+  if (m_nSettingsFontSize < -32) m_nSettingsFontSize = -32;  // max font size
 
   // Settings window theme mode (Dark/Light/Follow System)
   // Migration: if new ThemeMode key doesn't exist yet, read old DarkTheme bool

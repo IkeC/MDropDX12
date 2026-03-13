@@ -1340,7 +1340,7 @@ public:
 
   // ToolWindow subclass instances (each runs on its own thread)
   std::unique_ptr<SettingsWindow>       m_settingsWindow;
-  int         m_nSettingsFontSize = -16;     // Shared font size for all tool windows (negative = pixel height)
+  int         m_nSettingsFontSize = -20;     // Shared font size for all tool windows (negative = pixel height)
   std::unique_ptr<DisplaysWindow>       m_displaysWindow;
   std::unique_ptr<SongInfoWindow>       m_songInfoWindow;
   std::unique_ptr<HotkeysWindow>        m_hotkeysWindow;
