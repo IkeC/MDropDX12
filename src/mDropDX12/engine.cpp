@@ -1669,9 +1669,9 @@ void Engine::MyReadConfig() {
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
   // Settings window position/size now managed by ToolWindow::LoadWindowPosition()
-  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
+  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -20, pIni);
   if (m_nSettingsFontSize > -12) m_nSettingsFontSize = -12;  // min font size
-  if (m_nSettingsFontSize < -24) m_nSettingsFontSize = -24;  // max font size
+  if (m_nSettingsFontSize < -32) m_nSettingsFontSize = -32;  // max font size
 
   // Settings window theme mode (Dark/Light/Follow System)
   // Migration: if new ThemeMode key doesn't exist yet, read old DarkTheme bool

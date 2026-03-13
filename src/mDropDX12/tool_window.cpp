@@ -1219,7 +1219,7 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
     // Font + (common)
     if (id == tw->GetFontPlusControlID() && code == BN_CLICKED) {
-      if (p->m_nSettingsFontSize > -24) {
+      if (p->m_nSettingsFontSize > -32) {
         p->m_nSettingsFontSize -= 2;
         tw->RebuildFonts();
         p->BroadcastFontSync(hWnd);
