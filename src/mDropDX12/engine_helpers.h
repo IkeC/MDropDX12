@@ -470,6 +470,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
 #define IDT_CONTROLLER_POLL         10003 // Timer ID for game controller polling (50ms)
+#define IDT_SAVE_SETTINGS_DEBOUNCE  10004 // Timer ID for debounced settings save (2s after last change)
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 

@@ -1106,6 +1106,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   {
     KillTimer(hWnd, IDT_IDLE_CHECK);
     KillTimer(hWnd, IDT_CONTROLLER_POLL);
+    KillTimer(hWnd, IDT_SAVE_SETTINGS_DEBOUNCE);
     g_engine.UnregisterGlobalHotkeys(hWnd);
     g_engine.SaveWindowSizeAndPosition(hWnd);
 
@@ -1549,6 +1550,8 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       };
       g_engine.m_nInjectEffectMode = (g_engine.m_nInjectEffectMode + 1) % 5;
       g_engine.AddNotificationColored(kInjectNames[g_engine.m_nInjectEffectMode], 1.5f, 0xFF00FFFF);
+      // Debounced save — resets on each cycle, fires 2s after user settles
+      SetTimer(hWnd, IDT_SAVE_SETTINGS_DEBOUNCE, 2000, NULL);
       break;
     }
     case HK_HARDCUT_MODE_CYCLE: {
@@ -1599,6 +1602,13 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
     if (wParam == IDT_CONTROLLER_POLL) {
       g_engine.PollController();
+      return 0;
+    }
+    if (wParam == IDT_SAVE_SETTINGS_DEBOUNCE) {
+      KillTimer(hWnd, IDT_SAVE_SETTINGS_DEBOUNCE);
+      // Write changed settings to INI (inject effect, etc.)
+      wchar_t* pIni = g_engine.GetConfigIniFile();
+      WritePrivateProfileIntW(g_engine.m_nInjectEffectMode, L"nInjectEffectMode", pIni, L"Settings");
       return 0;
     }
     break;
@@ -2550,31 +2560,65 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   mdropdx12.LogInfo(L"CreateWindowAndRun: Creating window");
 
-  if (g_engine.m_WindowX == 0 || g_engine.m_WindowY == 0 || g_engine.m_WindowWidth == 0 || g_engine.m_WindowHeight == 0) {
-    RECT workArea{};
-    if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0)) {
-      workArea.left = 0;
-      workArea.top = 0;
-      workArea.right = GetSystemMetrics(SM_CXSCREEN);
-      workArea.bottom = GetSystemMetrics(SM_CYSCREEN);
+  {
+    // Validate saved window position — ensure it's mostly on a visible monitor.
+    bool needsDefault = (g_engine.m_WindowWidth <= 0 || g_engine.m_WindowHeight <= 0);
+
+    if (!needsDefault) {
+      // Check that the window center lands on an actual monitor
+      POINT center = {
+        g_engine.m_WindowX + g_engine.m_WindowWidth / 2,
+        g_engine.m_WindowY + g_engine.m_WindowHeight / 2
+      };
+      HMONITOR hMon = MonitorFromPoint(center, MONITOR_DEFAULTTONULL);
+      if (!hMon) {
+        // Center is off-screen — try the top-left corner
+        RECT rc = { g_engine.m_WindowX, g_engine.m_WindowY,
+                     g_engine.m_WindowX + g_engine.m_WindowWidth,
+                     g_engine.m_WindowY + g_engine.m_WindowHeight };
+        hMon = MonitorFromRect(&rc, MONITOR_DEFAULTTONULL);
+      }
+      if (!hMon) {
+        needsDefault = true; // completely off-screen
+      } else {
+        // Nudge onto the monitor if partially off its work area
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfo(hMon, &mi)) {
+          RECT& wa = mi.rcWork;
+          if (g_engine.m_WindowX + g_engine.m_WindowWidth > wa.right)
+            g_engine.m_WindowX = wa.right - g_engine.m_WindowWidth;
+          if (g_engine.m_WindowY + g_engine.m_WindowHeight > wa.bottom)
+            g_engine.m_WindowY = wa.bottom - g_engine.m_WindowHeight;
+          if (g_engine.m_WindowX < wa.left)
+            g_engine.m_WindowX = wa.left;
+          if (g_engine.m_WindowY < wa.top)
+            g_engine.m_WindowY = wa.top;
+        }
+      }
     }
 
-    const int gapPx = 50;
-    int spanWidth = workArea.right - workArea.left;
-    int spanHeight = workArea.bottom - workArea.top;
-    int defaultWidth = spanWidth > 0 ? spanWidth / 3 : 640;
-    int defaultHeight = spanHeight > 0 ? spanHeight / 3 : 360;
-    if (defaultWidth <= 0) {
-      defaultWidth = 640;
-    }
-    if (defaultHeight <= 0) {
-      defaultHeight = 360;
-    }
+    if (needsDefault) {
+      RECT workArea{};
+      if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0)) {
+        workArea.left = 0;
+        workArea.top = 0;
+        workArea.right = GetSystemMetrics(SM_CXSCREEN);
+        workArea.bottom = GetSystemMetrics(SM_CYSCREEN);
+      }
 
-    g_engine.m_WindowWidth = defaultWidth;
-    g_engine.m_WindowHeight = defaultHeight;
-    g_engine.m_WindowX = (workArea.right - gapPx) - g_engine.m_WindowWidth;
-    g_engine.m_WindowY = workArea.top + gapPx;
+      const int gapPx = 50;
+      int spanWidth = workArea.right - workArea.left;
+      int spanHeight = workArea.bottom - workArea.top;
+      int defaultWidth = spanWidth > 0 ? spanWidth / 3 : 640;
+      int defaultHeight = spanHeight > 0 ? spanHeight / 3 : 360;
+      if (defaultWidth <= 0) defaultWidth = 640;
+      if (defaultHeight <= 0) defaultHeight = 360;
+
+      g_engine.m_WindowWidth = defaultWidth;
+      g_engine.m_WindowHeight = defaultHeight;
+      g_engine.m_WindowX = (workArea.right - gapPx) - g_engine.m_WindowWidth;
+      g_engine.m_WindowY = workArea.top + gapPx;
+    }
   }
 
 
