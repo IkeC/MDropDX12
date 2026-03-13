@@ -41,12 +41,7 @@ extern Engine g_engine;
 // ---------------------------------------------------------------------------
 static LONG WriteSEHCrashDiag(EXCEPTION_POINTERS* ep, const wchar_t* presetPath)
 {
-    // Build output path in the base directory (same as debug.log)
-    wchar_t path[MAX_PATH];
-    swprintf_s(path, L"%sdiag_seh_crash.txt", g_engine.m_szBaseDir);
-
-    FILE* f = nullptr;
-    _wfopen_s(&f, path, L"a"); // append — accumulates across crashes
+    FILE* f = DebugLogDiagOpen(L"diag_seh_crash.txt", L"a"); // append — accumulates across crashes
     if (!f) return EXCEPTION_EXECUTE_HANDLER;
 
     EXCEPTION_RECORD* er = ep->ExceptionRecord;
@@ -139,11 +134,7 @@ static LONG WriteSEHCrashDiag(EXCEPTION_POINTERS* ep, const wchar_t* presetPath)
 
     // --- Write EEL-specific diagnostics to diag_eel_error.txt ---
     if (g_eelCompileCtx.phase) {
-        wchar_t eelPath[MAX_PATH];
-        swprintf_s(eelPath, L"%sdiag_eel_error.txt", g_engine.m_szBaseDir);
-
-        FILE* ef = nullptr;
-        _wfopen_s(&ef, eelPath, L"a"); // append — accumulates across crashes
+        FILE* ef = DebugLogDiagOpen(L"diag_eel_error.txt", L"a"); // append — accumulates across crashes
         if (ef) {
             fwprintf(ef, L"\n========== EEL CRASH %04d-%02d-%02d %02d:%02d:%02d ==========\n",
                      st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
@@ -1986,8 +1977,8 @@ void Engine::OnFinishedLoadingPreset() {
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 
-  // Preset name display on render
-  if (m_nPresetNameAnimProfile != -1) {
+  // Preset name display on render (suppressed when ShowNotifications=0)
+  if (m_nPresetNameAnimProfile != -1 && m_bShowNotifications) {
     // Extract preset filename without path/extension
     const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
     if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');

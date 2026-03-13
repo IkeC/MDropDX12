@@ -29,6 +29,8 @@ static void AudioErr(LPCWSTR format, ...) {
 std::mutex pcmLpbMutex;
 unsigned char pcmLeftLpb[SAMPLE_SIZE_LPB];
 unsigned char pcmRightLpb[SAMPLE_SIZE_LPB];
+float pcmLeftFloatLpb[SAMPLE_SIZE_LPB];
+float pcmRightFloatLpb[SAMPLE_SIZE_LPB];
 bool pcmBufDrained = false;
 signed int pcmLen = 0;
 signed int pcmPos = 0;
@@ -36,17 +38,13 @@ signed int pcmPos = 0;
 float mdropdx12_amp_left = 1.0f;
 float mdropdx12_amp_right = 1.0f;
 float mdropdx12_audio_sensitivity = 1.0f;
-bool  mdropdx12_audio_adaptive = false;
-
-// Adaptive audio normalization state
-static float s_adaptivePeak = 0.1f;   // legacy: peak tracker (instant attack, slow decay)
-static float s_adaptiveAvg  = 0.01f;  // new: running average of |sample| (slow adaptation)
-static float s_adaptiveGain = 1.0f;
 
 void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
   memset(pcmLeftLpb, 128, SAMPLE_SIZE_LPB);
   memset(pcmRightLpb, 128, SAMPLE_SIZE_LPB);
+  memset(pcmLeftFloatLpb, 0, sizeof(pcmLeftFloatLpb));
+  memset(pcmRightFloatLpb, 0, sizeof(pcmRightFloatLpb));
   pcmBufDrained = false;
   pcmLen = 0;
 }
@@ -78,45 +76,39 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
   }
 }
 
-int8_t FltToInt(float flt) {
-  static int s_diagCount = 0;
-  float gain;
-  if (mdropdx12_audio_adaptive) {
-    float absFlt = fabsf(flt);
+void GetAudioBufFloat(float* pWaveL, float* pWaveR, int SamplesCount) {
+  std::unique_lock<std::mutex> lock(pcmLpbMutex);
+  static int consecutiveReads = 0;
+  static int lastPcmPos = pcmPos;
 
-    if (mdropdx12_audio_sensitivity <= -2.0f) {
-      // Legacy adaptive: instant peak attack, slow decay.
-      // Targets 10% of float range. Compresses transients aggressively.
-      if (absFlt > s_adaptivePeak)
-        s_adaptivePeak = absFlt;
-      else
-        s_adaptivePeak *= 0.99998f;
-      gain = 0.10f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
-      if (gain < 0.1f)  gain = 0.1f;
-      if (gain > 8.0f)  gain = 8.0f;
-    } else {
-      // Improved adaptive (-1): tracks average level, not peak.
-      // Slow adaptation preserves beat transients for better beat detection.
-      // Targets 20% of float range for average level (~25 counts in int8).
-      // This leaves headroom for 4x transients before clipping (25→100 counts),
-      // preserving the imm_rel ratio dynamics that presets depend on.
-      // alpha ~= 1.4s half-life at 48kHz (slow enough to not compress beats)
-      const float alpha = 0.00001f;
-      s_adaptiveAvg += (absFlt - s_adaptiveAvg) * alpha;
-      gain = 0.20f / (s_adaptiveAvg > 0.0001f ? s_adaptiveAvg : 0.0001f);
-      if (gain < 0.1f)  gain = 0.1f;
-      if (gain > 64.0f) gain = 64.0f;
+  if (pcmPos == lastPcmPos) {
+    consecutiveReads++;
+  }
+  else {
+    consecutiveReads = 0;
+    lastPcmPos = pcmPos;
+  }
+
+  if ((pcmLen < SamplesCount) || (consecutiveReads > 3)) {
+    memset(pWaveL, 0, SamplesCount * sizeof(float));
+    memset(pWaveR, 0, SamplesCount * sizeof(float));
+    if (consecutiveReads > 3)
+      pcmBufDrained = true;
+  }
+  else {
+    for (int i = 0; i < SamplesCount; i++) {
+      // Match the legacy waveform amplitude domain used by the FFT path:
+      // old m_sound.fWaveform samples were roughly in [-128..127].
+      pWaveL[i % SamplesCount] = pcmLeftFloatLpb[(pcmPos + i) % SAMPLE_SIZE_LPB] * 128.0f;
+      pWaveR[i % SamplesCount] = pcmRightFloatLpb[(pcmPos + i) % SAMPLE_SIZE_LPB] * 128.0f;
     }
-    s_adaptiveGain = gain;
-  } else {
-    gain = mdropdx12_audio_sensitivity;
   }
-  flt *= gain;
-  if (++s_diagCount >= 48000) {
-    DLOG_VERBOSE("[AudioDiag] adaptive=%d gain=%.3f avg=%.5f peak=%.5f flt_out=%.4f",
-      (int)mdropdx12_audio_adaptive, gain, s_adaptiveAvg, s_adaptivePeak, flt);
-    s_diagCount = 0;
-  }
+}
+
+// Float-to-int8 conversion — matches Milkwave's audiobuf.cpp.
+// WASAPI float [-1..+1] → int8 [-128..+127], straight passthrough.
+// Gain (mdropdx12_audio_sensitivity) is applied in SetAudioBuf, not here.
+int8_t FltToInt(float flt) {
   if (flt >= 1.0f)  return +127;
   if (flt < -1.0f)  return -128;
   return (int8_t)(flt * 128);
@@ -147,6 +139,27 @@ int8_t GetChannelSample(const BYTE* pData, int BlockOffset, int ChannelOffset, c
   }
 }
 
+// Float version — returns [-1..+1] with full precision (matches Milkwave's GetChannelSampleFloat)
+static float GetChannelSampleFloat(const BYTE* pData, int BlockOffset, int ChannelOffset, const bool bInt16) {
+  u_type sample;
+  sample.IntVar = 0;
+  sample.Bytes[0] = pData[BlockOffset + ChannelOffset + 0];
+  sample.Bytes[1] = pData[BlockOffset + ChannelOffset + 1];
+  if (!bInt16) {
+    sample.Bytes[2] = pData[BlockOffset + ChannelOffset + 2];
+    sample.Bytes[3] = pData[BlockOffset + ChannelOffset + 3];
+    if (sample.FltVar >= 1.0f) return 1.0f;
+    if (sample.FltVar <= -1.0f) return -1.0f;
+    return sample.FltVar;
+  }
+  float v = (float)((int16_t)sample.IntVar) / 32768.0f;
+  if (v >= 1.0f) return 1.0f;
+  if (v <= -1.0f) return -1.0f;
+  return v;
+}
+
+// Matches Milkwave's SetAudioBuf — sums as floats, converts to uint8 at the end.
+// Previous MDropDX12 code converted to int8 first (losing precision), then summed integers.
 void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFORMATEX* pwfx, const bool bInt16) {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
 
@@ -172,8 +185,8 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
   }
 
   for (int i = start; i < len; i++, n++) {
-    int32_t sumLeft = 0;
-    int32_t sumRight = 0;
+    float sumLeft = 0.0f;
+    float sumRight = 0.0f;
 
     for (int j = 0; j < downsampleRatio; j++) {
       int inputIndex = i * downsampleRatio + j;
@@ -181,23 +194,29 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
 
       int blockOffset = inputIndex * pwfx->nBlockAlign;
 
-      int8_t sampleLeft = 0;
+      float sampleLeft = 0.0f;
       if (pData && pwfx->nChannels >= 1) {
-        sampleLeft = GetChannelSample(pData, blockOffset, 0, bInt16);
+        sampleLeft = GetChannelSampleFloat(pData, blockOffset, 0, bInt16);
       }
       sumLeft += sampleLeft;
 
-      int8_t sampleRight = sampleLeft;
+      float sampleRight = sampleLeft;
       if (pData && pwfx->nChannels >= 2) {
-        sampleRight = GetChannelSample(pData, blockOffset, pwfx->wBitsPerSample / 8, bInt16);
+        sampleRight = GetChannelSampleFloat(pData, blockOffset, pwfx->wBitsPerSample / 8, bInt16);
       }
       sumRight += sampleRight;
     }
 
-    int leftVal = (int)(sumLeft / downsampleRatio * mdropdx12_amp_left) + 128;
-    int rightVal = (int)(sumRight / downsampleRatio * mdropdx12_amp_right) + 128;
-    pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(leftVal < 0 ? 0 : (leftVal > 255 ? 255 : leftVal));
-    pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(rightVal < 0 ? 0 : (rightVal > 255 ? 255 : rightVal));
+    float avgLeft = sumLeft / downsampleRatio * mdropdx12_audio_sensitivity * mdropdx12_amp_left;
+    float avgRight = sumRight / downsampleRatio * mdropdx12_audio_sensitivity * mdropdx12_amp_right;
+    if (avgLeft > 1.0f) avgLeft = 1.0f;
+    if (avgLeft < -1.0f) avgLeft = -1.0f;
+    if (avgRight > 1.0f) avgRight = 1.0f;
+    if (avgRight < -1.0f) avgRight = -1.0f;
+    pcmLeftFloatLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = avgLeft;
+    pcmRightFloatLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = avgRight;
+    pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (uint8_t)(FltToInt(avgLeft) + 128);
+    pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (uint8_t)(FltToInt(avgRight) + 128);
   }
 
   pcmBufDrained = false;
@@ -811,17 +830,13 @@ static HRESULT GetBufferWithRetry(
       hr = attemptHr;
     }
 
-    // Log AFTER __try/__except
-    if (pMDropDX12) {
-      wchar_t buf[256];
-      if (hadSeh) {
-        swprintf_s(buf, L"GetBufferWithRetry: attempt %d SEH exception 0x%08x (pAudioCaptureClient=%p, vtable=%p)",
-          attempt + 1, sehCode, pAudioCaptureClient, vtablePtr);
-      } else {
-        swprintf_s(buf, L"GetBufferWithRetry: attempt %d hr=0x%08x (pData=%p, frames=%u, flags=0x%08x)",
-          attempt + 1, hr, pDataResult, framesResult, flagsResult);
-      }
-      pMDropDX12->LogInfo(buf);
+    // Log AFTER __try/__except — only at verbose level or on error/retry
+    if (hadSeh) {
+      DLOGW_ERROR(L"GetBufferWithRetry: attempt %d SEH exception 0x%08x (pAudioCaptureClient=%p, vtable=%p)",
+        attempt + 1, sehCode, pAudioCaptureClient, vtablePtr);
+    } else {
+      DLOGW_VERBOSE(L"GetBufferWithRetry: attempt %d hr=0x%08x (pData=%p, frames=%u, flags=0x%08x)",
+        attempt + 1, hr, pDataResult, framesResult, flagsResult);
     }
 
     if (!hadSeh && SUCCEEDED(hr) && (pDataResult != nullptr || (flagsResult & AUDCLNT_BUFFERFLAGS_SILENT))) {
@@ -829,20 +844,11 @@ static HRESULT GetBufferWithRetry(
     }
 
     if (attempt == kMaxRetries - 1) {
-      AudioErr(L"GetBufferWithRetry: failed after %d attempts, hr=0x%08x", kMaxRetries, hr);
-      if (pMDropDX12) {
-        wchar_t buf[256];
-        swprintf_s(buf, L"GetBufferWithRetry: FAILED after %d attempts, hr=0x%08x", kMaxRetries, hr);
-        pMDropDX12->LogInfo(buf);
-      }
+      DLOGW_ERROR(L"GetBufferWithRetry: FAILED after %d attempts, hr=0x%08x", kMaxRetries, hr);
       break;
     }
 
-    if (pMDropDX12) {
-      wchar_t buf[128];
-      swprintf_s(buf, L"GetBufferWithRetry: attempt %d failed, backing off %d ms", attempt + 1, backoffMs);
-      pMDropDX12->LogDebug(buf);
-    }
+    DLOGW_WARN(L"GetBufferWithRetry: attempt %d failed, backing off %d ms", attempt + 1, backoffMs);
     Sleep(backoffMs);
     backoffMs = backoffMs * 2;
   }

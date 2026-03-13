@@ -151,13 +151,13 @@ private:
 
 void ResetAudioBuf();
 void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount);
+void GetAudioBufFloat(float* pWaveL, float* pWaveR, int SamplesCount);
 void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFORMATEX* pwfx, const bool bInt16);
 
 // External audio gain/sensitivity controls (defined in audio_capture.cpp)
 extern float mdropdx12_amp_left;
 extern float mdropdx12_amp_right;
-extern float mdropdx12_audio_sensitivity;
-extern bool  mdropdx12_audio_adaptive;
+extern float mdropdx12_audio_sensitivity;  // fixed gain multiplier (default 1.0 = passthrough)
 
 // ---------------------------------------------------------------------------
 // Device resolution (replaces CPrefs from prefs.h)

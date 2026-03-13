@@ -695,7 +695,7 @@ extern CShaderParamsList global_CShaderParams_master_list; // defined in engine_
 SettingDesc g_settingsDesc[] = {
   { L"Preset Directory",       ST_PATH,     SET_PRESET_DIR,       0, 0, 0,       L"Settings",  L"szPresetDir" },
   { L"Audio Device",           ST_READONLY, SET_AUDIO_DEVICE,     0, 0, 0,       NULL,         NULL },
-  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, -1, 256, 0.5f, L"Milkwave",  L"AudioSensitivity" },
+  { L"Audio Sensitivity",      ST_FLOAT,    SET_AUDIO_SENSITIVITY, 1, 256, 0.5f, L"Milkwave",  L"AudioSensitivity" },
   { L"Blend Time",             ST_FLOAT,    SET_BLEND_TIME,       0.1f, 10, 0.1f, L"Settings", L"fBlendTimeAuto" },
   { L"Time Between Presets",   ST_FLOAT,    SET_TIME_BETWEEN,     1, 300, 5,     L"Settings",  L"fTimeBetweenPresets" },
   { L"Hard Cuts Disabled",     ST_BOOL,     SET_HARD_CUTS,        0, 0, 0,       L"Settings",  L"bHardCutsDisabled" },
@@ -1441,21 +1441,12 @@ void Engine::MyReadConfig() {
   m_bEnablePresetStartup = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartup", m_bEnablePresetStartup, pIni);
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
+  // AudioSensitivity: 1.0 = passthrough (default), >1 = manual gain boost for visualization.
+  // No adaptive normalization — presets are tuned to raw WASAPI levels.
   m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < -2.0f) m_fAudioSensitivity = -2.0f;
+  if (m_fAudioSensitivity <= 0.0f) m_fAudioSensitivity = 1.0f;  // migrate old -1/-2 adaptive settings; 0 is invalid
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  if (m_fAudioSensitivity <= -1.0f) {
-    // -1 = improved adaptive (average-tracking, preserves transients)
-    // -2 = legacy adaptive (peak-tracking, compresses transients)
-    mdropdx12_audio_adaptive = true;
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;  // pass through so FltToInt can distinguish
-  } else {
-    mdropdx12_audio_adaptive = false;
-    if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
-  }
-  DLOG_INFO("AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
-    m_fAudioSensitivity, (int)mdropdx12_audio_adaptive, mdropdx12_audio_sensitivity);
+  mdropdx12_audio_sensitivity = (m_fAudioSensitivity <= 1.0f) ? 1.0f : m_fAudioSensitivity;
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
