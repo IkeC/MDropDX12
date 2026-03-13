@@ -73,12 +73,9 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
 }
 
 // Float-to-int8 conversion — matches Milkwave's audiobuf.cpp.
-// WASAPI float [-1..+1] → int8 [-128..+127], with optional fixed gain.
-// No adaptive normalization: Milkwave passes audio through with no gain/AGC,
-// and presets are tuned to that level. Any adaptive normalization compresses
-// dynamics and changes how presets react to music.
+// WASAPI float [-1..+1] → int8 [-128..+127], straight passthrough.
+// Gain (mdropdx12_audio_sensitivity) is applied in SetAudioBuf, not here.
 int8_t FltToInt(float flt) {
-  flt *= mdropdx12_audio_sensitivity;
   if (flt >= 1.0f)  return +127;
   if (flt < -1.0f)  return -128;
   return (int8_t)(flt * 128);
@@ -156,8 +153,10 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
       sumRight += sampleRight;
     }
 
-    int leftVal = (int)(sumLeft / downsampleRatio * mdropdx12_amp_left) + 128;
-    int rightVal = (int)(sumRight / downsampleRatio * mdropdx12_amp_right) + 128;
+    float gain = mdropdx12_audio_sensitivity * mdropdx12_amp_left;
+    int leftVal = (int)(sumLeft / downsampleRatio * gain) + 128;
+    float gainR = mdropdx12_audio_sensitivity * mdropdx12_amp_right;
+    int rightVal = (int)(sumRight / downsampleRatio * gainR) + 128;
     pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(leftVal < 0 ? 0 : (leftVal > 255 ? 255 : leftVal));
     pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(rightVal < 0 ? 0 : (rightVal > 255 ? 255 : rightVal));
   }

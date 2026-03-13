@@ -2955,6 +2955,60 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
   }
+  else if (wcsncmp(sMessage, L"SET_AUDIO_GAIN=", 15) == 0) {
+    float val = (float)_wtof(sMessage + 15);
+    if (val <= 0.0f) val = 1.0f;
+    if (val > 256.0f) val = 256.0f;
+    m_fAudioSensitivity = val;
+    extern float mdropdx12_audio_sensitivity;
+    mdropdx12_audio_sensitivity = (val <= 1.0f) ? 1.0f : val;
+    SaveSettingToINI(SET_AUDIO_SENSITIVITY);
+    wchar_t buf[128];
+    swprintf_s(buf, L"AUDIO_GAIN=%.2f|effective=%.2f", m_fAudioSensitivity, mdropdx12_audio_sensitivity);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"GET_AUDIO_GAIN", 14) == 0) {
+    extern float mdropdx12_audio_sensitivity;
+    wchar_t buf[128];
+    swprintf_s(buf, L"AUDIO_GAIN=%.2f|effective=%.2f", m_fAudioSensitivity, mdropdx12_audio_sensitivity);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"GET_AUDIO_DIAG", 14) == 0) {
+    extern float mdropdx12_audio_sensitivity;
+    extern float mdropdx12_amp_left;
+    extern float mdropdx12_amp_right;
+    extern unsigned char pcmLeftLpb[576];
+    extern signed int pcmPos;
+    // Sample a few PCM values from the buffer to check levels
+    int p = pcmPos;
+    int pcm0 = pcmLeftLpb[(p + 0) % 576];
+    int pcm1 = pcmLeftLpb[(p + 100) % 576];
+    int pcm2 = pcmLeftLpb[(p + 200) % 576];
+    int pcm3 = pcmLeftLpb[(p + 300) % 576];
+    int pcm4 = pcmLeftLpb[(p + 400) % 576];
+    // Min/max scan
+    int pcmMin = 255, pcmMax = 0;
+    for (int i = 0; i < 576; i++) {
+      int v = pcmLeftLpb[i];
+      if (v < pcmMin) pcmMin = v;
+      if (v > pcmMax) pcmMax = v;
+    }
+    wchar_t buf[512];
+    swprintf_s(buf, 512,
+      L"AUDIO_DIAG|gain=%.2f|effective=%.2f|ampL=%.2f|ampR=%.2f"
+      L"|bass=%.3f|mid=%.3f|treb=%.3f"
+      L"|bass_att=%.3f|mid_att=%.3f|treb_att=%.3f"
+      L"|pcm_min=%d|pcm_max=%d|pcm_samples=%d,%d,%d,%d,%d",
+      m_fAudioSensitivity, mdropdx12_audio_sensitivity,
+      mdropdx12_amp_left, mdropdx12_amp_right,
+      mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2],
+      mysound.avg_rel[0], mysound.avg_rel[1], mysound.avg_rel[2],
+      pcmMin, pcmMax, pcm0, pcm1, pcm2, pcm3, pcm4);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.
