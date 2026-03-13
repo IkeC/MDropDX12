@@ -1901,7 +1901,11 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileStringW(L"Milkwave", L"LastRemoteExePath", m_szLastRemoteExePath, pIni);
 
   WritePrivateProfileFloatW(m_WindowWatermarkModeOpacity, L"WindowWatermarkModeOpacity", pIni, L"Milkwave");
-  WritePrivateProfileFloatW(fOpacity, L"WindowOpacity", pIni, L"Milkwave");
+  // Don't persist the watermark mode's reduced opacity — save 1.0 (or whatever the
+  // pre-watermark value was). The watermark handlers write prevOpacity to INI
+  // on entry, so if the app exits during watermark mode the correct value is already there.
+  if (!m_bMirrorWatermarkActive && !m_bWatermarkActive)
+    WritePrivateProfileFloatW(fOpacity, L"WindowOpacity", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowX, L"WindowX", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowY, L"WindowY", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_WindowWidth, L"WindowWidth", pIni, L"Milkwave");
@@ -1920,6 +1924,11 @@ void Engine::MyWriteConfig() {
 }
 
 void Engine::SaveWindowSizeAndPosition(HWND hwnd) {
+  // Don't save the watermark-mode window position — the render window is
+  // temporarily on a different monitor at full size. The correct position
+  // was already saved in m_WindowX/Y/W/H by the watermark entry handler.
+  if (m_bMirrorWatermarkActive || m_bWatermarkActive)
+    return;
   RECT rect;
   if (GetWindowRect(hwnd, &rect)) {
     m_WindowX = rect.left;

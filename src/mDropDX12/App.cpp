@@ -216,7 +216,20 @@ static bool borderless = false;
 static bool clickthrough = false;
 static bool watermarkMode = false;
 static float watermarkPrevOpacity = 1.0f;
+
+// Mirror watermark state (moved from case-scope so all handlers can access)
+static bool mirrorWM_prevMirrorsActive = false;
+static float mirrorWM_prevOpacity = 1.0f;
+static bool mirrorWM_prevAlwaysOnTop = false;
+static bool mirrorWM_prevClickthrough = false;
+static RECT mirrorWM_prevWindowRect = {};
+
 static RECT lastRect = { 0 };
+
+// Check if window is in any form of fullscreen (true fullscreen OR borderless fullscreen)
+static bool IsAnyFullscreen(HWND hWnd) {
+  return fullscreen || g_engine.IsBorderlessFullscreen(hWnd);
+}
 
 static HMODULE module = nullptr;
 static std::atomic<HANDLE> threadRender = nullptr;
@@ -1032,6 +1045,58 @@ static void ShowAudioDeviceDialog(HWND hParent) {
 
 // GetDefaultAudioDeviceName removed — replaced by GetDefaultLoopbackDevice() in audio_capture.h
 
+// Exit mirror watermark mode — restores render window and mirror configs to pre-watermark state.
+// Called from all mirror/fullscreen toggle paths when mirrorWM is active.
+// If bKeepMirrorsActive is true, mirrors stay active (for watermark→regular mirror transition).
+static void ExitMirrorWatermark(HWND hWnd, bool bKeepMirrorsActive = false) {
+  if (!g_engine.m_bMirrorWatermarkActive) return;
+
+  // Restore render window clickthrough
+  if (clickthrough)
+    ToggleClickThrough(hWnd);
+
+  // Restore render window opacity
+  g_engine.fOpacity = mirrorWM_prevOpacity;
+  g_engine.SetOpacity(hWnd);
+
+  // Restore always-on-top
+  if (g_engine.m_bAlwaysOnTop != mirrorWM_prevAlwaysOnTop) {
+    g_engine.m_bAlwaysOnTop = mirrorWM_prevAlwaysOnTop;
+    g_engine.ToggleAlwaysOnTop(hWnd);
+  }
+
+  // Restore render window position/size
+  if (mirrorWM_prevWindowRect.right > mirrorWM_prevWindowRect.left) {
+    LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE);
+    if (g_engine.m_WindowBorderless)
+      style = WS_POPUP | WS_VISIBLE;
+    else
+      style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+    SetWindowLongPtr(hWnd, GWL_STYLE, style);
+    SetWindowPos(hWnd, mirrorWM_prevAlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+        mirrorWM_prevWindowRect.left, mirrorWM_prevWindowRect.top,
+        mirrorWM_prevWindowRect.right - mirrorWM_prevWindowRect.left,
+        mirrorWM_prevWindowRect.bottom - mirrorWM_prevWindowRect.top,
+        SWP_FRAMECHANGED | SWP_NOACTIVATE);
+  }
+
+  // Reset mirror configs to defaults (100% opacity, no clickthrough)
+  for (auto& out : g_engine.m_displayOutputs) {
+    if (out.config.type != DisplayOutputType::Monitor) continue;
+    out.config.bClickThrough = false;
+    out.config.nOpacity = 100;
+  }
+  g_engine.m_bMirrorStylesDirty.store(true);
+
+  if (!bKeepMirrorsActive && !mirrorWM_prevMirrorsActive)
+    g_engine.m_bMirrorsActive = false;
+
+  g_engine.m_bMirrorWatermarkActive = false;
+  g_engine.SaveDisplayOutputSettings();
+  g_engine.RefreshDisplaysTab();
+  g_engine.AddNotification(L"Mirror watermark OFF");
+}
+
 LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
   static bool rightMouseButtonHeld = false; // Track the state of the right mouse button  
@@ -1310,7 +1375,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     int id = (int)wParam;
     // Toggle actions need App.cpp locals (hWnd, fullscreen state)
     if (id == HK_TOGGLE_FULLSCREEN) {
-      if (g_engine.m_bMirrorsActive) {
+      if (g_engine.m_bMirrorWatermarkActive) {
+        ExitMirrorWatermark(hWnd);
+      } else if (g_engine.m_bMirrorsActive) {
         g_engine.m_bMirrorsActive = false;
         g_engine.AddNotification(L"Mirror outputs disabled");
       } else {
@@ -1323,10 +1390,15 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       bool doMirror = (id == HK_MIRROR_ONLY) || (id == HK_TOGGLE_STRETCH && g_engine.m_bMirrorModeForAltS);
       bool doStretch = (id == HK_STRETCH_ONLY) || (id == HK_TOGGLE_STRETCH && !g_engine.m_bMirrorModeForAltS);
       if (doMirror) {
-        if (!g_engine.m_bMirrorsActive) {
+        if (g_engine.m_bMirrorWatermarkActive) {
+          // Watermark → regular mirror: exit watermark, keep mirrors with defaults
+          ExitMirrorWatermark(hWnd, true /*bKeepMirrorsActive*/);
+          if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs active");
+        } else if (!g_engine.m_bMirrorsActive) {
           auto result = g_engine.TryActivateMirrors(hWnd);
           if (result != Engine::MirrorCancelled) {
-            if (!fullscreen) ToggleFullScreen(hWnd);
+            if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
           }
           if (result == Engine::MirrorActivated) {
             g_engine.m_bMirrorsActive = true;
@@ -1340,6 +1412,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
       } else if (doStretch) {
+        if (g_engine.m_bMirrorWatermarkActive) ExitMirrorWatermark(hWnd);
         ToggleStretch(hWnd);
       }
       SetForegroundWindow(hWnd);
@@ -1357,7 +1430,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     int id = (int)wParam;
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
-      if (g_engine.m_bMirrorsActive) {
+      if (g_engine.m_bMirrorWatermarkActive) {
+        ExitMirrorWatermark(hWnd);
+      } else if (g_engine.m_bMirrorsActive) {
         // Mirroring → single fullscreen: disable mirrors, stay fullscreen
         g_engine.m_bMirrorsActive = false;
         g_engine.AddNotification(L"Mirror outputs disabled");
@@ -1373,10 +1448,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       bool doMirror = (id == HK_MIRROR_ONLY) || (id == HK_TOGGLE_STRETCH && g_engine.m_bMirrorModeForAltS);
       bool doStretch = (id == HK_STRETCH_ONLY) || (id == HK_TOGGLE_STRETCH && !g_engine.m_bMirrorModeForAltS);
       if (doMirror) {
-        if (!g_engine.m_bMirrorsActive) {
+        if (g_engine.m_bMirrorWatermarkActive) {
+          ExitMirrorWatermark(hWnd, true /*bKeepMirrorsActive*/);
+          if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs active");
+        } else if (!g_engine.m_bMirrorsActive) {
           auto result = g_engine.TryActivateMirrors(hWnd);
           if (result != Engine::MirrorCancelled) {
-            if (!fullscreen) ToggleFullScreen(hWnd);
+            if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
           }
           if (result == Engine::MirrorActivated) {
             g_engine.m_bMirrorsActive = true;
@@ -1390,6 +1469,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
       } else if (doStretch) {
+        if (g_engine.m_bMirrorWatermarkActive) ExitMirrorWatermark(hWnd);
         ToggleStretch(hWnd);
       }
       SetForegroundWindow(hWnd);
@@ -1570,13 +1650,30 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_MW_TOGGLE_MIRROR_MODE:
   {
-    if (!g_engine.m_bMirrorsActive) {
+    if (g_engine.m_bMirrorWatermarkActive) {
+      // Transition from watermark mirror → regular mirror:
+      // Exit watermark state but keep mirrors active with default settings
+      ExitMirrorWatermark(hWnd, true /*bKeepMirrorsActive*/);
+      // Mirrors are now active with 100% opacity, no clickthrough.
+      // Enter fullscreen if not already.
+      if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
+      g_engine.AddNotification(L"Mirror outputs active");
+    } else if (!g_engine.m_bMirrorsActive) {
+      // Reset mirror opacity to 100% for regular mirror mode
+      for (auto& out : g_engine.m_displayOutputs) {
+        if (out.config.type == DisplayOutputType::Monitor) {
+          out.config.nOpacity = 100;
+          out.config.bClickThrough = false;
+        }
+      }
+      g_engine.SaveDisplayOutputSettings();
       auto result = g_engine.TryActivateMirrors(hWnd);
       if (result != Engine::MirrorCancelled) {
-        if (!fullscreen) ToggleFullScreen(hWnd);
+        if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
       }
       if (result == Engine::MirrorActivated) {
         g_engine.m_bMirrorsActive = true;
+        g_engine.m_bMirrorStylesDirty.store(true);
         g_engine.AddNotification(L"Mirror outputs active");
       }
     } else {
@@ -1589,6 +1686,8 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_MW_RESET_WINDOW:
   {
+    // Exit watermark modes first
+    if (g_engine.m_bMirrorWatermarkActive) ExitMirrorWatermark(hWnd);
     // Exit stretch mode first (restores saved window rect)
     if (stretch) ToggleStretch(hWnd);
     // Deactivate mirrors
@@ -1606,10 +1705,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
     else if (wParam == 'S' || wParam == 's') {
       if (g_engine.m_bMirrorModeForAltS) {
-        if (!g_engine.m_bMirrorsActive) {
+        if (g_engine.m_bMirrorWatermarkActive) {
+          ExitMirrorWatermark(hWnd, true /*bKeepMirrorsActive*/);
+          if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
+          g_engine.AddNotification(L"Mirror outputs active");
+        } else if (!g_engine.m_bMirrorsActive) {
           auto result = g_engine.TryActivateMirrors(hWnd);
           if (result != Engine::MirrorCancelled) {
-            if (!fullscreen) ToggleFullScreen(hWnd);
+            if (!IsAnyFullscreen(hWnd)) ToggleFullScreen(hWnd);
           }
           if (result == Engine::MirrorActivated) {
             g_engine.m_bMirrorsActive = true;
@@ -1623,11 +1726,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
       } else {
+        if (g_engine.m_bMirrorWatermarkActive) ExitMirrorWatermark(hWnd);
         ToggleStretch(hWnd);
       }
     }
     else if (wParam == VK_RETURN) {
-      if (g_engine.m_bMirrorsActive) {
+      if (g_engine.m_bMirrorWatermarkActive) {
+        ExitMirrorWatermark(hWnd);
+      } else if (g_engine.m_bMirrorsActive) {
         g_engine.m_bMirrorsActive = false;
         g_engine.AddNotification(L"Mirror outputs disabled");
       } else {
@@ -1737,7 +1843,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   }
 
   case WM_MW_FULLSCREEN:
-    if (g_engine.m_bMirrorsActive) {
+    if (g_engine.m_bMirrorWatermarkActive) {
+      ExitMirrorWatermark(hWnd);
+    } else if (g_engine.m_bMirrorsActive) {
       // Deactivate mirrors first, then enter fullscreen
       g_engine.m_bMirrorsActive = false;
       // Already fullscreen from mirror mode — stay fullscreen
@@ -1760,6 +1868,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
       g_engine.SetOpacity(hWnd);
       watermarkMode = true;
+      g_engine.m_bWatermarkActive = true;
+      // Write pre-watermark opacity to INI so it persists correctly if app exits
+      {
+        wchar_t* pIni = g_engine.GetConfigIniFile();
+        wchar_t buf[32];
+        swprintf_s(buf, L"%f", watermarkPrevOpacity);
+        WritePrivateProfileStringW(L"Milkwave", L"WindowOpacity", buf, pIni);
+      }
     } else {
       // Exit watermark: restore clickthrough, opacity, always-on-top, borderless
       if (clickthrough)
@@ -1771,12 +1887,16 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       if (g_engine.IsBorderlessFullscreen(hWnd))
         ToggleBorderlessFullscreen(hWnd);
       watermarkMode = false;
+      g_engine.m_bWatermarkActive = false;
     }
     return 0;
   }
 
   case WM_MW_BORDERLESS_FS:
-    ToggleBorderlessFullscreen(hWnd);
+    if (fullscreen)
+      ToggleFullScreen(hWnd);  // Exit proper fullscreen first (updates fullscreen flag)
+    else
+      ToggleBorderlessFullscreen(hWnd);
     return 0;
 
   case WM_MW_STRETCH:
@@ -1786,6 +1906,106 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_MW_MIRROR:
     PostMessage(hWnd, WM_MW_TOGGLE_MIRROR_MODE, 0, 0);
     return 0;
+
+  case WM_MW_MIRROR_WM:
+  {
+    // Toggle mirror watermark: all displays get visualization with click-through + low opacity
+    // Phase 1 (wParam=0): go fullscreen + set render window watermark
+    // Phase 2 (wParam=1): activate mirrors (deferred so fullscreen resize completes first)
+
+    if (!g_engine.m_bMirrorWatermarkActive && wParam == 0) {
+      // Save render window state
+      mirrorWM_prevMirrorsActive = g_engine.m_bMirrorsActive;
+      mirrorWM_prevOpacity = g_engine.fOpacity;
+      mirrorWM_prevAlwaysOnTop = g_engine.m_bAlwaysOnTop;
+      mirrorWM_prevClickthrough = clickthrough;
+
+      // Save current window position for restore
+      GetWindowRect(hWnd, &mirrorWM_prevWindowRect);
+
+      // Move render window directly to the largest display at full size.
+      // Avoid intermediate sizes (like 200x200) — the render thread picks them up
+      // and creates mirror swap chains at that size, stressing the GPU driver.
+      {
+        RECT bestRect = {};
+        long bestArea = 0;
+        for (auto& out : g_engine.m_displayOutputs) {
+          if (out.config.type != DisplayOutputType::Monitor) continue;
+          RECT rc = out.config.rcMonitor;
+          long w = rc.right - rc.left;
+          long h = rc.bottom - rc.top;
+          long area = w * h;
+          if (area > bestArea) {
+            bestArea = area;
+            bestRect = rc;
+          }
+        }
+        if (bestArea > 0) {
+          // Exit fullscreen/borderless first if needed
+          if (fullscreen)
+            ToggleFullScreen(hWnd);
+          else if (g_engine.IsBorderlessFullscreen(hWnd))
+            ToggleBorderlessFullscreen(hWnd);
+          // Move directly to target monitor at full rcMonitor size (single resize)
+          SetWindowLongPtrW(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+          SetWindowPos(hWnd, HWND_TOPMOST,
+              bestRect.left, bestRect.top,
+              bestRect.right - bestRect.left,
+              bestRect.bottom - bestRect.top,
+              SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        }
+      }
+      // Overwrite the restore values so exiting fullscreen returns to the original
+      // position, not the temporary 200x200 positioning window
+      g_engine.m_WindowX = mirrorWM_prevWindowRect.left;
+      g_engine.m_WindowY = mirrorWM_prevWindowRect.top;
+      g_engine.m_WindowWidth = mirrorWM_prevWindowRect.right - mirrorWM_prevWindowRect.left;
+      g_engine.m_WindowHeight = mirrorWM_prevWindowRect.bottom - mirrorWM_prevWindowRect.top;
+      if (!g_engine.m_bAlwaysOnTop) {
+        g_engine.m_bAlwaysOnTop = true;
+        g_engine.ToggleAlwaysOnTop(hWnd);
+      }
+      if (!clickthrough)
+        ToggleClickThrough(hWnd);
+      g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
+      g_engine.SetOpacity(hWnd);
+
+      // Write the pre-watermark opacity to INI immediately so it persists correctly
+      // even if the app is closed during watermark mode
+      {
+        wchar_t* pIni = g_engine.GetConfigIniFile();
+        wchar_t buf[32];
+        swprintf_s(buf, L"%f", mirrorWM_prevOpacity);
+        WritePrivateProfileStringW(L"Milkwave", L"WindowOpacity", buf, pIni);
+      }
+
+      // Defer mirror activation so the fullscreen resize completes first
+      PostMessage(hWnd, WM_MW_MIRROR_WM, 1, 0);
+      return 0;
+    }
+
+    if (!g_engine.m_bMirrorWatermarkActive && wParam == 1) {
+      // Phase 2: fullscreen resize is done, now activate mirrors
+      int wmOpacity = (int)(g_engine.m_WindowWatermarkModeOpacity * 100.0f);
+      if (wmOpacity < 1) wmOpacity = 1;
+      for (auto& out : g_engine.m_displayOutputs) {
+        if (out.config.type != DisplayOutputType::Monitor) continue;
+        out.config.bEnabled = true;
+        out.config.bClickThrough = true;
+        out.config.nOpacity = wmOpacity;
+      }
+      g_engine.m_bMirrorsActive = true;
+      g_engine.m_bMirrorStylesDirty.store(true);
+      g_engine.m_bMirrorWatermarkActive = true;
+      g_engine.SaveDisplayOutputSettings();
+      g_engine.RefreshDisplaysTab();
+      g_engine.AddNotification(L"Mirror watermark ON");
+    } else if (g_engine.m_bMirrorWatermarkActive) {
+      // Exit watermark via the shared helper
+      ExitMirrorWatermark(hWnd);
+    }
+    return 0;
+  }
 
   default:
     return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);

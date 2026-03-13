@@ -612,6 +612,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
 #define IDC_MW_DISP_SAVE_PROFILE   7016 // Button: save display profile
 #define IDC_MW_DISP_LOAD_PROFILE   7017 // Button: load display profile
+#define IDC_MW_DISP_MIRROR_WM     7018 // Button: toggle mirror watermark mode
 
 // About tab
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
@@ -988,3 +989,4 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_BORDERLESS_FS         (WM_APP + 162) // SIGNAL|BORDERLESS_FS
 #define WM_MW_STRETCH               (WM_APP + 163) // SIGNAL|STRETCH
 #define WM_MW_MIRROR                (WM_APP + 164) // SIGNAL|MIRROR
+#define WM_MW_MIRROR_WM             (WM_APP + 165) // SIGNAL|MIRROR_WM

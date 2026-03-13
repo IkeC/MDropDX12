@@ -2786,6 +2786,165 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     g_pipeServer.Send(buf);
     DLOG_INFO("Log level changed to %d via IPC", newLevel);
   }
+  else if (wcsncmp(sMessage, L"DIAG_MIRRORS", 12) == 0) {
+    // Dump mirror state for diagnostics
+    extern PipeServer g_pipeServer;
+    std::wstring response = L"MIRRORS|active=";
+    response += m_bMirrorsActive ? L"1" : L"0";
+    // Report which monitor the render window is on
+    if (m_lpDX && m_lpDX->GetHwnd()) {
+      HMONITOR hMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
+      if (hMon) {
+        MONITORINFOEXW mi = { sizeof(mi) };
+        if (GetMonitorInfoW(hMon, &mi)) {
+          response += L"|render_on=";
+          response += mi.szDevice;
+          RECT wr;
+          GetWindowRect(m_lpDX->GetHwnd(), &wr);
+          wchar_t buf[128];
+          swprintf_s(buf, L",renderwin=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+          response += buf;
+          // Render window opacity and style
+          swprintf_s(buf, L",opacity=%.2f,fs=%d",
+            fOpacity, IsBorderlessFullscreen(m_lpDX->GetHwnd()) ? 1 : 0);
+          response += buf;
+          LONG_PTR exStyle = GetWindowLongPtr(m_lpDX->GetHwnd(), GWL_EXSTYLE);
+          response += (exStyle & WS_EX_TRANSPARENT) ? L",clickthru=1" : L",clickthru=0";
+        }
+      }
+    }
+    int idx = 0;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      response += L"|mon";
+      response += std::to_wstring(idx);
+      response += L"=";
+      response += out.config.szDeviceName;
+      response += L",enabled=";
+      response += out.config.bEnabled ? L"1" : L"0";
+      response += L",opacity=";
+      response += std::to_wstring(out.config.nOpacity);
+      response += L",clickthru=";
+      response += out.config.bClickThrough ? L"1" : L"0";
+      response += L",skipped=";
+      response += out.bSkippedSameMonitor ? L"1" : L"0";
+      // Display area from enumeration
+      auto& rc = out.config.rcMonitor;
+      wchar_t rcBuf[128];
+      swprintf_s(rcBuf, L",display=(%d,%d)-(%d,%d) %dx%d",
+        rc.left, rc.top, rc.right, rc.bottom,
+        rc.right - rc.left, rc.bottom - rc.top);
+      response += rcBuf;
+      if (out.monitorState) {
+        auto& ms = *out.monitorState;
+        response += L",ready=";
+        response += ms.bReady ? L"1" : L"0";
+        response += L",hwnd=";
+        wchar_t hwndBuf[32];
+        swprintf_s(hwndBuf, L"%p", (void*)ms.hWnd);
+        response += hwndBuf;
+        response += L",swapsize=";
+        response += std::to_wstring(ms.width);
+        response += L"x";
+        response += std::to_wstring(ms.height);
+        // Check if window is actually visible
+        if (ms.hWnd) {
+          RECT wr;
+          GetWindowRect(ms.hWnd, &wr);
+          swprintf_s(rcBuf, L",winrect=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+          response += rcBuf;
+          response += IsWindowVisible(ms.hWnd) ? L",visible=1" : L",visible=0";
+        }
+      } else {
+        response += L",state=none";
+      }
+      idx++;
+    }
+    g_pipeServer.Send(response.c_str());
+  }
+  else if (wcsncmp(sMessage, L"SET_MIRROR_OPACITY=", 19) == 0) {
+    // Set opacity for all monitor mirrors.  Format: SET_MIRROR_OPACITY=<1-100>
+    int val = _wtoi(sMessage + 19);
+    if (val < 1) val = 1;
+    if (val > 100) val = 100;
+    for (auto& out : m_displayOutputs)
+      if (out.config.type == DisplayOutputType::Monitor)
+        out.config.nOpacity = val;
+    m_bMirrorStylesDirty.store(true);
+    SaveDisplayOutputSettings();
+    RefreshDisplaysTab();
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"SET_MIRROR_CLICKTHRU=", 21) == 0) {
+    // Set click-through for all monitor mirrors.  Format: SET_MIRROR_CLICKTHRU=<0|1>
+    bool val = (_wtoi(sMessage + 21) != 0);
+    for (auto& out : m_displayOutputs)
+      if (out.config.type == DisplayOutputType::Monitor)
+        out.config.bClickThrough = val;
+    m_bMirrorStylesDirty.store(true);
+    SaveDisplayOutputSettings();
+    RefreshDisplaysTab();
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MIRROR_CLICKTHRU=%d", val ? 1 : 0);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"MOVE_TO_DISPLAY=", 16) == 0) {
+    // Move render window to center of display N (1-based).  Format: MOVE_TO_DISPLAY=<N>
+    int idx = _wtoi(sMessage + 16) - 1; // convert 1-based to 0-based
+    int monIdx = 0;
+    extern PipeServer g_pipeServer;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      if (monIdx == idx) {
+        RECT rc = out.config.rcMonitor;
+        int cx = (rc.left + rc.right) / 2;
+        int cy = (rc.top + rc.bottom) / 2;
+        HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+        if (hRender) {
+          RECT wr;
+          GetWindowRect(hRender, &wr);
+          int ww = wr.right - wr.left;
+          int wh = wr.bottom - wr.top;
+          SetWindowPos(hRender, nullptr, cx - ww/2, cy - wh/2, 0, 0,
+              SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+          wchar_t buf[128];
+          swprintf_s(buf, L"MOVED_TO=%ls", out.config.szDeviceName);
+          g_pipeServer.Send(buf);
+        }
+        break;
+      }
+      monIdx++;
+    }
+  }
+  else if (wcsncmp(sMessage, L"SET_WINDOW=", 11) == 0) {
+    // Set render window position and size.  Format: SET_WINDOW=<x>,<y>,<w>,<h>
+    int x, y, w, h;
+    if (swscanf_s(sMessage + 11, L"%d,%d,%d,%d", &x, &y, &w, &h) == 4) {
+      HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+      if (hRender) {
+        UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        if (w <= 0 || h <= 0) flags |= SWP_NOSIZE;
+        SetWindowPos(hRender, nullptr, x, y,
+            (w > 0 ? w : 0), (h > 0 ? h : 0), flags);
+        RECT wr;
+        GetWindowRect(hRender, &wr);
+        extern PipeServer g_pipeServer;
+        wchar_t buf[128];
+        swprintf_s(buf, L"WINDOW=(%d,%d)-(%d,%d) %dx%d",
+            wr.left, wr.top, wr.right, wr.bottom,
+            wr.right - wr.left, wr.bottom - wr.top);
+        g_pipeServer.Send(buf);
+      }
+    }
+  }
   else if (wcsncmp(sMessage, L"GET_LOGLEVEL", 12) == 0) {
     // Query current log level.
     const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };

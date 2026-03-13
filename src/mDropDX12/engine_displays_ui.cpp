@@ -112,11 +112,16 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
       IDC_MW_DISP_ACTIVATE, x, y, rw, lineH, hFont));
     y += lineH + gap;
 
-    // Click-through + opacity
-    PAGE_TC(0, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false));
+    // Click-through + watermark button + opacity
+    PAGE_TC(0, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, MulDiv(110, lineH, 26), lineH, hFont, false));
+    {
+      int wmBtnW = MulDiv(130, lineH, 26);
+      int wmBtnX = x + MulDiv(115, lineH, 26);
+      PAGE_TC(0, CreateBtn(hw, L"Mirror Watermark", IDC_MW_DISP_MIRROR_WM, wmBtnX, y, wmBtnW, lineH, hFont));
+    }
     {
       int opLblW = MulDiv(60, lineH, 26);
-      int opEditW = MulDiv(50, lineH, 26);
+      int opEditW = MulDiv(70, lineH, 26);
       int opPctW = MulDiv(20, lineH, 26);
       int opX = x + rw / 2;
       PAGE_TC(0, CreateLabel(hw, L"Opacity:", opX, y, opLblW, lineH, hFont));
@@ -411,6 +416,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
         p->bSpoutChanged = true;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+        p->SaveDisplayOutputSettings();
         p->RefreshDisplaysTab();
         HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
         if (hList) SendMessage(hList, LB_SETCURSEL, sel, 0);
@@ -550,6 +556,13 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
     }
+  }
+
+  // ===== Mirror Watermark =====
+  if (code == BN_CLICKED && id == IDC_MW_DISP_MIRROR_WM) {
+    HWND hw = p->GetPluginWindow();
+    if (hw) PostMessage(hw, WM_MW_MIRROR_WM, 0, 0);
+    return 0;
   }
 
   // ===== Activate Mirrors =====
