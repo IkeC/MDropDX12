@@ -18,6 +18,8 @@
 #include "defines.h"
 #include "shell_defines.h"
 #include "wasabi.h"
+#include "../ns-eel2/ns-eel.h"
+extern "C" EEL_F * volatile nseel_gmembuf_default; // ns-eel2 global gmegabuf
 #include <assert.h>
 #include <strsafe.h>
 #include <Windows.h>
@@ -31,6 +33,7 @@
 #include <commdlg.h>
 #include <uxtheme.h>
 #include <set>
+
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
@@ -74,6 +77,7 @@ static void HueRotateRGB(int& r, int& g, int& b, float hueDeg) {
 namespace mdrop {
 
 extern Engine g_engine;
+extern int SAMPLE_RATE;  // defined later in this file (DoCustomSoundAnalysis section)
 
 void Engine::PopulateMsgListBox(HWND hList) {
   if (!hList) return;
@@ -3009,19 +3013,69 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     float gamma = m_pState->var_pf_gamma ? (float)*m_pState->var_pf_gamma : 0;
     float echo_alpha = m_pState->var_pf_echo_alpha ? (float)*m_pState->var_pf_echo_alpha : 0;
     float echo_zoom = m_pState->var_pf_echo_zoom ? (float)*m_pState->var_pf_echo_zoom : 0;
-    wchar_t buf[1024];
-    swprintf_s(buf, 1024,
+    // Compute aspect ratio matching ApplyShaderParams
+    float diag_aspect_x = 1, diag_aspect_y = 1;
+    if (!m_bScreenDependentRenderMode) {
+      if (GetWidth() > GetHeight())
+        diag_aspect_y = GetHeight() / (float)GetWidth();
+      else
+        diag_aspect_x = GetWidth() / (float)GetHeight();
+    }
+    float diag_time = GetTime() - m_pState->GetPresetStartTime();
+    int nShapesVis = 0, nWavesVis = 0;
+    for (int si = 0; si < MAX_CUSTOM_SHAPES; si++)
+      if (m_pState->m_shape[si].enabled) nShapesVis++;
+    for (int wi = 0; wi < MAX_CUSTOM_WAVES; wi++)
+      if (m_pState->m_wave[wi].enabled) nWavesVis++;
+
+    // Per-frame equation outputs for warp
+    float pf_zoom = m_pState->var_pf_zoom ? (float)*m_pState->var_pf_zoom : 0;
+    float pf_rot = m_pState->var_pf_rot ? (float)*m_pState->var_pf_rot : 0;
+    float pf_warp = m_pState->var_pf_warp ? (float)*m_pState->var_pf_warp : 0;
+    float pf_cx = m_pState->var_pf_cx ? (float)*m_pState->var_pf_cx : 0;
+    float pf_cy = m_pState->var_pf_cy ? (float)*m_pState->var_pf_cy : 0;
+    float pf_dx = m_pState->var_pf_dx ? (float)*m_pState->var_pf_dx : 0;
+    float pf_dy = m_pState->var_pf_dy ? (float)*m_pState->var_pf_dy : 0;
+    float pf_sx = m_pState->var_pf_sx ? (float)*m_pState->var_pf_sx : 0;
+    float pf_sy = m_pState->var_pf_sy ? (float)*m_pState->var_pf_sy : 0;
+    float pf_zoomexp = m_pState->var_pf_zoomexp ? (float)*m_pState->var_pf_zoomexp : 0;
+
+    // Sample warp mesh UVs at corners and center
+    int gw = m_nGridX, gh = m_nGridY;
+    int ctrIdx = (gh / 2) * (gw + 1) + gw / 2;
+    int tlIdx = 0;
+    int trIdx = gw;
+    int blIdx = gh * (gw + 1);
+    int brIdx = gh * (gw + 1) + gw;
+    float mesh_ctr_u = 0, mesh_ctr_v = 0;
+    float mesh_tl_u = 0, mesh_tl_v = 0, mesh_br_u = 0, mesh_br_v = 0;
+    if (m_verts) {
+      mesh_ctr_u = m_verts[ctrIdx].tu; mesh_ctr_v = m_verts[ctrIdx].tv;
+      mesh_tl_u = m_verts[tlIdx].tu; mesh_tl_v = m_verts[tlIdx].tv;
+      mesh_br_u = m_verts[brIdx].tu; mesh_br_v = m_verts[brIdx].tv;
+    }
+
+    wchar_t buf[4096];
+    swprintf_s(buf, 4096,
       L"RENDER_DIAG"
       L"|blur_min0=%.6f|blur_max0=%.6f|blur_min1=%.6f|blur_max1=%.6f|blur_min2=%.6f|blur_max2=%.6f"
       L"|fscale0=%.4f|fbias0=%.4f|fscale1=%.4f|fbias1=%.4f|fscale2=%.4f|fbias2=%.4f"
       L"|nHighestBlur=%d|decay=%.6f|gamma=%.4f|echo_alpha=%.4f|echo_zoom=%.4f"
+      L"|zoom=%.6f|rot=%.6f|warp=%.6f|cx=%.6f|cy=%.6f|dx=%.6f|dy=%.6f|sx=%.6f|sy=%.6f|zoomexp=%.6f"
       L"|q1=%.6f|q2=%.6f|q3=%.6f|q4=%.6f|q5=%.6f|q6=%.6f|q7=%.6f|q8=%.6f"
-      L"|bass_att=%.6f|mid_att=%.6f|treb_att=%.6f"
+      L"|q9=%.6f|q10=%.6f|q11=%.6f|q12=%.6f|q13=%.6f|q14=%.6f|q15=%.6f|q16=%.6f"
+      L"|bass_rel=%.6f|mid_rel=%.6f|treb_rel=%.6f"
       L"|bass_imm=%.6f|mid_imm=%.6f|treb_imm=%.6f"
-      L"|warpPSVer=%d|compPSVer=%d",
+      L"|bass_avg=%.6f|mid_avg=%.6f|treb_avg=%.6f"
+      L"|bass_lavg=%.6f|mid_lavg=%.6f|treb_lavg=%.6f"
+      L"|warpPSVer=%d|compPSVer=%d"
+      L"|texW=%d|texH=%d|aspect_x=%.6f|aspect_y=%.6f|gridW=%d|gridH=%d"
+      L"|mesh_ctr=%.6f,%.6f|mesh_tl=%.6f,%.6f|mesh_br=%.6f,%.6f"
+      L"|time=%.4f|frame=%d|shapes=%d|waves=%d|srate=%d|fps=%.1f|wave_peak=%.1f",
       blur_min[0], blur_max[0], blur_min[1], blur_max[1], blur_min[2], blur_max[2],
       fscale0, fbias0, fscale1, fbias1, fscale2, fbias2,
       m_nHighestBlurTexUsedThisFrame, decay, gamma, echo_alpha, echo_zoom,
+      pf_zoom, pf_rot, pf_warp, pf_cx, pf_cy, pf_dx, pf_dy, pf_sx, pf_sy, pf_zoomexp,
       m_pState->var_pf_q[0] ? (float)*m_pState->var_pf_q[0] : 0.f,
       m_pState->var_pf_q[1] ? (float)*m_pState->var_pf_q[1] : 0.f,
       m_pState->var_pf_q[2] ? (float)*m_pState->var_pf_q[2] : 0.f,
@@ -3030,11 +3084,110 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       m_pState->var_pf_q[5] ? (float)*m_pState->var_pf_q[5] : 0.f,
       m_pState->var_pf_q[6] ? (float)*m_pState->var_pf_q[6] : 0.f,
       m_pState->var_pf_q[7] ? (float)*m_pState->var_pf_q[7] : 0.f,
-      m_sound.avg[0][0], m_sound.avg[0][1], m_sound.avg[0][2],
+      m_pState->var_pf_q[8] ? (float)*m_pState->var_pf_q[8] : 0.f,
+      m_pState->var_pf_q[9] ? (float)*m_pState->var_pf_q[9] : 0.f,
+      m_pState->var_pf_q[10] ? (float)*m_pState->var_pf_q[10] : 0.f,
+      m_pState->var_pf_q[11] ? (float)*m_pState->var_pf_q[11] : 0.f,
+      m_pState->var_pf_q[12] ? (float)*m_pState->var_pf_q[12] : 0.f,
+      m_pState->var_pf_q[13] ? (float)*m_pState->var_pf_q[13] : 0.f,
+      m_pState->var_pf_q[14] ? (float)*m_pState->var_pf_q[14] : 0.f,
+      m_pState->var_pf_q[15] ? (float)*m_pState->var_pf_q[15] : 0.f,
+      mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2],
       mysound.imm[0], mysound.imm[1], mysound.imm[2],
-      m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
+      mysound.avg[0], mysound.avg[1], mysound.avg[2],
+      mysound.long_avg[0], mysound.long_avg[1], mysound.long_avg[2],
+      m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion,
+      m_nTexSizeX, m_nTexSizeY, diag_aspect_x, diag_aspect_y, gw, gh,
+      mesh_ctr_u, mesh_ctr_v, mesh_tl_u, mesh_tl_v, mesh_br_u, mesh_br_v,
+      diag_time, (int)GetFrame(), nShapesVis, nWavesVis,
+      SAMPLE_RATE, GetFps(),
+      [&]() { float peak = 0; for (int k = 0; k < 576; k++) { float v = fabsf(mysound.fWave[0][k]); if (v > peak) peak = v; } return peak; }());
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"GET_EEL_STATE", 13) == 0) {
+    // Dump EEL megabuf/gmegabuf values and per-frame variable state
+    // Format: GET_EEL_STATE [megabuf=START,COUNT] [gmegabuf=START,COUNT] [reg=START,COUNT]
+    // Defaults: megabuf=0,32  gmegabuf=0,32  reg=0,100
+    int mb_start = 0, mb_count = 32;
+    int gmb_start = 0, gmb_count = 32;
+    int reg_start = 0, reg_count = 100;
+
+    // Parse optional parameters
+    const wchar_t* p = sMessage + 13;
+    while (*p) {
+      while (*p == L' ') p++;
+      if (wcsncmp(p, L"megabuf=", 8) == 0) {
+        swscanf_s(p + 8, L"%d,%d", &mb_start, &mb_count);
+      } else if (wcsncmp(p, L"gmegabuf=", 9) == 0) {
+        swscanf_s(p + 9, L"%d,%d", &gmb_start, &gmb_count);
+      } else if (wcsncmp(p, L"reg=", 4) == 0) {
+        swscanf_s(p + 4, L"%d,%d", &reg_start, &reg_count);
+      }
+      while (*p && *p != L' ') p++;
+    }
+
+    // Clamp
+    if (mb_count > 256) mb_count = 256;
+    if (gmb_count > 256) gmb_count = 256;
+    if (reg_count > 256) reg_count = 256;
+    if (mb_count < 0) mb_count = 0;
+    if (gmb_count < 0) gmb_count = 0;
+    if (reg_count < 0) reg_count = 0;
+
+    std::wstring result = L"EEL_STATE";
+
+    // 1. Global registers (reg00-reg99)
+    double* globalRegs = NSEEL_getglobalregs();
+    if (globalRegs && reg_count > 0) {
+      result += L"|REGS=";
+      for (int i = 0; i < reg_count; i++) {
+        if (i > 0) result += L",";
+        wchar_t tmp[32];
+        swprintf_s(tmp, L"%.6g", globalRegs[reg_start + i]);
+        result += tmp;
+      }
+    }
+
+    // 2. Megabuf (per-frame VM's local RAM)
+    if (m_pState && m_pState->m_pf_eel && mb_count > 0) {
+      result += L"|MEGABUF=";
+      for (int i = 0; i < mb_count; i++) {
+        if (i > 0) result += L",";
+        int validCount = 0;
+        EEL_F* ptr = NSEEL_VM_getramptr_noalloc(m_pState->m_pf_eel, mb_start + i, &validCount);
+        wchar_t tmp[32];
+        swprintf_s(tmp, L"%.6g", ptr ? (double)*ptr : 0.0);
+        result += tmp;
+      }
+    }
+
+    // 3. Global megabuf (gmegabuf)
+    if (gmb_count > 0) {
+      // Access the default gmegabuf (declared at file scope with extern "C")
+      result += L"|GMEGABUF=";
+      for (int i = 0; i < gmb_count; i++) {
+        if (i > 0) result += L",";
+        wchar_t tmp[32];
+        double val = 0.0;
+        if (nseel_gmembuf_default) {
+          unsigned int offs = (unsigned int)(gmb_start + i) & ((1 << 20) - 1);
+          val = (double)nseel_gmembuf_default[offs];
+        }
+        swprintf_s(tmp, L"%.6g", val);
+        result += tmp;
+      }
+    }
+
+    // 4. Monitor variable
+    if (m_pState && m_pState->var_pf_monitor)
+      result += L"|monitor=" + std::to_wstring((float)*m_pState->var_pf_monitor);
+
+    // 5. Key per-frame output vars for blue haze (regNN values used by the preset)
+    result += L"|frame=" + std::to_wstring((int)GetFrame());
+
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(result.c_str());
   }
   else if (wcsncmp(sMessage, L"GET_AUDIO_DIAG", 14) == 0) {
     extern float mdropdx12_audio_sensitivity;
@@ -3335,22 +3488,32 @@ void Engine::DoCustomSoundAnalysis() {
 
   // sum spectrum up into 3 bands
   //DeepSeek - Updated Beat Detection Splitting Algorithm
+  // Use effective post-downsample rate for bin mapping, not device native rate.
+  // Audio is downsampled: effectiveRate = SAMPLE_RATE / floor(SAMPLE_RATE / TARGET_SAMPLE_RATE).
+  // At 96kHz device: ratio=2, effective=48000. At 44.1kHz: ratio=1, effective=44100.
+  // Using SAMPLE_RATE directly would halve the bins per band at 96kHz (Nyquist 48kHz vs actual 24kHz).
+  int effectiveRate = SAMPLE_RATE;
+  if (SAMPLE_RATE > TARGET_SAMPLE_RATE) {
+    int downsampleRatio = SAMPLE_RATE / TARGET_SAMPLE_RATE;
+    effectiveRate = SAMPLE_RATE / downsampleRatio;
+  }
+
   for (int i = 0; i < 3; i++) {
     // Calculate which FFT bins correspond to our frequency ranges
     int start_bin, end_bin;
 
     switch (i) {
     case 0: // Bass (0-250Hz)
-      start_bin = (int)(BASS_MIN * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
-      end_bin = (int)(BASS_MAX * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
+      start_bin = (int)(BASS_MIN * MY_FFT_SAMPLES / (effectiveRate / 2));
+      end_bin = (int)(BASS_MAX * MY_FFT_SAMPLES / (effectiveRate / 2));
       break;
     case 1: // Mid (250-4000Hz)
-      start_bin = (int)(MID_MIN * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
-      end_bin = (int)(MID_MAX * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
+      start_bin = (int)(MID_MIN * MY_FFT_SAMPLES / (effectiveRate / 2));
+      end_bin = (int)(MID_MAX * MY_FFT_SAMPLES / (effectiveRate / 2));
       break;
     case 2: // Treble (4000-20000Hz)
-      start_bin = (int)(TREBLE_MIN * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
-      end_bin = (int)(TREBLE_MAX * MY_FFT_SAMPLES / (SAMPLE_RATE / 2));
+      start_bin = (int)(TREBLE_MIN * MY_FFT_SAMPLES / (effectiveRate / 2));
+      end_bin = (int)(TREBLE_MAX * MY_FFT_SAMPLES / (effectiveRate / 2));
       break;
     }
 

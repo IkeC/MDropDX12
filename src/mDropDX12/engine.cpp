@@ -1639,7 +1639,7 @@ void Engine::MyReadConfig() {
 
   // We'll put these in the settings section since other MilkDrop forks use similar settings
   m_MinPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MinPSVersion", m_MinPSVersionConfig, pIni);
-  if (m_MinPSVersionConfig < 0) m_MinPSVersionConfig = 4; // MD2_PS_3_0 minimum for DX12
+  if (m_MinPSVersionConfig < 4) m_MinPSVersionConfig = 4; // MD2_PS_3_0 minimum for DX12 (ps_2_a silently drops texture bindings)
   m_MaxPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MaxPSVersion", m_MaxPSVersionConfig, pIni);
   if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 6;
   m_nMixType = GetPrivateProfileIntW(L"Settings", L"Mixtype", m_nMixType, pIni);
