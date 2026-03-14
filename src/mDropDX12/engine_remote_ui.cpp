@@ -143,35 +143,68 @@ void RemoteWindow::DoBuildControls() {
   // ════════════════════════════════════════════════════════════════════
   {
     int py = tabY;
+    const wchar_t* pIni = p->GetConfigIniFile();
 
-    // TCP Server status
+    // TCP Server header
     PAGE_CTRL(1, CreateLabel(hw, L"TCP Server", tabX, py, tabRW, lineH, hFontBold, false));
     py += lineH + gap;
 
-    PAGE_CTRL(1, CreateLabel(hw, L"", tabX, py, tabRW, lineH, hFont, false));
-    // Give the status label the IDC so we can update it
-    HWND hStatus = CreateWindowExW(0, L"STATIC", L"",
-      WS_CHILD | SS_LEFT,
-      tabX, py, tabRW, lineH, hw, (HMENU)(INT_PTR)IDC_MW_TCP_STATUS,
-      GetModuleHandle(NULL), NULL);
-    if (hStatus && hFont) SendMessage(hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(1, hStatus);
+    // Enable checkbox
+    {
+      bool enabled = GetPrivateProfileIntW(L"Network", L"TcpEnabled", 1, pIni) != 0;
+      HWND hChk = CreateWindowExW(0, L"BUTTON", L"Enable TCP Server",
+        WS_CHILD | BS_AUTOCHECKBOX,
+        tabX, py, MulDiv(160, lineH, 26), lineH, hw, (HMENU)(INT_PTR)IDC_MW_TCP_ENABLED,
+        GetModuleHandle(NULL), NULL);
+      if (hChk && hFont) SendMessage(hChk, WM_SETFONT, (WPARAM)hFont, TRUE);
+      SendMessage(hChk, BM_SETCHECK, enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+      PAGE_CTRL(1, hChk);
+    }
+    py += lineH + gap;
+
+    // Port + Start/Stop on same line
+    {
+      int portLW = MulDiv(35, lineH, 26);
+      PAGE_CTRL(1, CreateLabel(hw, L"Port:", tabX, py, portLW, lineH, hFont, false));
+
+      int portEditW = MulDiv(70, lineH, 26);
+      wchar_t portBuf[16];
+      swprintf_s(portBuf, L"%d", GetPrivateProfileIntW(L"Network", L"TcpPort", 9270, pIni));
+      PAGE_CTRL(1, CreateEdit(hw, portBuf, IDC_MW_TCP_PORT_EDIT,
+        tabX + portLW + 4, py, portEditW, lineH, hFont, ES_NUMBER, false));
+
+      int btnW = MulDiv(80, lineH, 26);
+      PAGE_CTRL(1, CreateBtn(hw, g_tcpServer.IsRunning() ? L"Stop" : L"Start", IDC_MW_TCP_STARTSTOP,
+        tabX + portLW + portEditW + 12, py, btnW, lineH, hFont, false));
+    }
+    py += lineH + gap;
+
+    // Status label
+    {
+      HWND hStatus = CreateWindowExW(0, L"STATIC", L"",
+        WS_CHILD | SS_LEFT,
+        tabX, py, tabRW, lineH, hw, (HMENU)(INT_PTR)IDC_MW_TCP_STATUS,
+        GetModuleHandle(NULL), NULL);
+      if (hStatus && hFont) SendMessage(hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(1, hStatus);
+    }
     py += lineH + gap + 4;
 
     // PIN configuration
-    PAGE_CTRL(1, CreateLabel(hw, L"PIN Configuration", tabX, py, tabRW, lineH, hFontBold, false));
+    PAGE_CTRL(1, CreateLabel(hw, L"PIN", tabX, py, tabRW, lineH, hFontBold, false));
     py += lineH + gap;
 
-    int pinLW = MulDiv(40, lineH, 26);
-    PAGE_CTRL(1, CreateLabel(hw, L"PIN:", tabX, py, pinLW, lineH, hFont, false));
-    int pinEditW = MulDiv(150, lineH, 26);
-    HWND hPinEdit = CreateEdit(hw, L"", IDC_MW_TCP_PIN_EDIT,
-      tabX + pinLW + 4, py, pinEditW, lineH, hFont, ES_PASSWORD, false);
-    PAGE_CTRL(1, hPinEdit);
+    {
+      int pinLW = MulDiv(35, lineH, 26);
+      PAGE_CTRL(1, CreateLabel(hw, L"PIN:", tabX, py, pinLW, lineH, hFont, false));
+      int pinEditW = MulDiv(150, lineH, 26);
+      PAGE_CTRL(1, CreateEdit(hw, L"", IDC_MW_TCP_PIN_EDIT,
+        tabX + pinLW + 4, py, pinEditW, lineH, hFont, ES_PASSWORD, false));
 
-    int applyW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(1, CreateBtn(hw, L"Apply", IDC_MW_TCP_PIN_APPLY,
-      tabX + pinLW + pinEditW + 12, py, applyW, lineH, hFont, false));
+      int applyW = MulDiv(80, lineH, 26);
+      PAGE_CTRL(1, CreateBtn(hw, L"Apply", IDC_MW_TCP_PIN_APPLY,
+        tabX + pinLW + pinEditW + 12, py, applyW, lineH, hFont, false));
+    }
     py += lineH + gap + 8;
 
     // Authorized Devices
@@ -292,6 +325,83 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       wcsncpy_s(p->m_screenshotPath, filePath, _TRUNCATE);
       p->m_bScreenshotRequested = true;
     }
+    return 0;
+  }
+
+  // Enable/Disable TCP
+  if (id == IDC_MW_TCP_ENABLED && code == BN_CLICKED) {
+    HWND hChk = GetDlgItem(hWnd, IDC_MW_TCP_ENABLED);
+    bool enabled = SendMessage(hChk, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    const wchar_t* pIni = p->GetConfigIniFile();
+    WritePrivateProfileStringW(L"Network", L"TcpEnabled", enabled ? L"1" : L"0", pIni);
+
+    if (!enabled && g_tcpServer.IsRunning()) {
+      g_tcpServer.Stop();
+    }
+    RefreshTcpStatus();
+    // Update Start/Stop button text
+    HWND hBtn = GetDlgItem(hWnd, IDC_MW_TCP_STARTSTOP);
+    if (hBtn) SetWindowTextW(hBtn, g_tcpServer.IsRunning() ? L"Stop" : L"Start");
+    return 0;
+  }
+
+  // Start/Stop TCP server
+  if (id == IDC_MW_TCP_STARTSTOP && code == BN_CLICKED) {
+    const wchar_t* pIni = p->GetConfigIniFile();
+    if (g_tcpServer.IsRunning()) {
+      g_tcpServer.Stop();
+    } else {
+      // Read port from edit field
+      wchar_t portBuf[16] = {};
+      HWND hPortEdit = GetDlgItem(hWnd, IDC_MW_TCP_PORT_EDIT);
+      if (hPortEdit) GetWindowTextW(hPortEdit, portBuf, 16);
+      int port = _wtoi(portBuf);
+      if (port < 1 || port > 65535) port = 9270;
+
+      // Save port to INI
+      WritePrivateProfileStringW(L"Network", L"TcpPort", portBuf, pIni);
+
+      // Get the render window handle for PostMessage dispatch
+      extern std::atomic<HWND> g_hRenderWindow;
+      HWND hwndRender = g_hRenderWindow.load();
+      g_tcpServer.LoadAuthorizedDevices(pIni);
+      g_tcpServer.Start(port,
+        [hwndRender](TcpClientConnection& client, const std::wstring& msg) {
+          g_respondingTcpClient = &client;
+          wchar_t* copy = (wchar_t*)malloc((msg.size() + 1) * sizeof(wchar_t));
+          if (copy) {
+            wcscpy_s(copy, msg.size() + 1, msg.c_str());
+            PostMessageW(hwndRender, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+          }
+        },
+        [pIni](TcpClientConnection& client, const std::string& pin,
+               const std::string& deviceId, const std::string& deviceName) {
+          wchar_t storedHash[128] = {};
+          GetPrivateProfileStringW(L"Network", L"PinHash", L"", storedHash, 128, pIni);
+          bool pinConfigured = storedHash[0] != L'\0';
+          if (pinConfigured) {
+            // TODO: SHA256 verification
+          }
+          client.deviceId = deviceId;
+          client.deviceName = deviceName;
+          if (g_tcpServer.IsDeviceAuthorized(deviceId)) {
+            client.authState = TcpAuthState::Authenticated;
+            g_tcpServer.SendTo(client, "AUTH_OK");
+          } else {
+            client.authState = TcpAuthState::Pending;
+            g_tcpServer.SendTo(client, "AUTH_PENDING");
+          }
+        }
+      );
+
+      // Update enable checkbox
+      HWND hChk = GetDlgItem(hWnd, IDC_MW_TCP_ENABLED);
+      if (hChk) SendMessage(hChk, BM_SETCHECK, BST_CHECKED, 0);
+      WritePrivateProfileStringW(L"Network", L"TcpEnabled", L"1", pIni);
+    }
+    RefreshTcpStatus();
+    HWND hBtn = GetDlgItem(hWnd, IDC_MW_TCP_STARTSTOP);
+    if (hBtn) SetWindowTextW(hBtn, g_tcpServer.IsRunning() ? L"Stop" : L"Start");
     return 0;
   }
 

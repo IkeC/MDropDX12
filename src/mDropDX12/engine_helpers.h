@@ -884,6 +884,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_TCP_PIN_APPLY         9526  // Button: Apply PIN
 #define IDC_MW_TCP_DEVICE_LIST       9527  // ListView: authorized devices
 #define IDC_MW_TCP_DEVICE_REMOVE     9528  // Button: Remove device
+#define IDC_MW_TCP_ENABLED           9529  // Checkbox: Enable TCP server
+#define IDC_MW_TCP_PORT_EDIT         9530  // Edit: TCP port
+#define IDC_MW_TCP_STARTSTOP         9531  // Button: Start/Stop TCP server
 
 // Visual window controls (9540-9559)
 #define IDC_MW_VISUALWIN_PIN          9540
