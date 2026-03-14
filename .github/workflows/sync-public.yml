@@ -31,6 +31,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --unset-all http.https://github.com/.extraheader || true
           git add -A
           git commit -m "sync: update from private repo" --allow-empty
           git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_PAT }}@github.com/shanevbg/MDropDX12.git
