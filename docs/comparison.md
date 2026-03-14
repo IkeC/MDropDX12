@@ -4,7 +4,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v2.2.0) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v2.4.0) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active (v3.31) |
 | **projectM** | Open-source MilkDrop reimplementation (SDL standalone) | OpenGL | Pre-release (lib v4.1.6) |
@@ -191,7 +191,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | Window title regex parsing (named profiles) | ✅ | ❌ | ❌ | ❌ |
 | Windows Media Play/Pause/Stop keys | ✅ | ✅ | ❌ | ❌ |
 
-## Remote Control
+## Remote Control & IPC
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
 | ------- | --------- | -------- | --------- | -------- |
@@ -200,6 +200,28 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | WM_COPYDATA IPC protocol | ❌ (replaced by Named Pipes) | ✅ | ❌ | ❌ |
 | Tabbed Remote UI | 🤝 | ✅ | ❌ | ❌ |
 | Button panel (Remote buttons) | ✅ (Button Board) | ✅ | ❌ | ❌ |
+| IPC preset control (load/next/prev/lock) | ✅ | ✅ | ❌ | ❌ |
+| IPC preset list management (load/clear/enum) | ✅ | ❌ | ❌ | ❌ |
+| IPC directory switching | ✅ | ❌ | ❌ | ❌ |
+| IPC text message system (font/size/color/position/animation) | ✅ | ✅ | ❌ | ❌ |
+| IPC wave parameter manipulation | ✅ | ✅ | ❌ | ❌ |
+| IPC color control (hue/sat/brightness, auto-cycling) | ✅ | ✅ | ❌ | ❌ |
+| IPC FFT control (attack/decay) | ✅ | ✅ | ❌ | ❌ |
+| IPC audio gain/sensitivity control | ✅ | ❌ | ❌ | ❌ |
+| IPC audio device switching (input/output) | ✅ | ✅ | ❌ | ❌ |
+| IPC Spout output control | ✅ | ✅ | ❌ | ❌ |
+| IPC Spout/video input mixing control | ✅ | ✅ | ❌ | ❌ |
+| IPC screenshot capture | ✅ | ✅ | ❌ | ❌ |
+| IPC state query (preset, opacity, colors, FFT, audio) | ✅ | ✅ | ❌ | ❌ |
+| IPC window management (move/resize/fullscreen/watermark) | ✅ | ✅ | ❌ | ❌ |
+| IPC monitor mirror control (opacity, clickthrough) | ✅ | ❌ | ❌ | ❌ |
+| IPC shader import (GLSL convert, save .milk3) | ✅ | ✅ (Remote) | ❌ | ❌ |
+| IPC track info forwarding | ✅ | ✅ | ❌ | ❌ |
+| IPC log level control (get/set/clear) | ✅ | ❌ | ❌ | ❌ |
+| IPC diagnostic commands (shader dump, render state, EEL state) | ✅ | ❌ | ❌ | ❌ |
+| IPC clean shutdown | ✅ | ❌ | ❌ | ❌ |
+| Multi-instance pipe support (unlimited clients) | ✅ | ❌ | ❌ | ❌ |
+| PID-based pipe discovery | ✅ | ❌ | ❌ | ❌ |
 
 ## Display Outputs
 
@@ -257,7 +279,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 ### Milkwave Remote Compatibility
 
-Milkwave Remote communicates with the Visualizer via `WM_COPYDATA` messages, finding the window using `EnumWindows()` + `GetWindowText()`. MDropDX12 uses a different IPC mechanism: Named Pipes (`\\.\pipe\Milkwave_<PID>`) with PID-based discovery and duplex message-mode communication. MDropDX12 handles 32 of 34 Milkwave command formats. The pipe name and connection status are shown in the Remote window.
+Milkwave Remote communicates with the Visualizer via `WM_COPYDATA` messages, finding the window using `EnumWindows()` + `GetWindowText()`. MDropDX12 uses a different IPC mechanism: Named Pipes (`\\.\pipe\Milkwave_<PID>`) with PID-based discovery and duplex message-mode communication. MDropDX12 handles all Milkwave Remote command formats plus additional commands for diagnostics, preset list management, shader import, and window control (58 commands total). The pipe name and connection status are shown in the Remote window.
 
 ### .milk2 Double-Preset Format
 
@@ -273,7 +295,7 @@ The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projec
 
 ### Architectural Differences
 
-- **MDropDX12 v2.2.0**: DirectX 12, x64, native ns-eel2 (x64 JIT with SEH crash protection), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`); ToolWindow system (20+ standalone windows: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations — all run on own threads), configurable hotkeys with local/global scope and dynamic Script/Launch entries, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing, Shadertoy import with GLSL->HLSL converter and .milk3 JSON format (SM5.0, FLOAT32 ping-pong feedback buffers, Buffer A/B multi-pass), FFT EQ smoothing with attack/decay and peak hold, SEH crash diagnostics for EEL JIT and preset loading, self-bootstrapping exe with embedded shaders, preset annotation system with persistent ratings/flags/notes and auto-captured shader errors, two-pass shader blending for preset transitions
+- **MDropDX12 v2.4.0**: DirectX 12, x64, native ns-eel2 (x64 JIT with SEH crash protection), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`); ToolWindow system (20+ standalone windows: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations — all run on own threads), configurable hotkeys with local/global scope and dynamic Script/Launch entries, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing, Shadertoy import with GLSL->HLSL converter and .milk3 JSON format (SM5.0, FLOAT32 ping-pong feedback buffers, Buffer A/B multi-pass), FFT EQ smoothing with attack/decay and peak hold, SEH crash diagnostics for EEL JIT and preset loading, self-bootstrapping exe with embedded shaders, preset annotation system with persistent ratings/flags/notes and auto-captured shader errors, two-pass shader blending for preset transitions
 - **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine, GLSL->HLSL Shadertoy converter (Remote Shader Tab), FFT EQ smoothing with attack/decay and peak hold, HLSL variable shadowing fix, fallback texture search paths, async shader compilation
 - **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
 - **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code
@@ -290,24 +312,65 @@ Features marked 🤝 are not built into MDropDX12 directly but will work when us
 
 Features marked ♻️ are implemented through MDropDX12's Named Pipe IPC server (`\\.\pipe\Milkwave_<PID>`). The pipe server runs on a dedicated thread and receives commands non-blockingly from Milkwave Remote or any pipe client. Connection status is shown in the Remote window.
 
-**Supported IPC commands** (32 of 34 Milkwave commands handled):
+**Supported IPC commands** (58 commands across 9 categories):
 
-- `MSG|` — Full text message system (text, font, size, position, color, fade, burn-in, background box, animation)
-- `AMP|` — Audio amplification (left/right channels)
+**Preset Control:**
 - `PRESET=` — Load preset by path/filename
-- `WAVE|` — Live wave parameter manipulation
-- `DEVICE=` — Audio device switching (input/output)
-- `OPACITY=` — Window transparency
-- `STATE` — State query (reports opacity, preset, settings back to Remote)
+- `SIGNAL|NEXT_PRESET` / `SIGNAL|PREV_PRESET` — Next/previous preset
 - `LINK=` — Remote preset link toggle
 - `QUICKSAVE` — Save current preset to Quicksave folder
-- `CONFIG` / `SETTINGS` — Reload configuration
-- `VAR_TIME=` / `VAR_FRAME=` / `VAR_FPS=` — Time/frame/FPS factors
-- `VAR_INTENSITY=` / `VAR_SHIFT=` / `VAR_VERSION=` — Visual parameters
+- `LOAD_LIST=` / `CLEAR_LIST` / `ENUM_LISTS` — Preset list management
+- `SET_DIR=` — Change preset directory (with optional `|recursive` flag)
+
+**Text Messages & Sprites:**
+- `MSG|` — Full text message system (text, font, size, position, color, fade, burn-in, background box, animation)
+- `SIGNAL|SPRITE_MODE` / `SIGNAL|MESSAGE_MODE` — Toggle sprite/message input
+- `CLEARPRESET` / `CLEARSPRITES` / `CLEARTEXTS` / `TESTFONTS` — Utility commands
+
+**Audio & FFT:**
+- `AMP|` — Audio amplification (left/right channels)
+- `FFT_ATTACK=` / `FFT_DECAY=` — FFT smoothing parameters
+- `SET_AUDIO_GAIN=` / `GET_AUDIO_GAIN` — Audio gain/sensitivity
+- `DEVICE=` — Audio device switching (IN|/OUT| subtypes)
+- `WAVE|` — Live wave parameter manipulation
+
+**Color & Visual:**
 - `COL_HUE=` / `HUE_AUTO=` / `HUE_AUTO_SECONDS=` — Hue shifting + auto cycling
 - `COL_SATURATION=` / `COL_BRIGHTNESS=` — Color adjustments
+- `VAR_INTENSITY=` / `VAR_SHIFT=` / `VAR_VERSION=` — Custom visual parameters
+- `VAR_TIME=` / `VAR_FRAME=` / `VAR_FPS=` — Time/frame/FPS factors
 - `VAR_QUALITY=` / `VAR_AUTO=` — Render quality control
+- `OPACITY=` — Window transparency
+
+**Display & Window:**
+- `SIGNAL|FULLSCREEN` / `SIGNAL|WATERMARK` / `SIGNAL|BORDERLESS_FS` — Window modes
+- `SIGNAL|STRETCH` / `SIGNAL|MIRROR` / `SIGNAL|MIRROR_WM` — Multi-monitor modes
+- `MOVE_TO_DISPLAY=` — Move window to center of display N
+- `SET_WINDOW=` — Set window position and size (x,y,w,h)
+- `SET_MIRROR_OPACITY=` / `SET_MIRROR_CLICKTHRU=` — Mirror display control
+
+**Spout & Input Mixing:**
 - `SPOUT_ACTIVE=` / `SPOUT_FIXEDSIZE=` / `SPOUT_RESOLUTION=` — Spout output control
-- `CAPTURE` — Screenshot capture
-- `CLEARPRESET` / `CLEARSPRITES` / `CLEARTEXTS` / `TESTFONTS` — Utility commands
 - `SPOUTINPUT=` — Spout input mixing (sender, enable/disable, layer, opacity, luma key)
+- `SIGNAL|ENABLESPOUTMIX=` / `SIGNAL|SET_INPUTMIX_*` — Input mixing signals
+- `SIGNAL|SETVIDEODEVICE=` / `SIGNAL|ENABLEVIDEOMIX=` — Video input control
+
+**Shader Import:**
+- `SHADER_IMPORT=` — Load and convert Shadertoy .json file
+- `SHADER_GLSL=` — Raw GLSL code conversion and application
+- `SHADER_CONVERT=` — Convert GLSL to HLSL (no apply)
+- `SHADER_SAVE=` — Save current shader passes as .milk3
+
+**Media & State:**
+- `TRACK|` — Track info from Remote (artist|title|album)
+- `SIGNAL|COVER_CHANGED` / `SIGNAL|SHOW_COVER` — Cover art signals
+- `STATE` — Full state query (preset, opacity, colors, FFT, audio, settings)
+- `CAPTURE` / `SIGNAL|CAPTURE` — Screenshot capture
+- `CONFIG` / `SETTINGS` — Reload configuration
+
+**Diagnostics & System:**
+- `SET_LOGLEVEL=` / `GET_LOGLEVEL` / `CLEAR_LOGS` — Runtime log level control
+- `DUMP_SHADER` — Dump current warp/comp shader text
+- `GET_RENDER_DIAG` / `GET_EEL_STATE` / `GET_AUDIO_DIAG` — Diagnostic data dumps
+- `DIAG_DISPLAY_MODE=` / `DIAG_MIRRORS` — Display diagnostic modes
+- `SHUTDOWN` — Clean shutdown
