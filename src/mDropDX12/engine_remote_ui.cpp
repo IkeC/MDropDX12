@@ -207,16 +207,20 @@ void RemoteWindow::DoBuildControls() {
     }
     py += lineH + gap + 8;
 
-    // Authorized Devices
-    PAGE_CTRL(1, CreateLabel(hw, L"Authorized Devices", tabX, py, tabRW, lineH, hFontBold, false));
+    // Connected Clients
+    PAGE_CTRL(1, CreateLabel(hw, L"Clients", tabX, py, tabRW, lineH, hFontBold, false));
     py += lineH + gap;
 
-    // ListView for devices
+    // ListView for connected clients with checkboxes
     {
       int listH = lineH * 8;
       HWND hList = CreateThemedListView(IDC_MW_TCP_DEVICE_LIST,
         tabX, py, tabRW, listH, false, false);
       PAGE_CTRL(1, hList);
+
+      // Enable checkboxes
+      DWORD exStyle = (DWORD)SendMessageW(hList, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+      SendMessageW(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, exStyle | LVS_EX_CHECKBOXES);
 
       // Add columns
       LVCOLUMNW col = {};
@@ -231,16 +235,16 @@ void RemoteWindow::DoBuildControls() {
       col.cx = MulDiv(tabRW * 35, 1, 100);
       SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
 
-      col.pszText = (LPWSTR)L"Date Added";
+      col.pszText = (LPWSTR)L"Status";
       col.cx = MulDiv(tabRW * 25, 1, 100);
       SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
 
       py += listH + gap;
     }
 
-    // Remove button
+    // Disconnect button
     int removeW = MulDiv(100, lineH, 26);
-    PAGE_CTRL(1, CreateBtn(hw, L"Remove", IDC_MW_TCP_DEVICE_REMOVE,
+    PAGE_CTRL(1, CreateBtn(hw, L"Disconnect", IDC_MW_TCP_DEVICE_REMOVE,
       tabX, py, removeW, lineH, hFont, false));
   }
 
@@ -430,7 +434,7 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     return 0;
   }
 
-  // Remove authorized device
+  // Disconnect client
   if (id == IDC_MW_TCP_DEVICE_REMOVE && code == BN_CLICKED) {
     HWND hList = GetDlgItem(hWnd, IDC_MW_TCP_DEVICE_LIST);
     if (!hList) return 0;
@@ -448,7 +452,6 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     item.cchTextMax = 256;
     SendMessageW(hList, LVM_GETITEMW, 0, (LPARAM)&item);
 
-    // Convert wide to narrow for the API
     std::string deviceId = WideToUTF8(deviceIdW);
 
     g_tcpServer.RemoveAuthorizedDevice(deviceId);
@@ -468,6 +471,51 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 //----------------------------------------------------------------------
 
 LRESULT RemoteWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
+  // Handle checkbox click on client list
+  if (pnm->idFrom == IDC_MW_TCP_DEVICE_LIST && pnm->code == LVN_ITEMCHANGED && !m_bRefreshingList) {
+    NMLISTVIEW* pnmv = (NMLISTVIEW*)pnm;
+    // Only handle check state changes (not selection changes)
+    if ((pnmv->uChanged & LVIF_STATE) &&
+        ((pnmv->uOldState ^ pnmv->uNewState) & LVIS_STATEIMAGEMASK)) {
+      bool nowChecked = ((pnmv->uNewState & LVIS_STATEIMAGEMASK) >> 12) == 2;
+      int idx = pnmv->iItem;
+
+      // Get device ID from column 1
+      HWND hList = pnm->hwndFrom;
+      wchar_t deviceIdW[256] = {};
+      LVITEMW item = {};
+      item.mask = LVIF_TEXT;
+      item.iItem = idx;
+      item.iSubItem = 1;
+      item.pszText = deviceIdW;
+      item.cchTextMax = 256;
+      SendMessageW(hList, LVM_GETITEMTEXTW, idx, (LPARAM)&item);
+
+      std::string deviceId = WideToUTF8(deviceIdW);
+      if (deviceId.empty()) return 0;
+
+      Engine* p = m_pEngine;
+      if (nowChecked) {
+        // Authorize: approve pending client and add to authorized list
+        g_tcpServer.ApproveDevice(deviceId);
+        // Get client name for persisted record
+        auto clients = g_tcpServer.GetConnectedClients();
+        std::string name;
+        for (auto& c : clients) {
+          if (c.deviceId == deviceId) { name = c.deviceName; break; }
+        }
+        g_tcpServer.AddAuthorizedDevice(deviceId, name);
+        g_tcpServer.SaveAuthorizedDevices(p->GetConfigIniFile());
+      } else {
+        // Deauthorize: remove from authorized list, deny the client
+        g_tcpServer.RemoveAuthorizedDevice(deviceId);
+        g_tcpServer.DenyDevice(deviceId);
+        g_tcpServer.SaveAuthorizedDevices(p->GetConfigIniFile());
+      }
+      RefreshDeviceList();
+      return 0;
+    }
+  }
   // Tab switching is handled by base class (TCN_SELCHANGE)
   return -1;
 }
@@ -488,8 +536,9 @@ LRESULT RemoteWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
     }
 
-    // Also refresh TCP status on the Authorization tab
+    // Also refresh TCP status and client list on the Authorization tab
     RefreshTcpStatus();
+    RefreshDeviceList();
     return 0;
   }
   return -1;
@@ -554,14 +603,25 @@ void RemoteWindow::RefreshDeviceList() {
   HWND hList = GetDlgItem(m_hWnd, IDC_MW_TCP_DEVICE_LIST);
   if (!hList) return;
 
+  m_bRefreshingList = true; // suppress LVN_ITEMCHANGED during rebuild
+
+  // Remember which item was selected
+  int prevSel = (int)SendMessageW(hList, LVM_GETNEXTITEM, -1, LVNI_SELECTED);
+
   SendMessageW(hList, LVM_DELETEALLITEMS, 0, 0);
 
-  auto devices = g_tcpServer.GetAuthorizedDevices();
-  for (int i = 0; i < (int)devices.size(); i++) {
-    // Convert narrow strings to wide
-    std::wstring nameW = UTF8ToWide(devices[i].name);
-    std::wstring idW = UTF8ToWide(devices[i].id);
-    std::wstring dateW = UTF8ToWide(devices[i].dateAdded);
+  auto clients = g_tcpServer.GetConnectedClients();
+  for (int i = 0; i < (int)clients.size(); i++) {
+    std::wstring nameW = clients[i].deviceName.empty()
+      ? L"(unknown)" : UTF8ToWide(clients[i].deviceName);
+    std::wstring idW = clients[i].deviceId.empty()
+      ? L"" : UTF8ToWide(clients[i].deviceId);
+
+    const wchar_t* statusStr = L"Unauthenticated";
+    if (clients[i].authState == TcpAuthState::Pending)
+      statusStr = L"Pending";
+    else if (clients[i].authState == TcpAuthState::Authenticated)
+      statusStr = L"Authorized";
 
     LVITEMW item = {};
     item.mask = LVIF_TEXT;
@@ -570,6 +630,10 @@ void RemoteWindow::RefreshDeviceList() {
     item.pszText = (LPWSTR)nameW.c_str();
     SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&item);
 
+    // Set checkbox: checked = Authorized
+    ListView_SetCheckState(hList, i,
+      clients[i].authState == TcpAuthState::Authenticated);
+
     LVITEMW sub = {};
     sub.mask = LVIF_TEXT;
     sub.iItem = i;
@@ -577,9 +641,16 @@ void RemoteWindow::RefreshDeviceList() {
     sub.pszText = (LPWSTR)idW.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
     sub.iSubItem = 2;
-    sub.pszText = (LPWSTR)dateW.c_str();
+    sub.pszText = (LPWSTR)statusStr;
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
   }
+
+  // Restore selection
+  if (prevSel >= 0 && prevSel < (int)clients.size()) {
+    ListView_SetItemState(hList, prevSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+  }
+
+  m_bRefreshingList = false;
 }
 
 } // namespace mdrop

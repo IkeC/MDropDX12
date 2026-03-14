@@ -355,3 +355,18 @@ void TcpServer::RemoveAuthorizedDevice(const std::string& id) {
 std::vector<AuthorizedDevice> TcpServer::GetAuthorizedDevices() const {
     return m_authorizedDevices;
 }
+
+std::vector<TcpClientInfo> TcpServer::GetConnectedClients() const {
+    std::vector<TcpClientInfo> result;
+    // Note: const_cast needed because mutex is not mutable
+    auto& mtx = const_cast<std::mutex&>(m_clientsMutex);
+    std::lock_guard<std::mutex> lock(mtx);
+    for (auto& c : m_clients) {
+        TcpClientInfo info;
+        info.deviceId = c.deviceId;
+        info.deviceName = c.deviceName;
+        info.authState = c.authState;
+        result.push_back(info);
+    }
+    return result;
+}

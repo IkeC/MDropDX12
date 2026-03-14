@@ -18,6 +18,13 @@ struct AuthorizedDevice {
     std::string dateAdded; // YYYY-MM-DD
 };
 
+// Snapshot of a connected client for UI display
+struct TcpClientInfo {
+    std::string deviceId;
+    std::string deviceName;
+    TcpAuthState authState;
+};
+
 struct TcpClientConnection {
     SOCKET socket = INVALID_SOCKET;
     TcpAuthState authState = TcpAuthState::Unauthenticated;
@@ -61,6 +68,7 @@ public:
     void AddAuthorizedDevice(const std::string& id, const std::string& name);
     void RemoveAuthorizedDevice(const std::string& id);
     std::vector<AuthorizedDevice> GetAuthorizedDevices() const;
+    std::vector<TcpClientInfo> GetConnectedClients() const;
 
 private:
     void AcceptNewClients();

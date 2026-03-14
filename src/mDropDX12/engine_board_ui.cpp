@@ -265,6 +265,13 @@ HMENU ButtonBoardWindow::BuildActionSubMenu() {
             }
         }
 
+        // Append IPC signal actions to the Window category
+        if (cat == HKCAT_WINDOW) {
+            AppendMenuW(hCatMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hCatMenu, MF_STRING, 2000, L"Watermark");
+            itemCount++;
+        }
+
         if (itemCount > 0)
             AppendMenuW(hTop, MF_POPUP, (UINT_PTR)hCatMenu, kCategoryNames[cat]);
         else
@@ -390,6 +397,15 @@ void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
         SetSlotImage(globalIndex, L"");
         SaveBoard();
         break;
+    }
+
+    // Handle IPC signal actions (ID = 2000+)
+    if (cmd == 2000) { // Watermark
+        s.action  = ButtonAction::ScriptCommand;
+        s.payload = L"SIGNAL|WATERMARK";
+        s.label   = L"Watermark";
+        m_pPanel->Invalidate();
+        SaveBoard();
     }
 
     // Handle "Assign Action..." menu items (ID = 1000 + hotkey index)

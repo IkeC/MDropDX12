@@ -598,6 +598,7 @@ protected:
 
 private:
   int m_lastSeenIPCSeq = 0;
+  bool m_bRefreshingList = false; // guard against LVN_ITEMCHANGED during list rebuild
   void RefreshIPCList();
   void RefreshDeviceList();
   void RefreshTcpStatus();
