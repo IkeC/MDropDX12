@@ -371,6 +371,8 @@
     <ClCompile Include="button_panel.cpp" />
     <ClCompile Include="engine_board_ui.cpp" />
     <ClCompile Include="pipe_server.cpp" />
+    <ClCompile Include="tcp_server.cpp" />
+    <ClCompile Include="mdns_advertiser.cpp" />
     <ClCompile Include="engine_shader_import_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
     <ClCompile Include="engine_sprites_ui.cpp" />
@@ -472,6 +474,8 @@
     <ClInclude Include="midi_input.h" />
     <ClInclude Include="engine.h" />
     <ClInclude Include="pipe_server.h" />
+    <ClInclude Include="tcp_server.h" />
+    <ClInclude Include="mdns_advertiser.h" />
     <ClInclude Include="tool_window.h" />
     <ClInclude Include="engineshell.h" />
     <ClInclude Include="render_commands.h" />

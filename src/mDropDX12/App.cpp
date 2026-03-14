@@ -259,7 +259,9 @@ PipeServer g_pipeServer;
 
 // --- TCP server for Android remote (MDR) ---
 #include "tcp_server.h"
+#include "mdns_advertiser.h"
 TcpServer g_tcpServer;
+MdnsAdvertiser g_mdns;
 thread_local TcpClientConnection* g_respondingTcpClient = nullptr;
 WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
 WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
@@ -2715,6 +2717,11 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
           }
         }
       );
+
+      // Advertise the service via mDNS so Android clients can discover it
+      char hostname[256] = {};
+      gethostname(hostname, sizeof(hostname));
+      g_mdns.Register(std::string("MDropDX12-") + hostname, g_tcpServer.GetPort(), (int)GetCurrentProcessId());
     }
   }
 
@@ -2856,6 +2863,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   // Stop pipe server and TCP server before tearing down the render window
   g_pipeServer.Stop();
+  g_mdns.Unregister();
   g_tcpServer.Stop();
   g_hRenderWindow.store(nullptr);
 
