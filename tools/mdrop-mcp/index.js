@@ -13,33 +13,57 @@ import { execSync } from 'child_process';
 
 // ── Pipe helpers ──
 
-function discoverPipes() {
+function getProcessNames(pids) {
+  // Returns Map<pid, exeName> for the given PIDs
+  const names = new Map();
+  try {
+    const output = execSync('tasklist /fo csv /nh', { encoding: 'utf8', timeout: 5000 });
+    for (const line of output.split(/\r?\n/)) {
+      const match = line.match(/^"([^"]+)","(\d+)"/);
+      if (match) {
+        const pid = parseInt(match[2]);
+        if (pids.has(pid)) names.set(pid, match[1]);
+      }
+    }
+  } catch { /* best effort */ }
+  return names;
+}
+
+function discoverPipes(target = 'auto') {
   try {
     const pipeDir = '//./pipe/';
     const pipes = fs.readdirSync(pipeDir)
       .filter(name => name.startsWith('Milkwave_'))
       .map(name => {
         const match = name.match(/Milkwave_(\d+)/);
-        return match ? { path: pipeDir + name, pid: parseInt(match[1]) } : null;
+        return match ? { path: pipeDir + name, pid: parseInt(match[1]), exe: null } : null;
       })
       .filter(Boolean);
 
-    // If multiple pipes found, prefer the MDropDX12 process over Milkwave Visualizer
-    if (pipes.length > 1) {
-      try {
-        const output = execSync('tasklist /fo csv /nh', { encoding: 'utf8', timeout: 5000 });
-        const mdropPids = new Set();
-        for (const line of output.split(/\r?\n/)) {
-          if (line.toLowerCase().includes('mdropdx12')) {
-            const pidMatch = line.match(/"(\d+)"/);
-            if (pidMatch) mdropPids.add(parseInt(pidMatch[1]));
-          }
-        }
-        if (mdropPids.size > 0) {
-          const mdropPipes = pipes.filter(p => mdropPids.has(p.pid));
-          if (mdropPipes.length > 0) return mdropPipes;
-        }
-      } catch { /* fall through to return all pipes */ }
+    // Look up process names for all discovered pipes
+    if (pipes.length > 0) {
+      const pidSet = new Set(pipes.map(p => p.pid));
+      const names = getProcessNames(pidSet);
+      for (const p of pipes) {
+        p.exe = names.get(p.pid) || 'unknown';
+      }
+    }
+
+    // Filter by target preference ('all' returns everything unfiltered)
+    if (target === 'all') {
+      return pipes;
+    } else if (target === 'mdrop') {
+      const filtered = pipes.filter(p => p.exe.toLowerCase().includes('mdropdx12'));
+      if (filtered.length > 0) return filtered;
+      // Fall through to all if no MDropDX12 found
+    } else if (target === 'milkwave') {
+      const filtered = pipes.filter(p => !p.exe.toLowerCase().includes('mdropdx12'));
+      if (filtered.length > 0) return filtered;
+      // Fall through to all if no Milkwave found
+    } else if (pipes.length > 1) {
+      // Auto mode: prefer MDropDX12
+      const mdropPipes = pipes.filter(p => p.exe.toLowerCase().includes('mdropdx12'));
+      if (mdropPipes.length > 0) return mdropPipes;
     }
 
     return pipes;
@@ -139,11 +163,32 @@ function findCaptureDir() {
   if (process.env.MDROP_CAPTURE_DIR) {
     return process.env.MDROP_CAPTURE_DIR;
   }
+
+  // Try to find capture dir from the connected process's exe location
+  try {
+    const pipePath = findPipe();
+    const pidMatch = pipePath.match(/Milkwave_(\d+)/);
+    if (pidMatch) {
+      const pid = pidMatch[1];
+      const output = execSync(
+        `wmic process where "ProcessId=${pid}" get ExecutablePath /value`,
+        { encoding: 'utf8', timeout: 5000 }
+      );
+      const exeMatch = output.match(/ExecutablePath=(.+)/);
+      if (exeMatch) {
+        const exeDir = path.dirname(exeMatch[1].trim());
+        const captureDir = path.join(exeDir, 'capture');
+        return captureDir; // visualizer creates it on first capture
+      }
+    }
+  } catch { /* fall through to hardcoded paths */ }
+
+  // Fallback: MDropDX12 build directories
   const releasePath = path.join(projectRoot, 'src/mDropDX12/Release_x64/capture');
   if (fs.existsSync(releasePath)) return releasePath;
   const debugPath = path.join(projectRoot, 'src/mDropDX12/Debug_x64/capture');
   if (fs.existsSync(debugPath)) return debugPath;
-  return releasePath; // fallback — visualizer will create it
+  return releasePath;
 }
 
 function waitForNewCapture(dir, afterTimestamp, timeoutMs) {
@@ -179,6 +224,34 @@ function waitForNewCapture(dir, afterTimestamp, timeoutMs) {
   });
 }
 
+// ── Preset path resolution ──
+
+// Extract preset directory from a STATE response string
+function extractPresetDir(stateText) {
+  const match = stateText.match(/PRESET=([^\r\n|]+)/);
+  if (match) {
+    const fullPath = match[1].trim();
+    const dir = path.dirname(fullPath);
+    if (dir && dir !== '.') return dir;
+  }
+  return null;
+}
+
+// If preset is a bare filename (no path separators), resolve to full path
+// by querying STATE from the given pipe to get the current preset directory.
+async function resolvePresetPath(preset, pipePath) {
+  // Already a full or relative path
+  if (preset.includes('\\') || preset.includes('/') || preset.includes(':')) {
+    return preset;
+  }
+  try {
+    const state = await sendPipeMessage(pipePath, 'STATE', true);
+    const dir = extractPresetDir(state);
+    if (dir) return path.join(dir, preset);
+  } catch { /* fall through */ }
+  return preset; // best effort — send as-is
+}
+
 // ── MCP Server ──
 
 const server = new McpServer({
@@ -189,16 +262,31 @@ const server = new McpServer({
 // Tool: Connect / discover
 server.tool(
   'mdrop_connect',
-  'Discover and connect to a running visualizer (MDropDX12 or Milkwave Visualizer)',
-  {},
-  async () => {
-    const pipes = discoverPipes();
-    if (pipes.length === 0) {
+  'Discover and connect to a running visualizer. Use target to pick which one: "mdrop" (MDropDX12), "milkwave" (Milkwave Visualizer), or "auto" (prefer MDropDX12). Lists all found instances.',
+  {
+    target: z.enum(['auto', 'mdrop', 'milkwave']).optional()
+      .describe('Which visualizer to connect to: "mdrop", "milkwave", or "auto" (default, prefers MDropDX12)'),
+  },
+  async ({ target }) => {
+    // Always discover ALL pipes first to show what's available
+    const allPipes = discoverPipes('all');
+    if (allPipes.length === 0) {
       return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12 or Milkwave Visualizer). Start the visualizer first.' }] };
     }
-    cachedPipePath = pipes[0].path;
-    const pids = pipes.map(p => p.pid).join(', ');
-    return { content: [{ type: 'text', text: `Connected to visualizer (PID: ${pids}), pipe: ${cachedPipePath}` }] };
+
+    // Now filter by target preference
+    const chosen = discoverPipes(target || 'auto');
+    cachedPipePath = chosen[0].path;
+
+    // Build a summary of all discovered instances
+    // Re-discover with 'auto' to get all pipes with exe names populated
+    const summary = allPipes.map(p => {
+      const label = p.exe?.toLowerCase().includes('mdropdx12') ? 'MDropDX12' : 'Milkwave Visualizer';
+      const active = p.path === cachedPipePath ? ' ← connected' : '';
+      return `  ${label} (PID ${p.pid})${active}`;
+    }).join('\n');
+
+    return { content: [{ type: 'text', text: `Found ${allPipes.length} visualizer(s):\n${summary}\n\nPipe: ${cachedPipePath}` }] };
   }
 );
 
@@ -224,8 +312,10 @@ server.tool(
   { preset: z.string().describe('Preset filename (e.g. "MyPreset.milk") or full path') },
   async ({ preset }) => {
     try {
-      await send(`PRESET=${preset}`);
-      return { content: [{ type: 'text', text: `Loaded preset: ${preset}` }] };
+      const pipePath = findPipe();
+      const resolved = await resolvePresetPath(preset, pipePath);
+      await sendPipeMessage(pipePath, `PRESET=${resolved}`);
+      return { content: [{ type: 'text', text: `Loaded preset: ${resolved}` }] };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
@@ -312,6 +402,64 @@ server.tool(
   }
 );
 
+// Helper: resize a capture image for Claude using ImageMagick
+// Returns { data: base64, mimeType } or null on failure
+function resizeForClaude(filePath, maxDim = 800) {
+  try {
+    const tmpPath = filePath.replace(/\.png$/i, '_claude.jpg');
+    execSync(
+      `magick "${filePath}" -resize ${maxDim}x${maxDim}> -quality 85 "${tmpPath}"`,
+      { timeout: 10000 }
+    );
+    const data = fs.readFileSync(tmpPath).toString('base64');
+    fs.unlinkSync(tmpPath); // clean up temp file
+    return { data, mimeType: 'image/jpeg' };
+  } catch {
+    // Fallback: read original PNG
+    try {
+      const data = fs.readFileSync(filePath).toString('base64');
+      return { data, mimeType: 'image/png' };
+    } catch { return null; }
+  }
+}
+
+// Helper: wait for a specific file to appear on disk (for deferred DX12 captures)
+function waitForFile(filePath, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const pollInterval = 100;
+    let elapsed = 0;
+    const check = () => {
+      try {
+        if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+          resolve(true);
+          return;
+        }
+      } catch { /* not ready yet */ }
+      elapsed += pollInterval;
+      if (elapsed >= timeoutMs) { resolve(false); return; }
+      setTimeout(check, pollInterval);
+    };
+    setTimeout(check, 50);
+  });
+}
+
+// Helper: send CAPTURE command and parse CAPTURE_PATH response
+async function captureWithPath(pipePath) {
+  const response = await sendPipeMessage(pipePath, 'CAPTURE', true);
+  // Parse CAPTURE_PATH=<full path> from response
+  const match = response.match(/CAPTURE_PATH=(.+)/);
+  if (!match || match[1] === 'ERROR') {
+    return { error: response || 'Capture failed' };
+  }
+  const filePath = match[1].trim();
+  // DX12 capture is deferred — wait for the file to appear
+  const ready = await waitForFile(filePath, 3000);
+  if (!ready) {
+    return { error: `File not ready within timeout: ${filePath}` };
+  }
+  return { filePath };
+}
+
 // Tool: Capture screenshot
 server.tool(
   'mdrop_capture',
@@ -321,28 +469,26 @@ server.tool(
   },
   async ({ return_image }) => {
     try {
-      const captureDir = findCaptureDir();
-      const beforeTime = Date.now();
+      const pipePath = findPipe();
+      const result = await captureWithPath(pipePath);
 
-      await send('SIGNAL|CAPTURE');
+      if (result.error) {
+        return { content: [{ type: 'text', text: `Capture error: ${result.error}` }] };
+      }
 
       if (return_image === false) {
-        return { content: [{ type: 'text', text: 'Screenshot capture triggered' }] };
+        return { content: [{ type: 'text', text: `Saved: ${result.filePath}` }] };
       }
 
-      const filePath = await waitForNewCapture(captureDir, beforeTime, 3000);
-
-      if (!filePath) {
-        return { content: [{ type: 'text', text: 'Screenshot captured but file not found within timeout. Check capture/ directory.' }] };
+      const img = resizeForClaude(result.filePath);
+      if (!img) {
+        return { content: [{ type: 'text', text: `Saved but failed to read: ${result.filePath}` }] };
       }
-
-      const imageData = fs.readFileSync(filePath);
-      const base64 = imageData.toString('base64');
 
       return {
         content: [
-          { type: 'image', data: base64, mimeType: 'image/png' },
-          { type: 'text', text: `Saved: ${path.basename(filePath)}` },
+          { type: 'image', data: img.data, mimeType: img.mimeType },
+          { type: 'text', text: `Saved: ${path.basename(result.filePath)}` },
         ]
       };
     } catch (err) {
@@ -496,6 +642,173 @@ server.tool(
       if (recursive) cmd += '|recursive';
       const response = await send(cmd, true);
       return { content: [{ type: 'text', text: response || `Set directory: ${directory}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Helper: get window rect for a process by PID using PowerShell
+function getWindowRect(pid) {
+  try {
+    // PowerShell one-liner to get main window position and size
+    const ps = `Add-Type -Name W -Namespace Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }'; $p=Get-Process -Id ${pid} -EA Stop; $r=New-Object Win32.W+RECT; [Win32.W]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null; "$($r.L),$($r.T),$($r.R),$($r.B)"`;
+    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
+    const [l, t, r, b] = output.split(',').map(Number);
+    if ([l, t, r, b].some(isNaN)) return null;
+    return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+  } catch { return null; }
+}
+
+// Helper: get monitor work area for a point using PowerShell
+function getMonitorWorkArea(x, y) {
+  try {
+    const ps = `Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::FromPoint([System.Drawing.Point]::new(${x},${y})); $w=$s.WorkingArea; "$($w.X),$($w.Y),$($w.Width),$($w.Height)"`;
+    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
+    const [mx, my, mw, mh] = output.split(',').map(Number);
+    if ([mx, my, mw, mh].some(isNaN)) return null;
+    return { left: mx, top: my, width: mw, height: mh, right: mx + mw, bottom: my + mh };
+  } catch { return null; }
+}
+
+// Helper: parse renderwin from MDropDX12 STATE response
+function parseMdropWindowRect(stateText) {
+  const m = stateText.match(/renderwin=\((-?\d+),(-?\d+)\)-\((-?\d+),(-?\d+)\)/);
+  if (!m) return null;
+  const [, l, t, r, b] = m.map(Number);
+  return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+}
+
+// Tool: Compare both visualizers side by side
+server.tool(
+  'mdrop_compare',
+  'Load the same preset on both MDropDX12 and Milkwave Visualizer, position them side-by-side, then capture screenshots from both. Returns both images for visual comparison.',
+  {
+    preset: z.string().optional().describe('Preset filename to load on both (e.g. "MyPreset.milk"). Omit to just capture current state.'),
+    delay: z.number().optional().describe('Seconds to wait after loading preset before capturing (default: 2)'),
+  },
+  async ({ preset, delay }) => {
+    try {
+      // Discover all pipes with process identification (must use 'all' to get both)
+      const allPipes = discoverPipes('all');
+      if (allPipes.length === 0) {
+        return { content: [{ type: 'text', text: 'No running visualizers found.' }] };
+      }
+
+      const mdropPipe = allPipes.find(p => p.exe?.toLowerCase().includes('mdropdx12'));
+      const milkwavePipe = allPipes.find(p => !p.exe?.toLowerCase().includes('mdropdx12'));
+
+      if (!mdropPipe || !milkwavePipe) {
+        const found = mdropPipe ? 'MDropDX12' : milkwavePipe ? 'Milkwave Visualizer' : 'none';
+        return { content: [{ type: 'text', text: `Need both visualizers running for comparison. Found: ${found}` }] };
+      }
+
+      const results = [];
+
+      // --- Position MDropDX12 alongside Milkwave ---
+      const mwRect = getWindowRect(milkwavePipe.pid);
+      if (mwRect) {
+        // Get MDropDX12's current state to check current size
+        const mdropStateForSize = await sendPipeMessage(mdropPipe.path, 'STATE', true).catch(() => '');
+        const mdRect = parseMdropWindowRect(mdropStateForSize);
+
+        // Only reposition if sizes differ
+        const alreadyMatched = mdRect &&
+          mdRect.width === mwRect.width && mdRect.height === mwRect.height;
+
+        if (!alreadyMatched) {
+          // Find the monitor Milkwave is on
+          const mwCenterX = mwRect.left + Math.floor(mwRect.width / 2);
+          const mwCenterY = mwRect.top + Math.floor(mwRect.height / 2);
+          const monitor = getMonitorWorkArea(mwCenterX, mwCenterY);
+
+          if (monitor) {
+            // Horizontal: space to the right vs left of Milkwave
+            const spaceRight = monitor.right - mwRect.right;
+            const spaceLeft = mwRect.left - monitor.left;
+            // Vertical: space below vs above
+            const spaceBelow = monitor.bottom - mwRect.bottom;
+            const spaceAbove = mwRect.top - monitor.top;
+
+            let newX, newY;
+            const canFitHorizontally = Math.max(spaceRight, spaceLeft) >= mwRect.width;
+            const canFitVertically = Math.max(spaceBelow, spaceAbove) >= mwRect.height;
+
+            if (canFitHorizontally) {
+              // Place horizontally — pick side with more room
+              newX = spaceRight >= spaceLeft ? mwRect.right : mwRect.left - mwRect.width;
+              newY = mwRect.top;
+            } else if (canFitVertically) {
+              // Place vertically on same display
+              newX = mwRect.left;
+              newY = spaceBelow >= spaceAbove ? mwRect.bottom : mwRect.top - mwRect.height;
+            } else {
+              // Not enough room — just place to the right, clipped
+              newX = spaceRight >= spaceLeft ? mwRect.right : mwRect.left - mwRect.width;
+              newY = mwRect.top;
+            }
+
+            const setCmd = `SET_WINDOW=${newX},${newY},${mwRect.width},${mwRect.height}`;
+            const posResult = await sendPipeMessage(mdropPipe.path, setCmd, true).catch(e => e.message);
+            results.push({ type: 'text', text: `Positioned MDropDX12: ${posResult}` });
+          }
+        } else {
+          results.push({ type: 'text', text: 'MDropDX12 already matches Milkwave size — skipping reposition' });
+        }
+      }
+
+      // Load preset on both simultaneously if specified
+      if (preset) {
+        // Resolve bare filename to full path using each visualizer's preset directory
+        const [mdropPreset, milkwavePreset] = await Promise.all([
+          resolvePresetPath(preset, mdropPipe.path),
+          resolvePresetPath(preset, milkwavePipe.path),
+        ]);
+        await Promise.all([
+          sendPipeMessage(mdropPipe.path, `PRESET=${mdropPreset}`),
+          sendPipeMessage(milkwavePipe.path, `PRESET=${milkwavePreset}`),
+        ]);
+        results.push({ type: 'text', text: `Loaded "${preset}" on both visualizers\n  MDropDX12: ${mdropPreset}\n  Milkwave: ${milkwavePreset}` });
+
+        // Wait for preset to settle
+        const waitMs = ((delay || 2) * 1000);
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+
+      // Query state from both simultaneously
+      const [mdropState, milkwaveState] = await Promise.all([
+        sendPipeMessage(mdropPipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
+        sendPipeMessage(milkwavePipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
+      ]);
+      results.push({ type: 'text', text: `--- MDropDX12 State ---\n${mdropState}` });
+      results.push({ type: 'text', text: `--- Milkwave Visualizer State ---\n${milkwaveState}` });
+
+      // Capture from both simultaneously — each responds with CAPTURE_PATH=<full path>
+      const captureResults = [];
+      const targets = [
+        { pipe: mdropPipe, label: 'MDropDX12' },
+        { pipe: milkwavePipe, label: 'Milkwave Visualizer' },
+      ];
+      const captures = await Promise.all(targets.map(async (t) => {
+        const result = await captureWithPath(t.pipe.path).catch(e => ({ error: e.message }));
+        return { ...t, ...result };
+      }));
+
+      for (const c of captures) {
+        if (c.filePath) {
+          const img = resizeForClaude(c.filePath);
+          captureResults.push({ type: 'text', text: `--- ${c.label} (PID ${c.pipe.pid}) ---` });
+          if (img) {
+            captureResults.push({ type: 'image', data: img.data, mimeType: img.mimeType });
+          } else {
+            captureResults.push({ type: 'text', text: `(failed to read ${c.filePath})` });
+          }
+        } else {
+          captureResults.push({ type: 'text', text: `${c.label}: ${c.error || 'capture failed'}` });
+        }
+      }
+
+      return { content: [...results, ...captureResults] };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }

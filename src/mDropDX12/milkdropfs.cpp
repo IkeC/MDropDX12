@@ -2657,9 +2657,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 0: old preset (opaque), cull tiles fully blended to new
       if (bOldUsesWarpShader && m_dx12OldWarpPSO) {
         cmdList->SetPipelineState(m_dx12OldWarpPSO.Get());
-        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_OldShaders.warp, m_pOldState, m_lpDX->GetOldWarpBindingGpuHandle());
-        drawWarpMesh(0xFFFFFFFF, true, true);
+        if (m_pOldState->m_bAutoGenWarpShader) {
+          float fDecay = (float)(*m_pOldState->var_pf_decay);
+          drawWarpMesh(D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1), true, true);
+        } else {
+          drawWarpMesh(0xFFFFFFFF, true, true); // Custom shader: white vertices
+        }
       } else if (!bOldUsesWarpShader) {
         // Old preset has no warp shader — use fallback PSO (texture * vertex color)
         cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
@@ -2675,9 +2679,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 1: new preset (alpha blend), cull tiles fully old
       if (bNewUsesWarpShader && m_dx12WarpBlendPSO) {
         cmdList->SetPipelineState(m_dx12WarpBlendPSO.Get());
-        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
-        drawWarpMesh(0xFFFFFFFF, true, false);
+        if (m_pState->m_bAutoGenWarpShader) {
+          float fDecay = (float)(*m_pState->var_pf_decay);
+          drawWarpMesh(D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1), true, false);
+        } else {
+          drawWarpMesh(0xFFFFFFFF, true, false); // Custom shader: white vertices
+        }
       } else if (!bNewUsesWarpShader) {
         // New preset has no warp shader — use fallback PSO with alpha blend
         // Note: PSO_TEXTURED_MYVERTEX doesn't have alpha blend, but for the non-shader
@@ -2711,17 +2719,16 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
       bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
 
-      // Milkwave behavior: WarpedBlit_NoShaders applies cDecay to vertex RGB
-      // (fixed-function modulate), but WarpedBlit_Shaders does NOT (vertices
-      // are white, shader handles decay itself via `ret *= decay`).
-      // Match this: only apply cDecay when using the fallback textured PSO.
+      // Custom warp shaders handle decay internally (white vertices).
+      // Auto-gen warp shaders use vDiffuse.r for per-frame decay (vertex color).
+      // Fallback PSO (no shader) also uses vertex color for decay modulation.
       float fDecay = (float)(*m_pState->var_pf_decay);
       D3DCOLOR cDecay;
-      if (m_dx12WarpPSO) {
+      if (m_dx12WarpPSO && !m_pState->m_bAutoGenWarpShader) {
         // Custom warp shader: white vertices (shader handles decay internally)
         cDecay = 0xFFFFFFFF;
       } else {
-        // No custom shader: fallback PSO uses vertex color for decay modulation
+        // Auto-gen or fallback: per-frame decay via vertex color
         cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
       }
 
@@ -2872,9 +2879,12 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f },
       { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }
     };
-    // For comp shader presets: always apply shade at full strength (fShaderAmount=1).
-    // For non-shader presets: only apply if fShaderAmount > 0, blended with white.
-    float fShaderAmount = (m_pState->m_nCompPSVersion > 0)
+    // For custom comp shader presets: always apply shade at full strength (fShaderAmount=1).
+    // For auto-gen comp (non-shader presets): use the preset's fShader value, blended with white.
+    // m_nCompPSVersion > 0 is true for BOTH custom and auto-gen, so use m_bAutoGenCompShader
+    // to distinguish. DX9 ShowToUser_NoShaders uses fShader directly; ShowToUser_Shaders forces 1.0.
+    bool bCustomCompShader = (m_pState->m_nCompPSVersion > 0) && !m_pState->m_bAutoGenCompShader;
+    float fShaderAmount = bCustomCompShader
         ? 1.0f : m_pState->m_fShader.eval(GetTime());
     if (fShaderAmount > 0.001f) {
       for (int i = 0; i < 4; i++) {

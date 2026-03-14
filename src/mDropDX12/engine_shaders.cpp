@@ -1751,9 +1751,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Dump assembled shader text to file for diagnostics (Verbose only)
   if (DLOG_DIAG_ENABLED() && (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
     const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
-    char dumpPath[MAX_PATH];
-    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
-    FILE* f = fopen(dumpPath, "w");
+    wchar_t diagName[64];
+    swprintf_s(diagName, L"diag_%hs_shader.txt", typeName);
+    FILE* f = DebugLogDiagOpen(diagName, L"w");
     if (f) {
       fprintf(f, "// DIAG: type=%s profile=%s len=%d preset=%ls\n",
               typeName, szProfile, lstrlenA(szShaderText),
@@ -1919,8 +1919,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   return true;
 }
 
-void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
+void Engine::GenWarpPShaderText(char* szShaderText, bool bWrap) {
   // find the pixel shader body and replace it with custom code.
+  // NOTE: decay is applied via vDiffuse.r (vertex color) which carries the
+  // per-frame decay value. This allows per_frame code to override decay
+  // dynamically (e.g. "decay = 0.92;"). DX9 used fixed-function vertex
+  // color multiply for non-shader presets; this is the DX12 equivalent.
 
   lstrcpyA(szShaderText, m_szDefaultWarpPShaderText);
   char LF = LINEFEED_CONTROL_CHAR;
@@ -1933,8 +1937,8 @@ void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   p += sprintf(p, "    // sample previous frame%c", LF);
   p += sprintf(p, "    ret = tex2D( sampler%ls_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
   p += sprintf(p, "    %c", LF);
-  p += sprintf(p, "    // darken (decay) over time%c", LF);
-  p += sprintf(p, "    ret *= %.2f; //or try: ret -= 0.004;%c", decay, LF);
+  p += sprintf(p, "    // darken (decay) over time - per-frame value via vertex color%c", LF);
+  p += sprintf(p, "    ret *= _vDiffuse.r;%c", LF);
   p += sprintf(p, "}%c", LF);
 }
 
