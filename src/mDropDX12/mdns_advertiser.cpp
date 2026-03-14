@@ -109,6 +109,12 @@ void MdnsAdvertiser::Unregister() {
     if (!m_registered) return;
     m_registered = false;
 
+    // Stop beacon
+    m_beaconRunning.store(false);
+    if (m_beaconThread.joinable())
+        m_beaconThread.join();
+
+    // Unregister mDNS
     if (s_DeRegister && m_instance)
         s_DeRegister(&m_request, nullptr);
     if (s_Free && m_instance)
