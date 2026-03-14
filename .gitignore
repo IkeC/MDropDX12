@@ -47,3 +47,6 @@ messages.ini.bak
 src/settings.ini
 src/messages.ini
 .worktrees/
+
+# Tools (MCP server, diagnostics, etc.)
+tools/
