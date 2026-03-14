@@ -471,6 +471,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
 #define IDT_CONTROLLER_POLL         10003 // Timer ID for game controller polling (50ms)
 #define IDT_SAVE_SETTINGS_DEBOUNCE  10004 // Timer ID for debounced settings save (2s after last change)
+#define IDT_TCP_POLL                10005 // Timer ID for TCP server polling (50ms)
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 
@@ -877,6 +878,12 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_REMOTEWIN_PIN          9520
 #define IDC_MW_REMOTEWIN_FONT_PLUS    9521
 #define IDC_MW_REMOTEWIN_FONT_MINUS   9522
+#define IDC_MW_REMOTE_TAB            9523  // Tab control
+#define IDC_MW_TCP_STATUS            9524  // Label: TCP status
+#define IDC_MW_TCP_PIN_EDIT          9525  // Edit: PIN
+#define IDC_MW_TCP_PIN_APPLY         9526  // Button: Apply PIN
+#define IDC_MW_TCP_DEVICE_LIST       9527  // ListView: authorized devices
+#define IDC_MW_TCP_DEVICE_REMOVE     9528  // Button: Remove device
 
 // Visual window controls (9540-9559)
 #define IDC_MW_VISUALWIN_PIN          9540

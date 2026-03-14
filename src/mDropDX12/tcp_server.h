@@ -53,6 +53,7 @@ public:
     void DisconnectDevice(const std::string& deviceId);
     bool IsRunning() const { return m_running.load(); }
     int GetPort() const { return m_port; }
+    int GetClientCount() const { return (int)m_clients.size(); }
 
     void LoadAuthorizedDevices(const std::wstring& iniPath);
     void SaveAuthorizedDevices(const std::wstring& iniPath);

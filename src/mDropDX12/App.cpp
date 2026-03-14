@@ -256,6 +256,11 @@ static HICON icon = nullptr;
 // --- Named pipe IPC (replaces hidden WM_COPYDATA window) ---
 std::atomic<HWND> g_hRenderWindow{nullptr};  // set after render window CreateWindowW
 PipeServer g_pipeServer;
+
+// --- TCP server for Android remote (MDR) ---
+#include "tcp_server.h"
+TcpServer g_tcpServer;
+thread_local TcpClientConnection* g_respondingTcpClient = nullptr;
 WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
 WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
 std::atomic<int> g_lastIPCMessageSeq{0};  // bumped on each new message
@@ -1605,6 +1610,10 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       g_engine.PollController();
       return 0;
     }
+    if (wParam == IDT_TCP_POLL) {
+      g_tcpServer.Poll();
+      return 0;
+    }
     if (wParam == IDT_SAVE_SETTINGS_DEBOUNCE) {
       KillTimer(hWnd, IDT_SAVE_SETTINGS_DEBOUNCE);
       // Write changed settings to INI (inject effect, etc.)
@@ -2658,6 +2667,57 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // Start named pipe IPC server (replaces hidden WM_COPYDATA window)
   g_pipeServer.Start(hwnd, WM_MW_IPC_MESSAGE);
 
+  // TCP server for Android remote
+  {
+    const wchar_t* pIni = g_engine.GetConfigIniFile();
+    g_tcpServer.LoadAuthorizedDevices(pIni);
+
+    int tcpPort = GetPrivateProfileIntW(L"Network", L"TcpPort", 9270, pIni);
+    bool tcpEnabled = GetPrivateProfileIntW(L"Network", L"TcpEnabled", 1, pIni) != 0;
+
+    if (tcpEnabled) {
+      g_tcpServer.Start(tcpPort,
+        // onMessage handler
+        [hwnd](TcpClientConnection& client, const std::wstring& msg) {
+          g_respondingTcpClient = &client;
+          // Dispatch same as pipe: heap-copy and PostMessage
+          wchar_t* copy = (wchar_t*)malloc((msg.size() + 1) * sizeof(wchar_t));
+          if (copy) {
+            wcscpy_s(copy, msg.size() + 1, msg.c_str());
+            PostMessageW(hwnd, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+          }
+        },
+        // onAuthRequest handler
+        [hwnd](TcpClientConnection& client, const std::string& pin,
+             const std::string& deviceId, const std::string& deviceName) {
+          const wchar_t* pIni = g_engine.GetConfigIniFile();
+
+          // Check PIN
+          wchar_t storedHash[128] = {};
+          GetPrivateProfileStringW(L"Network", L"PinHash", L"", storedHash, 128, pIni);
+          bool pinConfigured = storedHash[0] != L'\0';
+
+          if (pinConfigured) {
+            // TODO: Verify SHA256 hash of pin matches storedHash
+          }
+
+          client.deviceId = deviceId;
+          client.deviceName = deviceName;
+
+          if (g_tcpServer.IsDeviceAuthorized(deviceId)) {
+            client.authState = TcpAuthState::Authenticated;
+            g_tcpServer.SendTo(client, "AUTH_OK");
+          } else {
+            client.authState = TcpAuthState::Pending;
+            g_tcpServer.SendTo(client, "AUTH_PENDING");
+            // Signal UI thread about new auth request (wparam=2)
+            PostMessageW(hwnd, WM_MW_IPC_MESSAGE, 2, 0);
+          }
+        }
+      );
+    }
+  }
+
   // If a preset was specified on the command line, queue it as an IPC message
   // for the render thread to pick up after DX12 initialization
   if (g_szCmdLinePreset[0] != L'\0') {
@@ -2739,6 +2799,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // Start controller polling timer (50ms / 20Hz on the message pump thread)
   SetTimer(hwnd, IDT_CONTROLLER_POLL, 50, NULL);
 
+  // Start TCP server polling timer (50ms for non-blocking select)
+  SetTimer(hwnd, IDT_TCP_POLL, 50, NULL);
+
   // --- Phase 3: Spawn dedicated render thread for DX12 ---
   g_bQuitRequested.store(false);
   g_bRenderReady.store(false);
@@ -2791,8 +2854,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     g_hDX12RenderThread = nullptr;
   }
 
-  // Stop pipe server before tearing down the render window
+  // Stop pipe server and TCP server before tearing down the render window
   g_pipeServer.Stop();
+  g_tcpServer.Stop();
   g_hRenderWindow.store(nullptr);
 
   threadRender = nullptr;
