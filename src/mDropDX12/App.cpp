@@ -135,6 +135,8 @@
 #include <malloc.h>
 #include <crtdbg.h>
 
+#include <winsock2.h>  // Must precede windows.h for tcp_server.h
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
 #include <d3d12.h>
@@ -256,6 +258,12 @@ static HICON icon = nullptr;
 // --- Named pipe IPC (replaces hidden WM_COPYDATA window) ---
 std::atomic<HWND> g_hRenderWindow{nullptr};  // set after render window CreateWindowW
 PipeServer g_pipeServer;
+
+// --- TCP server for Android remote (MDR) ---
+#include "tcp_server.h"
+#include "mdns_advertiser.h"
+TcpServer g_tcpServer;
+MdnsAdvertiser g_mdns;
 WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
 WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
 std::atomic<int> g_lastIPCMessageSeq{0};  // bumped on each new message
@@ -267,13 +275,13 @@ BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
   if (h == NULL)
     return FALSE;
 
-  char search_window_name[MAX_PATH];
+  wchar_t search_window_name[MAX_PATH];
 
   if (IsWindow(h) && IsWindowVisible(h)) {
-    GetWindowTextA(h, search_window_name, MAX_PATH);
+    GetWindowTextW(h, search_window_name, MAX_PATH);
     if (search_window_name[0]) {
       // Does the search window name contain "MDropDX12 Visualizer" ?
-      if (strstr(search_window_name, "MDropDX12 Visualizer") != NULL) {
+      if (wcsstr(search_window_name, L"MDropDX12 Visualizer") != NULL) {
         nBeatDrops++;
       }
     }
@@ -1092,6 +1100,7 @@ static void ExitMirrorWatermark(HWND hWnd, bool bKeepMirrorsActive = false) {
     g_engine.m_bMirrorsActive = false;
 
   g_engine.m_bMirrorWatermarkActive = false;
+  g_engine.m_szWatermarkRenderDevice[0] = L'\0';
   g_engine.SaveDisplayOutputSettings();
   g_engine.RefreshDisplaysTab();
   g_engine.AddNotification(L"Mirror watermark OFF");
@@ -1604,6 +1613,10 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       g_engine.PollController();
       return 0;
     }
+    if (wParam == IDT_TCP_POLL) {
+      g_tcpServer.Poll();
+      return 0;
+    }
     if (wParam == IDT_SAVE_SETTINGS_DEBOUNCE) {
       KillTimer(hWnd, IDT_SAVE_SETTINGS_DEBOUNCE);
       // Write changed settings to INI (inject effect, etc.)
@@ -1924,6 +1937,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     // Phase 2 (wParam=1): activate mirrors (deferred so fullscreen resize completes first)
 
     if (!g_engine.m_bMirrorWatermarkActive && wParam == 0) {
+      // Re-enumerate displays to ensure fresh monitor rects/device names
+      g_engine.EnumerateDisplayOutputs();
+
       // Save render window state
       mirrorWM_prevMirrorsActive = g_engine.m_bMirrorsActive;
       mirrorWM_prevOpacity = g_engine.fOpacity;
@@ -1939,6 +1955,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       {
         RECT bestRect = {};
         long bestArea = 0;
+        wchar_t bestDevice[32] = {};
         for (auto& out : g_engine.m_displayOutputs) {
           if (out.config.type != DisplayOutputType::Monitor) continue;
           RECT rc = out.config.rcMonitor;
@@ -1948,6 +1965,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           if (area > bestArea) {
             bestArea = area;
             bestRect = rc;
+            wcscpy_s(bestDevice, out.config.szDeviceName);
           }
         }
         if (bestArea > 0) {
@@ -1963,6 +1981,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
               bestRect.right - bestRect.left,
               bestRect.bottom - bestRect.top,
               SWP_FRAMECHANGED | SWP_NOACTIVATE);
+          // Store target device name for deterministic skip detection —
+          // MonitorFromWindow() can return wrong results during window transitions
+          wcscpy_s(g_engine.m_szWatermarkRenderDevice, bestDevice);
         }
       }
       // Overwrite the restore values so exiting fullscreen returns to the original
@@ -2649,6 +2670,62 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // Start named pipe IPC server (replaces hidden WM_COPYDATA window)
   g_pipeServer.Start(hwnd, WM_MW_IPC_MESSAGE);
 
+  // TCP server for Android remote
+  {
+    const wchar_t* pIni = g_engine.GetConfigIniFile();
+    g_tcpServer.LoadAuthorizedDevices(pIni);
+
+    int tcpPort = GetPrivateProfileIntW(L"Network", L"TcpPort", 9270, pIni);
+    bool tcpEnabled = GetPrivateProfileIntW(L"Network", L"TcpEnabled", 1, pIni) != 0;
+
+    if (tcpEnabled) {
+      g_tcpServer.Start(tcpPort,
+        // onMessage handler
+        [hwnd](TcpClientConnection& client, const std::wstring& msg) {
+          g_respondingTcpClient = &client;
+          // Forward all commands through IPC dispatch (LaunchMessage handles everything)
+          wchar_t* copy = (wchar_t*)malloc((msg.size() + 1) * sizeof(wchar_t));
+          if (copy) {
+            wcscpy_s(copy, msg.size() + 1, msg.c_str());
+            PostMessageW(hwnd, WM_MW_IPC_MESSAGE, 1, (LPARAM)copy);
+          }
+        },
+        // onAuthRequest handler
+        [hwnd](TcpClientConnection& client, const std::string& pin,
+             const std::string& deviceId, const std::string& deviceName) {
+          const wchar_t* pIni = g_engine.GetConfigIniFile();
+
+          // Check PIN
+          wchar_t storedHash[128] = {};
+          GetPrivateProfileStringW(L"Network", L"PinHash", L"", storedHash, 128, pIni);
+          bool pinConfigured = storedHash[0] != L'\0';
+
+          if (pinConfigured) {
+            // TODO: Verify SHA256 hash of pin matches storedHash
+          }
+
+          client.deviceId = deviceId;
+          client.deviceName = deviceName;
+
+          if (g_tcpServer.IsDeviceAuthorized(deviceId)) {
+            client.authState = TcpAuthState::Authenticated;
+            g_tcpServer.SendTo(client, "AUTH_OK");
+          } else {
+            client.authState = TcpAuthState::Pending;
+            g_tcpServer.SendTo(client, "AUTH_PENDING");
+            // Signal UI thread about new auth request (wparam=2)
+            PostMessageW(hwnd, WM_MW_IPC_MESSAGE, 2, 0);
+          }
+        }
+      );
+
+      // Advertise the service via mDNS so Android clients can discover it
+      char hostname[256] = {};
+      gethostname(hostname, sizeof(hostname));
+      g_mdns.Register(std::string("MDropDX12-") + hostname, g_tcpServer.GetPort(), (int)GetCurrentProcessId());
+    }
+  }
+
   // If a preset was specified on the command line, queue it as an IPC message
   // for the render thread to pick up after DX12 initialization
   if (g_szCmdLinePreset[0] != L'\0') {
@@ -2730,6 +2807,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // Start controller polling timer (50ms / 20Hz on the message pump thread)
   SetTimer(hwnd, IDT_CONTROLLER_POLL, 50, NULL);
 
+  // Start TCP server polling timer (50ms for non-blocking select)
+  SetTimer(hwnd, IDT_TCP_POLL, 50, NULL);
+
   // --- Phase 3: Spawn dedicated render thread for DX12 ---
   g_bQuitRequested.store(false);
   g_bRenderReady.store(false);
@@ -2782,8 +2862,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     g_hDX12RenderThread = nullptr;
   }
 
-  // Stop pipe server before tearing down the render window
+  // Stop pipe server and TCP server before tearing down the render window
   g_pipeServer.Stop();
+  g_mdns.Unregister();
+  g_tcpServer.Stop();
   g_hRenderWindow.store(nullptr);
 
   threadRender = nullptr;
@@ -2841,7 +2923,7 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     if (!pMMDevice) {
       hr = GetDefaultLoopbackDevice(&pMMDevice, deviceDisplayName);
       if (FAILED(hr)) {
-        MessageBoxA(NULL, "Could not find any suitable audio devices!", "MDropDX12 Error", MB_OK | MB_ICONERROR);
+        MessageBoxW(NULL, L"Could not find any suitable audio devices!", L"MDropDX12 Error", MB_OK | MB_ICONERROR);
         return -__LINE__;
       }
       bIsRenderDevice = true;
@@ -3057,13 +3139,8 @@ unsigned __stdcall DoSetup(void* param) {
         line.erase(0, 3);
       }
 
-      // Convert UTF-8 to wide string properly
-      std::wstring wLine;
-      if (!line.empty()) {
-        int size_needed = MultiByteToWideChar(CP_UTF8, 0, &line[0], (int)line.size(), NULL, 0);
-        wLine.resize(size_needed);
-        MultiByteToWideChar(CP_UTF8, 0, &line[0], (int)line.size(), &wLine[0], size_needed);
-      }
+      // Convert UTF-8 to wide string
+      std::wstring wLine = UTF8ToWide(line);
 
       // Trim whitespace
       wLine.erase(0, wLine.find_first_not_of(L" \t"));

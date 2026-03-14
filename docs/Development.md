@@ -394,7 +394,241 @@ Use **`m_bLoadingShadertoyMode`** (not `m_bShadertoyMode`) in `LoadShaderFromMem
 
 ### Named Pipe IPC
 
-MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with Milkwave Remote and other clients. The pipe server (`pipe_server.cpp`) runs on a dedicated thread with duplex message-mode communication. PID-based discovery eliminates the need for window title matching. The old WM_COPYDATA / hidden IPC window approach was removed in v1.5.0.
+MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with Milkwave Remote, the MCP server, and other clients. The pipe server (`pipe_server.cpp`) runs on a dedicated thread with duplex message-mode, multi-instance support (each client gets its own handler thread).
+
+**Message format**: Raw wide strings, newline-delimited. Two dispatch paths:
+
+1. **Signals** — prefixed with `SIGNAL|`, dispatched via `DispatchSignal()` which posts a `WM_APP + offset` message to the render window. Signal table is in `pipe_server.cpp`:
+
+   | Signal | Description |
+   | ------ | ----------- |
+   | `SIGNAL\|NEXT_PRESET` | Next preset |
+   | `SIGNAL\|PREV_PRESET` | Previous preset |
+   | `SIGNAL\|CAPTURE` | Screenshot |
+   | `SIGNAL\|WATERMARK` | Toggle watermark mode |
+   | `SIGNAL\|FULLSCREEN` | Toggle fullscreen |
+   | `SIGNAL\|BORDERLESS_FS` | Toggle borderless fullscreen |
+   | `SIGNAL\|STRETCH` | Toggle stretch |
+   | `SIGNAL\|MIRROR` | Toggle mirror |
+   | `SIGNAL\|MIRROR_WM` | Toggle mirror watermark |
+   | `SIGNAL\|SPRITE_MODE` | Toggle sprite mode |
+   | `SIGNAL\|MESSAGE_MODE` | Toggle message mode |
+   | `SIGNAL\|COVER_CHANGED` | Notify cover art changed |
+   | `SIGNAL\|SHOW_COVER` | Show cover art |
+   | `SIGNAL\|SETVIDEODEVICE=N` | Set video device index |
+   | `SIGNAL\|ENABLEVIDEOMIX=0\|1` | Enable/disable video mix |
+   | `SIGNAL\|ENABLESPOUTMIX=0\|1` | Enable/disable Spout mix |
+   | `SIGNAL\|SET_INPUTMIX_OPACITY=N` | Set input mix opacity |
+   | `SIGNAL\|SET_INPUTMIX_ONTOP=0\|1` | Set input mix on-top |
+   | `SIGNAL\|SET_INPUTMIX_LUMAKEY=threshold\|softness` | Set luma key params |
+
+   To add a new signal: add an entry to `s_signalTable[]` in `pipe_server.cpp`, define a `WM_MW_*` message in `engine_helpers.h`, handle it in `App.cpp`'s message pump.
+
+2. **Commands** — everything else is forwarded to `LaunchMessage()` in `engine_messages.cpp`. Commands are matched via `wcsncmp` and include:
+
+   | Command | Description |
+   | ------- | ----------- |
+   | `PRESET=path` | Load preset by path |
+   | `OPACITY=0.0-1.0` | Set window opacity |
+   | `STATE` | Query current state (returns JSON-like response) |
+   | `CAPTURE` | Screenshot to file |
+   | `SHUTDOWN` | Clean shutdown |
+   | `SET_LOGLEVEL=0-4` | Set log level |
+   | `GET_LOGLEVEL` | Query log level |
+   | `CLEAR_LOGS` | Delete all log files |
+   | `SET_DIR=path` | Change preset directory |
+   | `LOAD_LIST=path` | Load a preset list |
+   | `ENUM_LISTS` | List available preset lists |
+   | `TRACK\|title\|artist\|album` | Set track info |
+   | `MSG\|text` | Display overlay message |
+   | `COL_HUE=0.0-1.0` | Set color hue |
+   | `COL_SATURATION=0.0-1.0` | Set saturation |
+   | `COL_BRIGHTNESS=-1.0-1.0` | Set brightness |
+   | `FFT_ATTACK=value` | Set FFT attack |
+   | `FFT_DECAY=value` | Set FFT decay |
+   | `SHADER_IMPORT=path` | Import shader from file |
+   | `GET_RENDER_DIAG` | Get render diagnostics |
+   | `GET_AUDIO_DIAG` | Get audio diagnostics |
+   | `GET_EEL_STATE` | Get expression evaluator state |
+   | `MOVE_TO_DISPLAY=N` | Move to display index |
+   | `SET_WINDOW=x,y,w,h` | Set window position/size |
+
+   To add a new command: add an `else if (wcsncmp(sMessage, L"MY_CMD", 6) == 0)` block in `LaunchMessage()`. Send responses via `g_pipeServer.Send(response)`.
+
+### TCP Server
+
+The TCP server (`tcp_server.cpp`) provides network-based remote control for LAN clients. It handles only TCP-specific concerns (framing, authentication, connection management) and forwards all commands through the same IPC dispatch path as the Named Pipe.
+
+- **Port**: 9270 (default, configurable via INI)
+- **Framing**: 4-byte little-endian length prefix + UTF-8 payload
+- **Authentication**: Clients must send `AUTH|<pin>|<deviceId>|<deviceName>` first. Authorized devices are stored in INI `[AuthorizedDevices]` section.
+- **Responses**: `AUTH_OK`, `AUTH_FAIL|<reason>`, `PONG` (for `PING`), or command-specific responses routed to the requesting client via `g_respondingTcpClient`
+- **Limits**: 16 concurrent clients, 60-second inactivity timeout, 64KB receive buffer
+- **mDNS**: Service advertised as `_milkwave._tcp` for automatic discovery
+
+**Command routing** (App.cpp `onMessage` handler): TCP does NOT process commands itself — it forwards them to the existing IPC path:
+
+- `SIGNAL|*` messages → `g_pipeServer.DispatchSignal()` (same as Named Pipe)
+- All other messages → `PostMessage(WM_MW_IPC_MESSAGE)` → `LaunchMessage()` (same as Named Pipe)
+
+After authentication, clients send the exact same commands and signals as Named Pipe clients. TCP is a transport layer, not a command handler.
+
+### mDNS and UDP Beacon
+
+LAN discovery uses two mechanisms in parallel (`mdns_advertiser.cpp`):
+
+1. **mDNS (DNS-SD)** — registers as `MDropDX12-<hostname>._milkwave._tcp.local` via Windows DNS-SD APIs (`DnsServiceRegister`). Loaded dynamically from `dnsapi.dll` so the binary runs on older Windows builds where the APIs aren't available. TXT record carries `version=1` and `pid=<process_id>`.
+
+2. **UDP broadcast beacon** — reliable fallback that always works regardless of mDNS support. Sends `MDROP_BEACON|<name>|<tcpPort>|<pid>` to `255.255.255.255` on port 9271 every 3 seconds. Clients listen on UDP 9271 to discover instances, then connect to the advertised TCP port.
+
+Both start in `App.cpp` after the TCP server is running:
+
+```cpp
+g_mdns.Register("MDropDX12-" + hostname, g_tcpServer.GetPort(), GetCurrentProcessId());
+```
+
+Both are stopped on shutdown via `g_mdns.Unregister()` which joins the beacon thread and deregisters from DNS-SD.
+
+**Key files**: `mdns_advertiser.h` (class declaration), `mdns_advertiser.cpp` (implementation), `App.cpp` (startup/shutdown calls).
+
+**Ports**:
+
+| Port | Protocol | Purpose |
+| ---- | -------- | ------- |
+| 9270 | TCP | Remote control (commands, auth) |
+| 9271 | UDP | Broadcast beacon (discovery only) |
+
+## Adding ToolWindows
+
+ToolWindows are standalone windows that run on their own threads with independent always-on-top, position persistence, and dark theme support. All controls use `BS_OWNERDRAW` (see `docs/tool_window.md`).
+
+### Creating a New ToolWindow
+
+1. **Declare** the class in `tool_window.h`:
+
+   ```cpp
+   class MyFeatureWindow : public ToolWindow {
+   public:
+       MyFeatureWindow(Engine* pEngine);
+   protected:
+       TOOLWINDOW_META(L"My Feature", L"MyFeatureWndClass", L"MyFeature",
+                       IDC_MY_PIN, IDC_MY_FONT_PLUS, IDC_MY_FONT_MINUS, 400, 300)
+       void DoBuildControls() override;
+       LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+       // Optional overrides:
+       // LRESULT DoHScroll(HWND hCtrl, int code, int pos) override;
+       // LRESULT DoNotify(NMHDR* pNMHDR) override;
+       // void DoDestroy() override;
+   };
+   ```
+
+   `TOOLWINDOW_META` generates boilerplate: window title, class name, INI section, control IDs for pin/font buttons, default width/height.
+
+2. **Implement** in `engine_myfeature_ui.cpp`:
+
+   ```cpp
+   #include "tool_window.h"
+   #include "engine.h"
+   #include "engine_helpers.h"
+
+   MyFeatureWindow::MyFeatureWindow(Engine* pEngine) : ToolWindow(pEngine, 400, 300) {}
+
+   void MyFeatureWindow::DoBuildControls() {
+       BuildBaseControls();  // creates pin, font+/- buttons
+       int y = 40;
+       CreateLabel(m_hWnd, L"My Label:", 10, y, 80, 20);
+       CreateCheck(m_hWnd, IDC_MY_CHECK, L"Enable", 100, y, 100, 20);
+       TrackControl(GetDlgItem(m_hWnd, IDC_MY_CHECK));  // register for dark theme
+   }
+
+   LRESULT MyFeatureWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
+       switch (id) {
+       case IDC_MY_CHECK:
+           m_pEngine->m_bMyFeature = IsChecked(IDC_MY_CHECK);
+           return 0;
+       }
+       return -1;  // not handled
+   }
+   ```
+
+3. **Register** in `engine.h`:
+
+   ```cpp
+   std::unique_ptr<MyFeatureWindow> m_myFeatureWindow;
+   void OpenMyFeatureWindow()  { OpenToolWindow(m_myFeatureWindow); }
+   void CloseMyFeatureWindow() { CloseToolWindow(m_myFeatureWindow); }
+   ```
+
+4. **Initialize** in `engine.cpp` constructor:
+
+   ```cpp
+   m_myFeatureWindow = std::make_unique<MyFeatureWindow>(this);
+   ```
+
+5. **Add to vcxproj**: Include `engine_myfeature_ui.cpp` in the project's ClCompile list.
+
+Key rules:
+
+- Use `IsChecked(id)` / `SetChecked(id, bool)` — never `IsDlgButtonChecked()`
+- Checkboxes auto-toggle before `DoCommand`; radio groups must be toggled manually
+- Don't access DX12 resources from ToolWindow code (wrong thread)
+- See `engine_colors_ui.cpp` for a simple example, `engine_midi_ui.cpp` for a complex one
+
+## Expanding Menus and Reordering Items
+
+### ButtonBoard Context Menu
+
+The ButtonBoard's right-click "Assign Action..." submenu is built by `BuildActionSubMenu()` in `engine_board_ui.cpp`. It auto-populates from the hotkey table, grouped by category (`HKCAT_NAVIGATION`, `HKCAT_WINDOW`, `HKCAT_VISUAL`, etc.).
+
+**Adding IPC signal actions** (actions that aren't hotkeys):
+
+In `BuildActionSubMenu()`, append items to the relevant category submenu after the hotkey loop, using IDs starting at 2000:
+
+```cpp
+if (cat == HKCAT_WINDOW) {
+    AppendMenuW(hCatMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hCatMenu, MF_STRING, 2000, L"Watermark");
+    itemCount++;
+}
+```
+
+Then handle the ID in `ShowSlotContextMenu()`:
+
+```cpp
+if (cmd == 2000) {
+    s.action  = ButtonAction::ScriptCommand;
+    s.payload = L"SIGNAL|WATERMARK";
+    s.label   = L"Watermark";
+    m_pPanel->Invalidate();
+    SaveBoard();
+}
+```
+
+**Reordering hotkey-based items**: Items appear in the order hotkeys are defined in `InitHotkeyDefaults()` (`engine_hotkeys.cpp`). Move the `HK_DEF` call to change the item's position within its category.
+
+**Reordering categories**: The loop iterates `HKCAT_NAVIGATION` through `HKCAT_MISC`. To change the category order in the menu, modify the loop range or iterate a custom order array.
+
+### Hotkey Categories
+
+Categories are defined in `hotkeys.h`:
+
+| Enum | Menu Name | Description |
+| ---- | --------- | ----------- |
+| `HKCAT_NAVIGATION` | Navigation | Preset navigation, browser, save |
+| `HKCAT_VISUAL` | Visual | Opacity, wave mode, zoom (auto-grouped by prefix) |
+| `HKCAT_MEDIA` | Media | Track info, song display |
+| `HKCAT_WINDOW` | Window | Fullscreen, always-on-top, FPS, borderless |
+| `HKCAT_TOOLS` | Tools | Open tool windows |
+| `HKCAT_SHADER` | Shader | Inject effects, quality |
+| `HKCAT_MISC` | Misc | Miscellaneous actions |
+| `HKCAT_SCRIPT` | Script | User-defined script commands |
+| `HKCAT_LAUNCH` | Launch | Launch external applications |
+
+The Visual category is special — `BuildActionSubMenu()` auto-groups items by their first word (e.g., all "Opacity ..." actions become an "Opacity" submenu).
+
+### Adding Actions Without Hotkeys
+
+Not all actions need a hotkey binding. For actions triggered only from UI (ButtonBoard, context menus, IPC), use `ButtonAction::ScriptCommand` with a pipe command payload (e.g., `SIGNAL|WATERMARK` or `OPACITY=0.5`). The button's `ExecuteSlot()` dispatches it via `PostIPCMessage()` which routes through `LaunchMessage()`.
 
 ## DX12 Rendering Pipeline
 

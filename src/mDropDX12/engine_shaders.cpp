@@ -670,7 +670,7 @@ bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int sh
   si->Clear();
 
   char ver[16];
-  lstrcpy(ver, "vs_1_1");
+  lstrcpyA(ver, "vs_1_1");
 
   // LOAD SHADER
   if (!LoadShaderFromMemory(szShadersText, "VS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, nullptr))
@@ -694,20 +694,20 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   // note: ps_1_4 required for dependent texture lookups.
   //       ps_2_0 required for tex2Dbias.
   char ver[16];
-  lstrcpy(ver, "ps_0_0");
+  lstrcpyA(ver, "ps_0_0");
   switch (PSVersion) {
   case MD2_PS_NONE:
     // Even though the PRESET doesn't use shaders, if MilkDrop is running where it CAN do shaders,
     //   we run all the old presets through (shader) emulation.
     // This way, during a MilkDrop session, we are always calling either WarpedBlit() or WarpedBlit_NoPixelShaders(),
     //   and blending always works.
-    lstrcpy(ver, "ps_2_0");
+    lstrcpyA(ver, "ps_2_0");
     break;
-  case MD2_PS_2_0: lstrcpy(ver, "ps_2_0"); break;
-  case MD2_PS_2_X: lstrcpy(ver, "ps_2_a"); break; // we'll try ps_2_a first, LoadShaderFromMemory will try ps_2_b if compilation fails
-  case MD2_PS_3_0: lstrcpy(ver, "ps_3_0"); break;
-  case MD2_PS_4_0: lstrcpy(ver, "ps_4_0"); break;
-  case MD2_PS_5_0: lstrcpy(ver, "ps_5_0"); break;
+  case MD2_PS_2_0: lstrcpyA(ver, "ps_2_0"); break;
+  case MD2_PS_2_X: lstrcpyA(ver, "ps_2_a"); break; // we'll try ps_2_a first, LoadShaderFromMemory will try ps_2_b if compilation fails
+  case MD2_PS_3_0: lstrcpyA(ver, "ps_3_0"); break;
+  case MD2_PS_4_0: lstrcpyA(ver, "ps_4_0"); break;
+  case MD2_PS_5_0: lstrcpyA(ver, "ps_5_0"); break;
   default: assert(0); break;
   }
 
@@ -1110,6 +1110,87 @@ static void FixMatrixVarMultiply(char* szShaderText) {
   free(tmp);
 }
 
+// Preprocessor: fix self-referencing variable redeclarations.
+// Some presets redeclare variables with self-initialization like:
+//   float3 ret1, ...;    (initial declaration)
+//   ...
+//   float3 ret1 = ret1;  (redeclaration with self-init)
+// The DX9 compiler (d3dx9_43.dll) handles this by initializing the new variable
+// from the outer scope. D3DCompile (d3dcompiler_47.dll) sees the RHS as the new
+// (uninitialized) variable, causing X4000 error. Fix by removing the redundant
+// type specifier, converting `float3 ret1 = ret1;` to `ret1 = ret1;` (a no-op).
+static void FixSelfRedeclarations(char* szShaderText) {
+  static const char* types[] = {
+    "float4x4", "float4x3", "float3x3", "float3x4",
+    "float4", "float3", "float2", "float",
+    "half4", "half3", "half2", "half",
+    "int4", "int3", "int2", "int",
+    "uint4", "uint3", "uint2", "uint",
+    "double4", "double3", "double2", "double",
+  };
+
+  auto isIdentChar = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  for (auto& type : types) {
+    int typeLen = (int)strlen(type);
+    char* p = szShaderText;
+
+    while ((p = strstr(p, type)) != nullptr) {
+      // Ensure word boundary before the type
+      if (p > szShaderText && isIdentChar(*(p - 1))) { p += typeLen; continue; }
+      // Ensure word boundary after the type
+      if (isIdentChar(p[typeLen])) { p += typeLen; continue; }
+
+      char* typeStart = p;
+      char* afterType = p + typeLen;
+
+      // Skip whitespace after type
+      char* ws1 = afterType;
+      while (*ws1 == ' ' || *ws1 == '\t') ws1++;
+      if (!isIdentChar(*ws1) || (*ws1 >= '0' && *ws1 <= '9')) { p = ws1; continue; }
+
+      // Extract variable name
+      char* nameStart = ws1;
+      char* nameEnd = nameStart;
+      while (isIdentChar(*nameEnd)) nameEnd++;
+      int nameLen = (int)(nameEnd - nameStart);
+      if (nameLen <= 0 || nameLen > 64) { p = nameEnd; continue; }
+
+      // Skip whitespace after name
+      char* ws2 = nameEnd;
+      while (*ws2 == ' ' || *ws2 == '\t') ws2++;
+
+      // Must have '=' (not '==')
+      if (*ws2 != '=' || ws2[1] == '=') { p = ws2; continue; }
+      ws2++; // skip '='
+
+      // Skip whitespace after '='
+      while (*ws2 == ' ' || *ws2 == '\t') ws2++;
+
+      // Check if RHS starts with the same variable name at word boundary
+      if (strncmp(ws2, nameStart, nameLen) != 0) { p = ws2; continue; }
+      if (isIdentChar(ws2[nameLen])) { p = ws2; continue; }
+
+      // Skip whitespace after RHS name
+      char* afterRHS = ws2 + nameLen;
+      while (*afterRHS == ' ' || *afterRHS == '\t') afterRHS++;
+
+      // Must end with ';' — this is `type name = name;`
+      if (*afterRHS != ';') { p = afterRHS; continue; }
+
+      // Found a self-referencing redeclaration! Blank out the type keyword with spaces.
+      DLOG_INFO("FixSelfRedeclarations: removing redundant '%.*s' from '%.*s'",
+                typeLen, type, (int)(afterRHS + 1 - typeStart), typeStart);
+      for (int i = 0; i < typeLen; i++)
+        typeStart[i] = ' ';
+
+      p = afterRHS + 1;
+    }
+  }
+}
+
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
 // Many MilkDrop presets use patterns like `float2 pow = float2(pow(x,y)...)` which
 // fails in SM3.0+ because the local variable shadows the intrinsic. We rename the
@@ -1231,19 +1312,19 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   const char szCompDefines[] = "#define rad _rad_ang.x\n"
     "#define ang _rad_ang.y\n"
     "#define uv _uv.xy\n"
-    "#define uv_orig _uv.xy\n" //[sic]
+    "#define uv_orig _uv.xy\n"
     "#define hue_shader _vDiffuse.xyz\n";
   const char szWarpParams[] = "float4 _vDiffuse : COLOR, float4 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
-  const char szCompParams[] = "float4 _vDiffuse : COLOR, float2 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
+  const char szCompParams[] = "float4 _vDiffuse : COLOR, float4 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
   const char szFirstLine[] = "    float3 ret = 0;";
 
   char szWhichShader[64];
   switch (shaderType) {
-  case SHADER_WARP:  lstrcpy(szWhichShader, "warp"); break;
-  case SHADER_COMP:  lstrcpy(szWhichShader, "composite"); break;
-  case SHADER_BLUR:  lstrcpy(szWhichShader, "blur"); break;
-  case SHADER_OTHER: lstrcpy(szWhichShader, "(other)"); break;
-  default:           lstrcpy(szWhichShader, "(unknown)"); break;
+  case SHADER_WARP:  lstrcpyA(szWhichShader, "warp"); break;
+  case SHADER_COMP:  lstrcpyA(szWhichShader, "composite"); break;
+  case SHADER_BLUR:  lstrcpyA(szWhichShader, "blur"); break;
+  case SHADER_OTHER: lstrcpyA(szWhichShader, "(other)"); break;
+  default:           lstrcpyA(szWhichShader, "(unknown)"); break;
   }
 
   LPD3DXBUFFER pShaderByteCode = NULL;
@@ -1274,7 +1355,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   int writePos = 0;
 
   // paste the universal #include
-  lstrcpy(&szShaderText[writePos], m_szShaderIncludeText);  // first, paste in the contents of 'inputs.fx' before the actual shader text.  Has 13's and 10's.
+  lstrcpyA(&szShaderText[writePos], m_szShaderIncludeText);  // first, paste in the contents of 'inputs.fx' before the actual shader text.  Has 13's and 10's.
   writePos += m_nShaderIncludeTextLen;
 
   // Strip include's sampler_rand declarations if the preset declares its own
@@ -1318,12 +1399,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // paste in any custom #defines for this shader type
   if (shaderType == SHADER_WARP && szProfile[0] == 'p') {
-    lstrcpy(&szShaderText[writePos], szWarpDefines);
-    writePos += lstrlen(szWarpDefines);
+    lstrcpyA(&szShaderText[writePos], szWarpDefines);
+    writePos += lstrlenA(szWarpDefines);
   }
   else if (shaderType == SHADER_COMP && szProfile[0] == 'p') {
-    lstrcpy(&szShaderText[writePos], szCompDefines);
-    writePos += lstrlen(szCompDefines);
+    lstrcpyA(&szShaderText[writePos], szCompDefines);
+    writePos += lstrlenA(szCompDefines);
   }
   // Shadertoy shaders: #undef MilkDrop Q-variable macros (q1..q32 → _qa.x etc.)
   // to avoid collisions with local GLSL variable names like "float3 q2 = abs(p2);"
@@ -1428,11 +1509,11 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
     if (p) {
       // insert "void PS(...params...)\n"
-      lstrcpy(temp, p);
+      lstrcpyA(temp, p);
       const char* params = (shaderType == SHADER_WARP) ? szWarpParams : szCompParams;
       sprintf(p, "void %s( %s )\n", szFn, params);
-      p += lstrlen(p);
-      lstrcpy(p, temp);
+      p += lstrlenA(p);
+      lstrcpyA(p, temp);
 
       // find the starting curly brace
       p = strchr(p, '{');
@@ -1440,7 +1521,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // skip over it
         p++;
         // then insert first line(s)
-        lstrcpy(temp, p);
+        lstrcpyA(temp, p);
         if (m_bLoadingShadertoyMode && !bHardErrors) {
           // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
           // Use m_bLoadingShadertoyMode (set before async thread) not m_bShadertoyMode
@@ -1449,8 +1530,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         } else {
           sprintf(p, "%s\n", szFirstLine);
         }
-        p += lstrlen(p);
-        lstrcpy(p, temp);
+        p += lstrlenA(p);
+        lstrcpyA(p, temp);
 
         // For comp shaders: compute rad/ang per-pixel from UV coordinates.
         // The fullscreen quad has only 4 vertices with hardcoded rad=1.0,
@@ -1458,12 +1539,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // matching the formula from engine.cpp grid precomputation (line ~2930).
         // _c0.xy = (aspect_x, aspect_y), UV in [0,1] → NDC in [-1,1].
         if (shaderType == SHADER_COMP && !m_bLoadingShadertoyMode) {
-          lstrcpy(temp, p);
+          lstrcpyA(temp, p);
           sprintf(p,
             "    float2 __d = float2((_uv.x * 2.0 - 1.0) * _c0.x, (_uv.y * 2.0 - 1.0) * _c0.y);\n"
             "    _rad_ang = float2(length(__d), atan2(__d.y, __d.x));\n");
-          p += lstrlen(p);
-          lstrcpy(p, temp);
+          p += lstrlenA(p);
+          lstrcpyA(p, temp);
         }
 
         // find the ending curly brace
@@ -1503,8 +1584,38 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
 
+  // Fix self-referencing variable redeclarations (e.g. float3 ret1 = ret1;)
+  FixSelfRedeclarations(szShaderText);
+
   // Fix matrix * vector multiplication (HLSL requires mul())
   FixMatrixVarMultiply(szShaderText);
+
+  // Replace normalize() with _safe_normalize() to prevent NaN from zero-length vectors.
+  // DX9 SM3.0 normalize(0) returns 0; DX12 SM5.0 returns NaN which propagates through
+  // the feedback loop and darkens the image over time.
+  {
+    const char* src = "normalize(";
+    const char* dst = "_safe_normalize(";
+    int srcLen = (int)strlen(src);
+    int dstLen = (int)strlen(dst);
+    int diff = dstLen - srcLen;
+    char* p = szShaderText;
+    while ((p = strstr(p, src)) != nullptr) {
+      // Word boundary check: skip if preceded by alphanumeric or underscore
+      if (p > szShaderText) {
+        char prev = *(p - 1);
+        if ((prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') || prev == '_') {
+          p += srcLen;
+          continue;
+        }
+      }
+      // Expand buffer to fit the longer replacement
+      int tailLen = (int)strlen(p + srcLen);
+      memmove(p + dstLen, p + srcLen, tailLen + 1);
+      memcpy(p, dst, dstLen);
+      p += dstLen;
+    }
+  }
 
   // Replace tex2D/tex2Dlod calls for samplers that need non-default addressing modes.
   // The generic tex2D macro uses _samp_lw (LINEAR+WRAP). These replacements bypass
@@ -1592,6 +1703,42 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     replaceTex2D("sampler_fc_main", "_samp_lc");  // LINEAR+CLAMP
     replaceTex2D("sampler_pc_main", "_samp_pc");  // POINT+CLAMP
     replaceTex2D("sampler_pw_main", "_samp_pw");  // POINT+WRAP
+    // Noise/volume/random textures with non-default addressing modes.
+    // Presets use sampler_pw_*, sampler_fc_*, sampler_pc_* prefixes to override
+    // the default LINEAR+WRAP filtering/addressing. Without these replacements,
+    // tex2D() falls through to the _samp_lw macro (LINEAR+WRAP), causing e.g.
+    // point-filtered noise to appear smoothed/blurred ("glow" artifacts).
+    replaceTex2D("sampler_pw_noise_lq",      "_samp_pw");  // POINT+WRAP
+    replaceTex2D("sampler_pw_noise_lq_lite", "_samp_pw");
+    replaceTex2D("sampler_pw_noise_mq",      "_samp_pw");
+    replaceTex2D("sampler_pw_noise_hq",      "_samp_pw");
+    replaceTex2D("sampler_pw_noisevol_lq",   "_samp_pw");
+    replaceTex2D("sampler_pw_noisevol_hq",   "_samp_pw");
+    replaceTex2D("sampler_fc_noise_lq",      "_samp_lc");  // LINEAR+CLAMP
+    replaceTex2D("sampler_fc_noise_lq_lite", "_samp_lc");
+    replaceTex2D("sampler_fc_noise_mq",      "_samp_lc");
+    replaceTex2D("sampler_fc_noise_hq",      "_samp_lc");
+    replaceTex2D("sampler_fc_noisevol_lq",   "_samp_lc");
+    replaceTex2D("sampler_fc_noisevol_hq",   "_samp_lc");
+    replaceTex2D("sampler_pc_noise_lq",      "_samp_pc");  // POINT+CLAMP
+    replaceTex2D("sampler_pc_noise_lq_lite", "_samp_pc");
+    replaceTex2D("sampler_pc_noise_mq",      "_samp_pc");
+    replaceTex2D("sampler_pc_noise_hq",      "_samp_pc");
+    replaceTex2D("sampler_pc_noisevol_lq",   "_samp_pc");
+    replaceTex2D("sampler_pc_noisevol_hq",   "_samp_pc");
+    // Random textures (rand00..rand03) with prefixed addressing
+    replaceTex2D("sampler_pw_rand00",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand01",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand02",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand03",  "_samp_pw");
+    replaceTex2D("sampler_fc_rand00",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand01",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand02",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand03",  "_samp_lc");
+    replaceTex2D("sampler_pc_rand00",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand01",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand02",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand03",  "_samp_pc");
     replaceTex2D("sampler_blur1",   "_samp_lc");  // blur = LINEAR+CLAMP
     replaceTex2D("sampler_blur2",   "_samp_lc");
     replaceTex2D("sampler_blur3",   "_samp_lc");
@@ -1609,7 +1756,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     FILE* f = fopen(dumpPath, "w");
     if (f) {
       fprintf(f, "// DIAG: type=%s profile=%s len=%d preset=%ls\n",
-              typeName, szProfile, lstrlen(szShaderText),
+              typeName, szProfile, lstrlenA(szShaderText),
               m_pState ? m_pState->m_szDesc : L"(unknown)");
       fputs(szShaderText, f);
       fclose(f);
@@ -1619,7 +1766,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // now really try to compile it.
 
   bool failed = false;
-  int len = lstrlen(szShaderText);
+  int len = lstrlenA(szShaderText);
 
   uint32_t checksum = crc32(szShaderText, len);
 
@@ -1713,9 +1860,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         AutoFlagPresetError(m_szCurrentPresetFile, wideErrorMsg);
       }
       else {
-        if (MessageBoxA(GetPluginWindow(), "The shader could not be compiled.\n\nPlease install the Microsoft DirectX End-User Runtimes.\n\nOpen Download-Website now?", "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
+        if (MessageBoxW(GetPluginWindow(), L"The shader could not be compiled.\n\nPlease install the Microsoft DirectX End-User Runtimes.\n\nOpen Download-Website now?", L"MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
           // open website in browser
-          ShellExecuteA(NULL, "open", "https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
+          ShellExecuteW(NULL, L"open", L"https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
         }
       }
       return false;
@@ -1775,7 +1922,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   // find the pixel shader body and replace it with custom code.
 
-  lstrcpy(szShaderText, m_szDefaultWarpPShaderText);
+  lstrcpyA(szShaderText, m_szDefaultWarpPShaderText);
   char LF = LINEFEED_CONTROL_CHAR;
   char* p = strrchr(szShaderText, '{');
   if (!p)
@@ -1794,7 +1941,7 @@ void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
 void Engine::GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert) {
   // find the pixel shader body and replace it with custom code.
 
-  lstrcpy(szShaderText, m_szDefaultCompPShaderText);
+  lstrcpyA(szShaderText, m_szDefaultCompPShaderText);
   char LF = LINEFEED_CONTROL_CHAR;
   char* p = strrchr(szShaderText, '{');
   if (!p)

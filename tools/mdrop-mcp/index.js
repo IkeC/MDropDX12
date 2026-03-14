@@ -111,7 +111,7 @@ function findPipe() {
 
   const pipes = discoverPipes();
   if (pipes.length === 0) {
-    throw new Error('No running MDropDX12 instance found. Start the visualizer first.');
+    throw new Error('No running visualizer found (MDropDX12 or Milkwave Visualizer). Start the visualizer first.');
   }
 
   cachedPipePath = pipes[0].path;
@@ -189,16 +189,16 @@ const server = new McpServer({
 // Tool: Connect / discover
 server.tool(
   'mdrop_connect',
-  'Discover and connect to a running MDropDX12 instance',
+  'Discover and connect to a running visualizer (MDropDX12 or Milkwave Visualizer)',
   {},
   async () => {
     const pipes = discoverPipes();
     if (pipes.length === 0) {
-      return { content: [{ type: 'text', text: 'No running MDropDX12 instance found. Start the visualizer first.' }] };
+      return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12 or Milkwave Visualizer). Start the visualizer first.' }] };
     }
     cachedPipePath = pipes[0].path;
     const pids = pipes.map(p => p.pid).join(', ');
-    return { content: [{ type: 'text', text: `Connected to MDropDX12 (PID: ${pids}), pipe: ${cachedPipePath}` }] };
+    return { content: [{ type: 'text', text: `Connected to visualizer (PID: ${pids}), pipe: ${cachedPipePath}` }] };
   }
 );
 
@@ -404,6 +404,24 @@ server.tool(
       const response = await send('CLEAR_LOGS', true);
       return { content: [{ type: 'text', text: response || 'Logs cleared' }] };
     } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Clean shutdown
+server.tool(
+  'mdrop_shutdown',
+  'Cleanly shut down the visualizer (saves settings, stops render thread, exits). Useful for restarting after a build.',
+  {},
+  async () => {
+    try {
+      const response = await send('SHUTDOWN', true);
+      return { content: [{ type: 'text', text: response || 'Shutdown initiated' }] };
+    } catch (err) {
+      // Connection reset is expected — the app is closing
+      if (err.message.includes('EPIPE') || err.message.includes('ERR_STREAM') || err.message.includes('reset'))
+        return { content: [{ type: 'text', text: 'Shutdown initiated (pipe closed)' }] };
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
   }

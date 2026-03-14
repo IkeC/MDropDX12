@@ -123,7 +123,8 @@ typedef struct {
   int		nCursorPos;
   int		nSelAnchorPos;		// -1 if no selection made
   int 	bOvertypeMode;
-  wchar_t	szText[48000];
+  wchar_t	szText[48000];      // wide string editing (filenames, user text)
+  char	szCode[96000];      // narrow code editing (shader/equation ASCII code)
   wchar_t	szPrompt[512];
   wchar_t	szToolTip[512];
   char	szClipboard[48000];
@@ -461,6 +462,7 @@ public:
   bool m_bMirrorClassRegistered = false;
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorWatermarkActive = false; // True while in mirror watermark mode (App.cpp manages)
+  wchar_t m_szWatermarkRenderDevice[32] = {}; // Device name of the display render moved to (for deterministic skip)
   bool m_bWatermarkActive = false;       // True while in single-window watermark mode (App.cpp manages)
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all
@@ -728,6 +730,7 @@ public:
   float   m_fStartTime;
   float   m_fPresetStartTime;
   bool    m_bPresetDiagLogged = false;
+  int     m_nDiagDisplayMode = 0;  // 0=normal, 1=show VS[0] raw, 2=show VS[1] raw
   float   m_fNextPresetTime;
   float   m_fSnapPoint;
   CState* m_pState;				// points to current CState

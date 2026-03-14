@@ -4,6 +4,7 @@
   Contains: Preset loading, browsing, file operations, blend pattern, plasma generation
 */
 
+#include "tcp_server.h"  // Must be before engine.h — winsock2.h must precede windows.h
 #include "engine.h"
 #include "engine_helpers.h"
 #include "json_utils.h"
@@ -2029,6 +2030,10 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doFo
 
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(messageToSend);
+
+    // Also broadcast to TCP clients (Android remote)
+    extern TcpServer g_tcpServer;
+    g_tcpServer.Broadcast(messageToSend);
   } catch (...) {
     // ignore
   }
@@ -2045,8 +2050,13 @@ void Engine::PostMessageToMDropDX12Remote(UINT msg) {
     else if (msg == WM_USER + 102) signal = L"SIGNAL|COVER_CHANGED";
     else if (msg == WM_USER + 103) signal = L"SIGNAL|SPRITE_MODE";
     else if (msg == WM_USER + 104) signal = L"SIGNAL|MESSAGE_MODE";
-    if (signal)
+    if (signal) {
       g_pipeServer.Send(signal);
+
+      // Also broadcast to TCP clients (Android remote)
+      extern TcpServer g_tcpServer;
+      g_tcpServer.Broadcast(signal);
+    }
   } catch (...) {
     // ignore
   }

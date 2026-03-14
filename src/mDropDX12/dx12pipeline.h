@@ -146,7 +146,7 @@ static const char g_szWarpVS[] =
     "    oRadAng  = rad_ang;\n"
     "}\n";
 
-// Composite vertex shader: float2 UV + float2 rad_ang
+// Composite vertex shader: float4 UV (.xy=current, .zw=original) + float2 rad_ang
 static const char g_szCompVS[] =
     "void main(\n"
     "    float3 pos     : POSITION,\n"
@@ -155,13 +155,13 @@ static const char g_szCompVS[] =
     "    float2 uv_orig : TEXCOORD1,\n"
     "    float2 rad_ang : TEXCOORD2,\n"
     "    out float4 oCol     : COLOR,\n"
-    "    out float2 oUv      : TEXCOORD0,\n"
+    "    out float4 oUv      : TEXCOORD0,\n"
     "    out float2 oRadAng  : TEXCOORD1,\n"
     "    out float4 oPos     : SV_POSITION\n"
     ") {\n"
     "    oPos     = float4(pos, 1.0);\n"
     "    oCol     = col.bgra;\n"
-    "    oUv      = uv;\n"
+    "    oUv      = float4(uv, uv_orig);\n"
     "    oRadAng  = rad_ang;\n"
     "}\n";
 

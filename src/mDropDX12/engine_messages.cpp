@@ -5,6 +5,7 @@
             remote communication, screenshots, audio analysis, misc utilities
 */
 
+#include "tcp_server.h"  // Must be before engine.h — winsock2.h must precede windows.h
 #include "engine.h"
 #include "engine_helpers.h"
 #include "tool_window.h"
@@ -2103,6 +2104,13 @@ LPCWSTR ConvertToLPCWSTR(const std::wstring& wstr) {
 }
 
 void Engine::LaunchMessage(wchar_t* sMessage) {
+  // Route SIGNAL| commands through pipe server dispatch (PostMessage to render window)
+  if (wcsncmp(sMessage, L"SIGNAL|", 7) == 0) {
+    extern PipeServer g_pipeServer;
+    g_pipeServer.DispatchSignal(sMessage + 7);
+    return;
+  }
+
   if (wcsncmp(sMessage, L"MSG|", 4) == 0) {
 
     std::wstring message(sMessage + 4); // Remove "MSG|"
@@ -2872,19 +2880,40 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     g_pipeServer.Send(response.c_str());
   }
   else if (wcsncmp(sMessage, L"SET_MIRROR_OPACITY=", 19) == 0) {
-    // Set opacity for all monitor mirrors.  Format: SET_MIRROR_OPACITY=<1-100>
-    int val = _wtoi(sMessage + 19);
+    // Set opacity for monitor mirrors.
+    // Format: SET_MIRROR_OPACITY=<1-100>         (all monitors)
+    //         SET_MIRROR_OPACITY=<N>,<1-100>      (DISPLAY N by device name, e.g. \\.\DISPLAY1 = 1)
+    const wchar_t* args = sMessage + 19;
+    const wchar_t* comma = wcschr(args, L',');
+    int displayNum = -1; // -1 = all
+    int val;
+    if (comma) {
+      displayNum = _wtoi(args);  // DISPLAY number from device name
+      val = _wtoi(comma + 1);
+    } else {
+      val = _wtoi(args);
+    }
     if (val < 1) val = 1;
     if (val > 100) val = 100;
-    for (auto& out : m_displayOutputs)
-      if (out.config.type == DisplayOutputType::Monitor)
-        out.config.nOpacity = val;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      if (displayNum > 0) {
+        // Match by DISPLAY number in device name (e.g. \\.\DISPLAY2 → 2)
+        wchar_t target[32];
+        swprintf_s(target, L"\\\\.\\DISPLAY%d", displayNum);
+        if (wcscmp(out.config.szDeviceName, target) != 0) continue;
+      }
+      out.config.nOpacity = val;
+    }
     m_bMirrorStylesDirty.store(true);
     SaveDisplayOutputSettings();
     RefreshDisplaysTab();
     extern PipeServer g_pipeServer;
     wchar_t buf[64];
-    swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
+    if (displayNum > 0)
+      swprintf_s(buf, L"MIRROR_OPACITY=%d,%d", displayNum, val);
+    else
+      swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
     g_pipeServer.Send(buf);
   }
   else if (wcsncmp(sMessage, L"SET_MIRROR_CLICKTHRU=", 21) == 0) {
@@ -2965,6 +2994,22 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     DebugLogClearAll();
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(L"LOGS_CLEARED");
+  }
+  else if (wcsncmp(sMessage, L"SHUTDOWN", 8) == 0) {
+    // Clean shutdown via WM_CLOSE — saves settings, stops render thread, exits
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"SHUTTING_DOWN");
+    PostMessage(GetPluginWindow(), WM_CLOSE, 0, 0);
+  }
+  else if (wcsncmp(sMessage, L"DIAG_DISPLAY_MODE=", 18) == 0) {
+    // Toggle diagnostic display mode: 0=normal, 1=show VS[0] raw, 2=show VS[1] raw
+    int mode = _wtoi(sMessage + 18);
+    m_nDiagDisplayMode = (mode >= 0 && mode <= 2) ? mode : 0;
+    extern PipeServer g_pipeServer;
+    wchar_t resp[64];
+    swprintf_s(resp, L"DIAG_DISPLAY_MODE=%d", m_nDiagDisplayMode);
+    g_pipeServer.Send(resp);
+    DLOG_INFO("DIAG_DISPLAY_MODE set to %d", m_nDiagDisplayMode);
   }
   else if (wcsncmp(sMessage, L"SET_AUDIO_GAIN=", 15) == 0) {
     float val = (float)_wtof(sMessage + 15);
@@ -3064,6 +3109,8 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       L"|zoom=%.6f|rot=%.6f|warp=%.6f|cx=%.6f|cy=%.6f|dx=%.6f|dy=%.6f|sx=%.6f|sy=%.6f|zoomexp=%.6f"
       L"|q1=%.6f|q2=%.6f|q3=%.6f|q4=%.6f|q5=%.6f|q6=%.6f|q7=%.6f|q8=%.6f"
       L"|q9=%.6f|q10=%.6f|q11=%.6f|q12=%.6f|q13=%.6f|q14=%.6f|q15=%.6f|q16=%.6f"
+      L"|q17=%.6f|q18=%.6f|q19=%.6f|q20=%.6f|q21=%.6f|q22=%.6f|q23=%.6f|q24=%.6f"
+      L"|q25=%.6f|q26=%.6f|q27=%.6f|q28=%.6f|q29=%.6f|q30=%.6f|q31=%.6f|q32=%.6f"
       L"|bass_rel=%.6f|mid_rel=%.6f|treb_rel=%.6f"
       L"|bass_imm=%.6f|mid_imm=%.6f|treb_imm=%.6f"
       L"|bass_avg=%.6f|mid_avg=%.6f|treb_avg=%.6f"
@@ -3092,6 +3139,22 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       m_pState->var_pf_q[13] ? (float)*m_pState->var_pf_q[13] : 0.f,
       m_pState->var_pf_q[14] ? (float)*m_pState->var_pf_q[14] : 0.f,
       m_pState->var_pf_q[15] ? (float)*m_pState->var_pf_q[15] : 0.f,
+      m_pState->var_pf_q[16] ? (float)*m_pState->var_pf_q[16] : 0.f,
+      m_pState->var_pf_q[17] ? (float)*m_pState->var_pf_q[17] : 0.f,
+      m_pState->var_pf_q[18] ? (float)*m_pState->var_pf_q[18] : 0.f,
+      m_pState->var_pf_q[19] ? (float)*m_pState->var_pf_q[19] : 0.f,
+      m_pState->var_pf_q[20] ? (float)*m_pState->var_pf_q[20] : 0.f,
+      m_pState->var_pf_q[21] ? (float)*m_pState->var_pf_q[21] : 0.f,
+      m_pState->var_pf_q[22] ? (float)*m_pState->var_pf_q[22] : 0.f,
+      m_pState->var_pf_q[23] ? (float)*m_pState->var_pf_q[23] : 0.f,
+      m_pState->var_pf_q[24] ? (float)*m_pState->var_pf_q[24] : 0.f,
+      m_pState->var_pf_q[25] ? (float)*m_pState->var_pf_q[25] : 0.f,
+      m_pState->var_pf_q[26] ? (float)*m_pState->var_pf_q[26] : 0.f,
+      m_pState->var_pf_q[27] ? (float)*m_pState->var_pf_q[27] : 0.f,
+      m_pState->var_pf_q[28] ? (float)*m_pState->var_pf_q[28] : 0.f,
+      m_pState->var_pf_q[29] ? (float)*m_pState->var_pf_q[29] : 0.f,
+      m_pState->var_pf_q[30] ? (float)*m_pState->var_pf_q[30] : 0.f,
+      m_pState->var_pf_q[31] ? (float)*m_pState->var_pf_q[31] : 0.f,
       mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2],
       mysound.imm[0], mysound.imm[1], mysound.imm[2],
       mysound.avg[0], mysound.avg[1], mysound.avg[2],
@@ -3226,6 +3289,30 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       pcmMin, pcmMax, pcm0, pcm1, pcm2, pcm3, pcm4);
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"DEAUTH_DEVICE|", 14) == 0) {
+    extern TcpServer g_tcpServer;
+    extern PipeServer g_pipeServer;
+    std::string deviceId = WideToUTF8(sMessage + 14);
+    g_tcpServer.RemoveAuthorizedDevice(deviceId);
+    g_tcpServer.DisconnectDevice(deviceId);
+    g_tcpServer.SaveAuthorizedDevices(GetConfigIniFile());
+    g_pipeServer.Send(L"DEAUTH_OK");
+  }
+  else if (wcscmp(sMessage, L"LIST_DEVICES") == 0) {
+    extern TcpServer g_tcpServer;
+    extern PipeServer g_pipeServer;
+    auto devices = g_tcpServer.GetAuthorizedDevices();
+    std::wstring response = L"DEVICES";
+    for (auto& d : devices) {
+      response += L"|id=";
+      response += UTF8ToWide(d.id);
+      response += L",name=";
+      response += UTF8ToWide(d.name);
+      response += L",added=";
+      response += UTF8ToWide(d.dateAdded);
+    }
+    g_pipeServer.Send(response);
   }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
