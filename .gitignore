@@ -48,5 +48,5 @@ src/settings.ini
 src/messages.ini
 .worktrees/
 
-# Tools (MCP server, diagnostics, etc.)
-tools/
+# Tools — node_modules only (source tracked in private repo)
+tools/mdrop-mcp/node_modules/
