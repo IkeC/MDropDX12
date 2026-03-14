@@ -1,7 +1,8 @@
 /*
   RemoteWindow — standalone Remote tool window (ToolWindow subclass).
   Extracted from the Settings Remote tab.
-  Controls: window title config, IPC status, last message display.
+  Tab 0 "IPC": window title config, pipe status, last message display.
+  Tab 1 "Authorization": TCP server status, PIN config, authorized devices list.
 */
 
 #include "tool_window.h"
@@ -9,10 +10,13 @@
 #include "engine_helpers.h"
 #include "utility.h"
 #include "pipe_server.h"
+#include "tcp_server.h"
 #include <commdlg.h>
+#include <commctrl.h>
 
 // These globals are defined in App.cpp in the global namespace (after 'using namespace mdrop')
 extern PipeServer g_pipeServer;
+extern TcpServer g_tcpServer;
 extern WCHAR g_szLastIPCMessage[2048];
 extern WCHAR g_szLastIPCTime[16];
 extern std::atomic<int> g_lastIPCMessageSeq;
@@ -21,12 +25,22 @@ namespace mdrop {
 
 extern Engine g_engine;
 
+#define PAGE_CTRL(page, expr) TrackPageControl(page, (expr))
+
 //----------------------------------------------------------------------
 // Constructor
 //----------------------------------------------------------------------
 
 RemoteWindow::RemoteWindow(Engine* pEngine)
   : ToolWindow(pEngine, 520, 600) {}
+
+//----------------------------------------------------------------------
+// Common control flags (need tab + listview)
+//----------------------------------------------------------------------
+
+DWORD RemoteWindow::GetCommonControlFlags() const {
+  return ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES;
+}
 
 //----------------------------------------------------------------------
 // Build Controls
@@ -37,76 +51,175 @@ void RemoteWindow::DoBuildControls() {
   if (!hw) return;
 
   auto L = BuildBaseControls();
-  int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, rw = L.rw;
+  int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, rw = L.rw, clientW = L.clientW;
   HFONT hFont = GetFont();
   HFONT hFontBold = GetFontBold();
   int lw = MulDiv(120, lineH, 26);
 
   Engine* p = m_pEngine;
 
-  // Section header
-  TrackControl(CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold));
-  y += lineH + gap;
+  RECT rcWnd;
+  GetClientRect(hw, &rcWnd);
+  int clientH = rcWnd.bottom;
 
-  // Info line
-  TrackControl(CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont));
-  y += lineH * 2 + gap;
+  // ── Tab control ──
+  const wchar_t* tabNames[] = { L"IPC", L"Authorization" };
+  RECT rcTab = BuildTabControl(IDC_MW_REMOTE_TAB, tabNames, 2,
+                                0, y, clientW, clientH - y);
+  int tabX = rcTab.left + x;
+  int tabY = rcTab.top + 4;
+  int tabRW = rcTab.right - rcTab.left - x;
 
-  // Window Title
-  TrackControl(CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont));
-  TrackControl(CreateEdit(hw, p->m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont));
-  y += lineH + 2;
-
-  // Hint
-  TrackControl(CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont));
-  y += lineH + gap;
-
-  // Apply button + Capture Screenshot button
+  // ════════════════════════════════════════════════════════════════════
+  // Page 0: IPC
+  // ════════════════════════════════════════════════════════════════════
   {
-    int applyW = MulDiv(100, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Apply", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont));
-    int captureW = MulDiv(130, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont));
-    y += lineH + gap + 8;
+    int py = tabY;
+
+    // Section header
+    PAGE_CTRL(0, CreateLabel(hw, L"Milkwave Remote Compatibility", tabX, py, tabRW, lineH, hFontBold));
+    py += lineH + gap;
+
+    // Info line
+    PAGE_CTRL(0, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", tabX, py, tabRW, lineH * 2, hFont));
+    py += lineH * 2 + gap;
+
+    // Window Title
+    PAGE_CTRL(0, CreateLabel(hw, L"Window Title:", tabX, py, lw, lineH, hFont));
+    PAGE_CTRL(0, CreateEdit(hw, p->m_szWindowTitle, IDC_MW_IPC_TITLE, tabX + lw + 4, py, tabRW - lw - 4, lineH, hFont));
+    py += lineH + 2;
+
+    // Hint
+    PAGE_CTRL(0, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", tabX + lw + 4, py, tabRW - lw - 4, lineH, hFont));
+    py += lineH + gap;
+
+    // Apply button + Capture Screenshot button
+    {
+      int applyW = MulDiv(100, lineH, 26);
+      PAGE_CTRL(0, CreateBtn(hw, L"Apply", IDC_MW_IPC_APPLY, tabX, py, applyW, lineH, hFont));
+      int captureW = MulDiv(130, lineH, 26);
+      PAGE_CTRL(0, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, tabX + applyW + 8, py, captureW, lineH, hFont));
+      py += lineH + gap + 8;
+    }
+
+    // Named Pipe IPC status
+    PAGE_CTRL(0, CreateLabel(hw, L"Named Pipe IPC", tabX, py, tabRW, lineH, hFontBold));
+    py += lineH + gap;
+
+    // IPC list box
+    {
+      int listH = lineH * 6;
+      HWND hIPCList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+        tabX, py, tabRW, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
+      if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(0, hIPCList);
+      py += listH + gap;
+    }
+
+    // Last Message group box
+    {
+      int groupH = lineH * 5;
+      HWND hGroup = CreateWindowExW(0, L"BUTTON", L"Last message:",
+        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+        tabX, py, tabRW, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
+        GetModuleHandle(NULL), NULL);
+      if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(0, hGroup);
+
+      int pad = 8;
+      HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+        tabX + pad, py + lineH + 2, tabRW - pad * 2, groupH - lineH - pad - 2,
+        hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
+        GetModuleHandle(NULL), NULL);
+      if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(0, hMsgText);
+    }
   }
 
-  // Named Pipe IPC status
-  TrackControl(CreateLabel(hw, L"Named Pipe IPC", x, y, rw, lineH, hFontBold));
-  y += lineH + gap;
-
-  // IPC list box
+  // ════════════════════════════════════════════════════════════════════
+  // Page 1: Authorization
+  // ════════════════════════════════════════════════════════════════════
   {
-    int listH = lineH * 6;
-    HWND hIPCList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
-    if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    TrackControl(hIPCList);
-    y += listH + gap;
-  }
+    int py = tabY;
 
-  // Last Message group box
-  {
-    int groupH = lineH * 5;
-    HWND hGroup = CreateWindowExW(0, L"BUTTON", L"Last message:",
-      WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-      x, y, rw, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
+    // TCP Server status
+    PAGE_CTRL(1, CreateLabel(hw, L"TCP Server", tabX, py, tabRW, lineH, hFontBold, false));
+    py += lineH + gap;
+
+    PAGE_CTRL(1, CreateLabel(hw, L"", tabX, py, tabRW, lineH, hFont, false));
+    // Give the status label the IDC so we can update it
+    HWND hStatus = CreateWindowExW(0, L"STATIC", L"",
+      WS_CHILD | SS_LEFT,
+      tabX, py, tabRW, lineH, hw, (HMENU)(INT_PTR)IDC_MW_TCP_STATUS,
       GetModuleHandle(NULL), NULL);
-    if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
-    TrackControl(hGroup);
+    if (hStatus && hFont) SendMessage(hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(1, hStatus);
+    py += lineH + gap + 4;
 
-    int pad = 8;
-    HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
-      WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-      x + pad, y + lineH + 2, rw - pad * 2, groupH - lineH - pad - 2,
-      hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
-      GetModuleHandle(NULL), NULL);
-    if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
-    TrackControl(hMsgText);
+    // PIN configuration
+    PAGE_CTRL(1, CreateLabel(hw, L"PIN Configuration", tabX, py, tabRW, lineH, hFontBold, false));
+    py += lineH + gap;
+
+    int pinLW = MulDiv(40, lineH, 26);
+    PAGE_CTRL(1, CreateLabel(hw, L"PIN:", tabX, py, pinLW, lineH, hFont, false));
+    int pinEditW = MulDiv(150, lineH, 26);
+    HWND hPinEdit = CreateEdit(hw, L"", IDC_MW_TCP_PIN_EDIT,
+      tabX + pinLW + 4, py, pinEditW, lineH, hFont, ES_PASSWORD, false);
+    PAGE_CTRL(1, hPinEdit);
+
+    int applyW = MulDiv(80, lineH, 26);
+    PAGE_CTRL(1, CreateBtn(hw, L"Apply", IDC_MW_TCP_PIN_APPLY,
+      tabX + pinLW + pinEditW + 12, py, applyW, lineH, hFont, false));
+    py += lineH + gap + 8;
+
+    // Authorized Devices
+    PAGE_CTRL(1, CreateLabel(hw, L"Authorized Devices", tabX, py, tabRW, lineH, hFontBold, false));
+    py += lineH + gap;
+
+    // ListView for devices
+    {
+      int listH = lineH * 8;
+      HWND hList = CreateThemedListView(IDC_MW_TCP_DEVICE_LIST,
+        tabX, py, tabRW, listH, false, false);
+      PAGE_CTRL(1, hList);
+
+      // Add columns
+      LVCOLUMNW col = {};
+      col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+      col.fmt = LVCFMT_LEFT;
+
+      col.pszText = (LPWSTR)L"Device Name";
+      col.cx = MulDiv(tabRW * 40, 1, 100);
+      ListView_InsertColumn(hList, 0, &col);
+
+      col.pszText = (LPWSTR)L"Device ID";
+      col.cx = MulDiv(tabRW * 35, 1, 100);
+      ListView_InsertColumn(hList, 1, &col);
+
+      col.pszText = (LPWSTR)L"Date Added";
+      col.cx = MulDiv(tabRW * 25, 1, 100);
+      ListView_InsertColumn(hList, 2, &col);
+
+      py += listH + gap;
+    }
+
+    // Remove button
+    int removeW = MulDiv(100, lineH, 26);
+    PAGE_CTRL(1, CreateBtn(hw, L"Remove", IDC_MW_TCP_DEVICE_REMOVE,
+      tabX, py, removeW, lineH, hFont, false));
   }
+
+  // Restore persisted tab selection
+  SelectInitialTab();
 
   // Populate IPC list with current state
   RefreshIPCList();
+
+  // Populate Authorization tab
+  RefreshTcpStatus();
+  RefreshDeviceList();
 
   // Start IPC message monitor timer (500ms polling)
   SetTimer(hw, IDT_IPC_MONITOR, 500, NULL);
@@ -182,6 +295,71 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     return 0;
   }
 
+  // Apply PIN
+  if (id == IDC_MW_TCP_PIN_APPLY && code == BN_CLICKED) {
+    wchar_t pinBuf[128] = {};
+    HWND hPinEdit = GetDlgItem(hWnd, IDC_MW_TCP_PIN_EDIT);
+    if (hPinEdit) {
+      GetWindowTextW(hPinEdit, pinBuf, 128);
+    }
+
+    const wchar_t* pIni = p->GetConfigIniFile();
+
+    if (pinBuf[0] == L'\0') {
+      // Clear PIN
+      WritePrivateProfileStringW(L"Network", L"PinHash", L"", pIni);
+    } else {
+      // TODO: Compute SHA256 hash of PIN using BCryptHashData
+      // For now, store the PIN directly as a placeholder
+      WritePrivateProfileStringW(L"Network", L"PinHash", pinBuf, pIni);
+    }
+
+    // Clear the edit field after applying
+    if (hPinEdit) SetWindowTextW(hPinEdit, L"");
+    RefreshTcpStatus();
+    return 0;
+  }
+
+  // Remove authorized device
+  if (id == IDC_MW_TCP_DEVICE_REMOVE && code == BN_CLICKED) {
+    HWND hList = GetDlgItem(hWnd, IDC_MW_TCP_DEVICE_LIST);
+    if (!hList) return 0;
+
+    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+    if (sel < 0) return 0;
+
+    // Get the device ID from column 1
+    wchar_t deviceIdW[256] = {};
+    LVITEMW item = {};
+    item.mask = LVIF_TEXT;
+    item.iItem = sel;
+    item.iSubItem = 1;
+    item.pszText = deviceIdW;
+    item.cchTextMax = 256;
+    ListView_GetItem(hList, &item);
+
+    // Convert wide to narrow for the API
+    char deviceId[256] = {};
+    WideCharToMultiByte(CP_UTF8, 0, deviceIdW, -1, deviceId, 256, NULL, NULL);
+
+    g_tcpServer.RemoveAuthorizedDevice(deviceId);
+    g_tcpServer.DisconnectDevice(deviceId);
+    g_tcpServer.SaveAuthorizedDevices(p->GetConfigIniFile());
+
+    RefreshDeviceList();
+    RefreshTcpStatus();
+    return 0;
+  }
+
+  return -1;
+}
+
+//----------------------------------------------------------------------
+// Notify handler (listview)
+//----------------------------------------------------------------------
+
+LRESULT RemoteWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
+  // Tab switching is handled by base class (TCN_SELCHANGE)
   return -1;
 }
 
@@ -200,6 +378,9 @@ LRESULT RemoteWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
     }
+
+    // Also refresh TCP status on the Authorization tab
+    RefreshTcpStatus();
     return 0;
   }
   return -1;
@@ -234,6 +415,55 @@ void RemoteWindow::RefreshIPCList() {
     SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry);
   } else {
     SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)L"(pipe server not running)");
+  }
+}
+
+//----------------------------------------------------------------------
+// RefreshTcpStatus
+//----------------------------------------------------------------------
+
+void RemoteWindow::RefreshTcpStatus() {
+  HWND hStatus = GetDlgItem(m_hWnd, IDC_MW_TCP_STATUS);
+  if (!hStatus) return;
+
+  wchar_t buf[256];
+  if (g_tcpServer.IsRunning()) {
+    int nClients = g_tcpServer.GetClientCount();
+    swprintf_s(buf, L"Running on port %d  \u2014  %d client%s",
+               g_tcpServer.GetPort(), nClients, nClients == 1 ? L"" : L"s");
+  } else {
+    swprintf_s(buf, L"Stopped");
+  }
+  SetWindowTextW(hStatus, buf);
+}
+
+//----------------------------------------------------------------------
+// RefreshDeviceList
+//----------------------------------------------------------------------
+
+void RemoteWindow::RefreshDeviceList() {
+  HWND hList = GetDlgItem(m_hWnd, IDC_MW_TCP_DEVICE_LIST);
+  if (!hList) return;
+
+  ListView_DeleteAllItems(hList);
+
+  auto devices = g_tcpServer.GetAuthorizedDevices();
+  for (int i = 0; i < (int)devices.size(); i++) {
+    // Convert narrow strings to wide
+    wchar_t nameW[256] = {}, idW[256] = {}, dateW[64] = {};
+    MultiByteToWideChar(CP_UTF8, 0, devices[i].name.c_str(), -1, nameW, 256);
+    MultiByteToWideChar(CP_UTF8, 0, devices[i].id.c_str(), -1, idW, 256);
+    MultiByteToWideChar(CP_UTF8, 0, devices[i].dateAdded.c_str(), -1, dateW, 64);
+
+    LVITEMW item = {};
+    item.mask = LVIF_TEXT;
+    item.iItem = i;
+    item.iSubItem = 0;
+    item.pszText = nameW;
+    ListView_InsertItem(hList, &item);
+
+    ListView_SetItemText(hList, i, 1, idW);
+    ListView_SetItemText(hList, i, 2, dateW);
   }
 }
 

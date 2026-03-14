@@ -587,16 +587,20 @@ public:
 
 protected:
   TOOLWINDOW_META(L"Remote", L"MDropDX12RemoteWnd", L"RemoteWnd",
-                  IDC_MW_REMOTEWIN_PIN, IDC_MW_REMOTEWIN_FONT_PLUS, IDC_MW_REMOTEWIN_FONT_MINUS, 380, 500)
+                  IDC_MW_REMOTEWIN_PIN, IDC_MW_REMOTEWIN_FONT_PLUS, IDC_MW_REMOTEWIN_FONT_MINUS, 520, 600)
 
+  DWORD   GetCommonControlFlags() const override;
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
   LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
   void    DoDestroy() override;
 
 private:
   int m_lastSeenIPCSeq = 0;
   void RefreshIPCList();
+  void RefreshDeviceList();
+  void RefreshTcpStatus();
 };
 
 // ── Concrete subclass: Visual window ──
