@@ -5,11 +5,11 @@
             remote communication, screenshots, audio analysis, misc utilities
 */
 
+#include "tcp_server.h"  // Must be before engine.h — winsock2.h must precede windows.h
 #include "engine.h"
 #include "engine_helpers.h"
 #include "tool_window.h"
 #include "pipe_server.h"
-#include "tcp_server.h"
 #include "audio_capture.h"
 #include <thread>
 #include "utility.h"

@@ -5,12 +5,12 @@
   Tab 1 "Authorization": TCP server status, PIN config, authorized devices list.
 */
 
+#include "tcp_server.h"  // Must be before engine.h — winsock2.h must precede windows.h
 #include "tool_window.h"
 #include "engine.h"
 #include "engine_helpers.h"
 #include "utility.h"
 #include "pipe_server.h"
-#include "tcp_server.h"
 #include <commdlg.h>
 #include <commctrl.h>
 
@@ -572,8 +572,15 @@ void RemoteWindow::RefreshDeviceList() {
     item.pszText = nameW;
     ListView_InsertItem(hList, &item);
 
-    ListView_SetItemText(hList, i, 1, idW);
-    ListView_SetItemText(hList, i, 2, dateW);
+    LVITEMW sub = {};
+    sub.mask = LVIF_TEXT;
+    sub.iItem = i;
+    sub.iSubItem = 1;
+    sub.pszText = idW;
+    SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
+    sub.iSubItem = 2;
+    sub.pszText = dateW;
+    SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
   }
 }
 

@@ -4,11 +4,11 @@
   Contains: Preset loading, browsing, file operations, blend pattern, plasma generation
 */
 
+#include "tcp_server.h"  // Must be before engine.h — winsock2.h must precede windows.h
 #include "engine.h"
 #include "engine_helpers.h"
 #include "json_utils.h"
 #include "pipe_server.h"
-#include "tcp_server.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"

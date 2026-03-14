@@ -135,6 +135,8 @@
 #include <malloc.h>
 #include <crtdbg.h>
 
+#include <winsock2.h>  // Must precede windows.h for tcp_server.h
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
 #include <d3d12.h>
@@ -262,7 +264,6 @@ PipeServer g_pipeServer;
 #include "mdns_advertiser.h"
 TcpServer g_tcpServer;
 MdnsAdvertiser g_mdns;
-thread_local TcpClientConnection* g_respondingTcpClient = nullptr;
 WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
 WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
 std::atomic<int> g_lastIPCMessageSeq{0};  // bumped on each new message
