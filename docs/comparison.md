@@ -102,3 +102,13 @@ Both render the worm-tunnel perspective with colored block walls (blue/purple on
 Both render the fractal tree with autumn-colored leaves (orange-brown to yellow-green gradient, left to right) against a black background with concentric ring ripples emanating from center. The leaf geometry, branching structure, trunk, and internal tile patterns are identical. Audio-reactive ring ripples match in spacing and intensity.
 
 **Verdict:** Visually equivalent.
+
+### 10. martin - axon3
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/10_axon3_mdrop.jpg) | ![Milkwave](images/comparison/10_axon3_milkwave.jpg) |
+
+Both render dark, iridescent organic neural/axon structures with flowing tentacle shapes, chromatic highlights (red, cyan, yellow, purple), and a deep biological aesthetic. The rendering style, color palette, and organic distortion are consistent. Exact frame content differs due to chaotic per-frame animation, but the visual quality and complexity match.
+
+**Verdict:** Visually equivalent.
