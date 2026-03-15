@@ -244,6 +244,22 @@ float2 _safe_acos(float2 x) { return acos(clamp(x, -1.0, 1.0)); }
 float3 _safe_acos(float3 x) { return acos(clamp(x, -1.0, 1.0)); }
 float4 _safe_acos(float4 x) { return acos(clamp(x, -1.0, 1.0)); }
 
+// NaN-safe atan2: DX12 IEEE 754 strict may return NaN for atan2(0, 0).
+// DX9 NVIDIA returns 0. This causes NaN propagation in raymarcher loops
+// where rays pass through the origin axis (e.g. tunnel shaders).
+// Fix: offset x by a tiny epsilon to prevent both args being exactly zero.
+float _safe_atan2(float y, float x) { return atan2(y, x + 1e-20); }
+
+// NaN-safe division denominator: DX9 NVIDIA returns 0 for 0/0 and ±FLT_MAX for x/0.
+// DX12 IEEE 754 returns NaN for 0/0 and ±inf for x/0. NaN propagates through the
+// feedback loop causing black screens. Fix: replace zero denominators with a tiny
+// epsilon so 0/eps=0 (matching DX9 0/0=0) and x/eps=huge (matching DX9 x/0=FLT_MAX).
+// huge*0=0 in IEEE (finite*0=0), matching DX9 NVIDIA inf*0=0.
+float  _safe_denom(float  x) { return x == 0 ? 1e-30 : x; }
+float2 _safe_denom(float2 x) { return float2(x.x == 0 ? 1e-30 : x.x, x.y == 0 ? 1e-30 : x.y); }
+float3 _safe_denom(float3 x) { return float3(x.x == 0 ? 1e-30 : x.x, x.y == 0 ? 1e-30 : x.y, x.z == 0 ? 1e-30 : x.z); }
+float4 _safe_denom(float4 x) { return float4(x.x == 0 ? 1e-30 : x.x, x.y == 0 ? 1e-30 : x.y, x.z == 0 ? 1e-30 : x.z, x.w == 0 ? 1e-30 : x.w); }
+
 #define GetMain(uv) (tex2D(sampler_main,uv).xyz)
 #define GetPixel(uv) (tex2D(sampler_main,uv).xyz)
 #define GetBlur1(uv) (sampler_blur1.Sample(_samp_lc,uv).xyz*_c5.x + _c5.y)
@@ -354,6 +370,7 @@ float3 shiftHSV(float3 c)
 #define pow _safe_pow
 #define asin _safe_asin
 #define acos _safe_acos
+#define atan2 _safe_atan2
 )";
 
 static const char k_warp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
