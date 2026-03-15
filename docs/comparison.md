@@ -42,3 +42,13 @@ Major difference. MDropDX12 renders a bright radial burst filling a large sphere
 This is a comp shader preset with 3D raymarched tunnel geometry. Both renderers produce the same concentric cylindrical tunnel structure with identical blue/orange/peach color gradients, geometric faceting, and spiral depth recession. The central rose-spiral focal point and floating arrow shapes match exactly.
 
 **Verdict:** Visually equivalent.
+
+### 4. Marex + IkeC - Shadow Party Shader Jam 2025
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/04_shadow_party_mdrop.jpg) | ![Milkwave](images/comparison/04_shadow_party_milkwave.jpg) |
+
+MDropDX12 renders completely black. Milkwave shows the intended output: a raymarched scene of reflective green-to-yellow spheres in a recursive lattice with specular highlights and ambient occlusion. This is likely a shader compilation failure or missing texture binding on DX12 — the comp shader may use features that fail silently.
+
+**Verdict:** Broken on MDropDX12 — black screen.
