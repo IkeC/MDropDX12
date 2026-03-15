@@ -29,9 +29,13 @@ Both render the deep blue-purple background, concentric swirl rings, and bright 
 | --------- | -------- |
 | ![MDropDX12](images/comparison/02_re_entry_mdrop.jpg) | ![Milkwave](images/comparison/02_re_entry_milkwave.jpg) |
 
-Both render a dark scene with a faint glow near center. Previously MDropDX12 was much brighter due to alpha accumulation in the feedback loop — textured shapes used `SrcBlendAlpha=ONE` instead of DX9's `SrcBlendAlpha=SRC_ALPHA`, causing excess alpha to compound through shape→warp→shape feedback. Fixed by matching all SPRITEVERTEX PSO alpha blend states to DX9 behavior (no separate alpha blend).
+MDropDX12 renders nearly black while Milkwave shows a bright, audio-reactive cyan starburst. This preset uses two textured non-additive custom shapes (99-sided circles) with aggressive decay (`fDecay=0.5`) and audio-driven zoom (`bass_att`). The shapes are the sole source of brightness — they sample the feedback texture (VS[0]) and blend it back each frame.
 
-**Verdict:** Visually equivalent (fixed).
+**Root cause:** DX9 used `D3DFMT_X8R8G8B8` render targets (no alpha channel — the X bits are ignored). DX12 uses `DXGI_FORMAT_R8G8B8A8_UNORM` which stores and reads back alpha. When shapes render with `SrcAlpha/InvSrcAlpha` blend, they write alpha < 1.0 into VS[1]. The warp pass reads this back, and the low alpha compounds through the feedback loop, progressively darkening the scene. In DX9, alpha was simply never stored, so shapes always blended against an implicit alpha of 1.0.
+
+A previous fix (commit 1d4a961) changed `SrcBlendAlpha` from `ONE` to `SRC_ALPHA` to match DX9 behavior — this was correct for the blend equation but doesn't address the underlying format difference. The real fix needs to either force alpha=1.0 in the render target write mask, or ensure shapes don't accumulate alpha in the feedback loop.
+
+**Verdict:** Open bug — MDropDX12 too dark, no audio reactivity visible. Needs alpha channel handling fix.
 
 ### 3. balkhan + IkeC - Tunnel Cylinders
 
@@ -130,7 +134,7 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | # | Preset | Result |
 |---|--------|--------|
 | 1 | Martin - blue haze | Equivalent |
-| 2 | BrainStain - re entry | Equivalent (fixed — alpha blend feedback amplification) |
+| 2 | BrainStain - re entry | **Open bug** — too dark, RT alpha feedback (DX9 X8R8G8B8 vs DX12 R8G8B8A8) |
 | 3 | balkhan + IkeC - Tunnel Cylinders | Equivalent |
 | 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | Equivalent (fixed — was black, X3005 variable/function shadow) |
 | 5 | Illusion & Rovastar - Clouded Bottle | Equivalent |
@@ -141,4 +145,4 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 10 | martin - axon3 | Equivalent |
 | 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
 
-**All 11 presets** render equivalently. Two presets required fixes: #2 (alpha blend feedback amplification in shape PSOs) and #4 (variable shadowing a user-defined function, HLSL error X3005).
+**10 of 11 presets** render equivalently. One preset (#4) required a fix (variable shadowing a user-defined function, HLSL error X3005). One preset (#2) has an open bug: render target alpha feedback causes progressive darkening due to DX9 `X8R8G8B8` (no alpha) vs DX12 `R8G8B8A8_UNORM` (stores alpha).

@@ -2561,7 +2561,9 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Clear VS[1] to black before warp mesh draws.
     // Prevents stale pixels from the ping-pong swap persisting if the mesh
     // doesn't cover every texel (rounding, edge cases).
-    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    // Alpha=1.0: DX9 used X8R8G8B8 (no alpha). Keep alpha at 1.0 so shapes/waves
+    // that sample VS don't pick up transparent pixels.
+    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
     cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
     SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
