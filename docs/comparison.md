@@ -29,9 +29,9 @@ Both render the deep blue-purple background, concentric swirl rings, and bright 
 | --------- | -------- |
 | ![MDropDX12](images/comparison/02_re_entry_mdrop.jpg) | ![Milkwave](images/comparison/02_re_entry_milkwave.jpg) |
 
-Major difference. MDropDX12 renders a bright radial burst filling a large sphere (yellow-green), while Milkwave shows a nearly black screen with only a faint green glow near center. MDropDX12 appears to be accumulating feedback energy much more aggressively — the warp zoom (0.2) and rotation (1.0) amplify the radial pattern through the feedback loop. Milkwave's output suggests the feedback is decaying faster or the initial waveform injection is weaker.
+Both render a dark scene with a faint glow near center. Previously MDropDX12 was much brighter due to alpha accumulation in the feedback loop — textured shapes used `SrcBlendAlpha=ONE` instead of DX9's `SrcBlendAlpha=SRC_ALPHA`, causing excess alpha to compound through shape→warp→shape feedback. Fixed by matching all SPRITEVERTEX PSO alpha blend states to DX9 behavior (no separate alpha blend).
 
-**Verdict:** Significant difference — MDropDX12 much brighter/more active.
+**Verdict:** Visually equivalent (fixed).
 
 ### 3. balkhan + IkeC - Tunnel Cylinders
 
@@ -130,7 +130,7 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | # | Preset | Result |
 |---|--------|--------|
 | 1 | Martin - blue haze | Equivalent |
-| 2 | BrainStain - re entry | **Different** — MDropDX12 much brighter |
+| 2 | BrainStain - re entry | Equivalent (fixed — alpha blend feedback amplification) |
 | 3 | balkhan + IkeC - Tunnel Cylinders | Equivalent |
 | 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | Equivalent (fixed — was black, X3005 variable/function shadow) |
 | 5 | Illusion & Rovastar - Clouded Bottle | Equivalent |
@@ -141,4 +141,4 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 10 | martin - axon3 | Equivalent |
 | 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
 
-**10 of 11 presets** render equivalently. One preset (#2) shows a brightness/feedback divergence. Preset #4 was fixed — variable shadowing a user-defined function caused HLSL error X3005.
+**All 11 presets** render equivalently. Two presets required fixes: #2 (alpha blend feedback amplification in shape PSOs) and #4 (variable shadowing a user-defined function, HLSL error X3005).
