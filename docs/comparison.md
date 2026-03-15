@@ -82,3 +82,13 @@ Both render deep-sea organic tentacle/tube structures against a dark navy backgr
 Both render a 3D voxel cityscape / cube matrix with rainbow color gradients (green, orange, pink, purple). The recursive cube geometry, reflective surfaces, and lit window patterns are present on both. Frame captures differ in camera angle due to chaotic animation timing, but the same visual elements and color palette are rendered.
 
 **Verdict:** Visually equivalent.
+
+### 8. shifter - escape the worm (Eo.S. + Phat mix)
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/08_escape_worm_mdrop.jpg) | ![Milkwave](images/comparison/08_escape_worm_milkwave.jpg) |
+
+Both render the worm-tunnel perspective with colored block walls (blue/purple on left, teal/green on right) and a central triangular waveform shape with spiral trail. The block mosaic pattern, color gradients, and tunnel depth are consistent. Camera position differs slightly due to animation timing.
+
+**Verdict:** Visually equivalent.
