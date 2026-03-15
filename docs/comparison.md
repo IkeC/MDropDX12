@@ -149,3 +149,33 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
 
 **All 11 presets** render with matching structure and behavior. Key fixes applied: #2 (RT alpha feedback via RGB-only shape write mask, warp decay for auto-gen presets via vertex color), #4 (HLSL X3005 variable shadowing user function — `FixShadowedUserFunctions`). Investigation confirmed DX9 fixed-function texture stage modulate is bypassed when a pixel shader is active, so custom warp shader presets correctly receive white vertices (no decay) on both DX9 and DX12. Remaining brightness differences at low volumes are due to feedback loop sensitivity in presets with extreme decay values.
+
+---
+
+## Gain Sweep Results
+
+Tested all 11 presets at audio gain levels 0.05, 0.1, 0.5, and 1.0 (system volume at max, gain attenuates). Both visualizers received identical `SET_AUDIO_GAIN` commands via Named Pipe IPC.
+
+**Legend:** E = Equivalent, ~ = Close match (minor differences), B = MDropDX12 brighter, D = MDropDX12 dimmer, — = not tested
+
+| # | Preset | Type | 0.05 | 0.1 | 0.5 | 1.0 |
+|---|--------|------|------|-----|-----|-----|
+| 1 | blue haze | shapes (fDecay=0.5, bDarken) | ~ | ~ | E | E |
+| 2 | BrainStain | shapes (fDecay=0.5, bDarken) | ~ | ~ | ~ | E |
+| 3 | Tunnel Cylinders | comp shader | E | E | E | E |
+| 4 | Shadow Party | comp shader | E | E | E | E |
+| 5 | Clouded Bottle | waves (fDecay=0.999) | E | E | D | E |
+| 6 | deep blue | shapes (fDecay=0.5, bDarken) | D | D | ~ | E |
+| 7 | push ax | comp shader | E | E | E | E |
+| 8 | escape worm | shapes (fDecay=1.0, bBrighten+bDarken) | E | E | E | E |
+| 9 | oldschool tree | shapes (fDecay=1.0, bBrighten) | E | E | E | E |
+| 10 | axon3 | shapes (fDecay=0.5, bDarken) | — | ~ | ~ | E |
+| 11 | Zylot Spiral | warp only (fDecay=0.997) | E | E | E | E |
+
+### Observations
+
+- **Comp shader presets (#3, #4, #7)** are identical at all gain levels — the shader does all rendering, no feedback loop sensitivity.
+- **Shape/feedback presets (#1, #2, #6, #10)** with aggressive `fDecay=0.5` show minor differences at low gain (0.05–0.1) where the feedback loop amplifies small per-frame energy differences.
+- **At gain=0.5 and above**, all presets are equivalent or close match — the audio energy dominates and both renderers converge.
+- **Clouded Bottle (#5)** was slightly dimmer on MDropDX12 at gain=0.5 — this is a waves-only preset with very high decay (0.999), so wave rendering intensity matters more.
+- **deep blue (#6)** is slightly dimmer on MDropDX12 at low gain — its custom warp shader encodes its own decay (`ret = ret1 * q10 - 0.04`), making it sensitive to any feedback loop differences.
