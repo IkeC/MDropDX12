@@ -72,3 +72,13 @@ Both render the same dark scene with green waveform threads crossing in an X-pat
 Both render deep-sea organic tentacle/tube structures against a dark navy background with matching cyan-green edge glow and internal blue shading. The tube shapes, branching patterns, and color gradients are consistent. Milkwave's tubes appear slightly thicker due to different window resolution at capture time.
 
 **Verdict:** Visually equivalent.
+
+### 7. martin - push ax
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/07_push_ax_mdrop.jpg) | ![Milkwave](images/comparison/07_push_ax_milkwave.jpg) |
+
+Both render a 3D voxel cityscape / cube matrix with rainbow color gradients (green, orange, pink, purple). The recursive cube geometry, reflective surfaces, and lit window patterns are present on both. Frame captures differ in camera angle due to chaotic animation timing, but the same visual elements and color palette are rendered.
+
+**Verdict:** Visually equivalent.
