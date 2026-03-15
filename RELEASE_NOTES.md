@@ -1,25 +1,17 @@
-# MDropDX12 v2.3.0
+# MDropDX12 v2.4.0
 
-Shader compatibility and rendering completeness release. Fixes preset rendering failures, adds missing DX12 motion vector rendering, and improves shader compilation compatibility for complex raymarching presets.
+Preset compatibility and visual accuracy release. Fixes two rendering bugs that caused presets to render differently from the reference Milkwave Visualizer, and adds a visual comparison document with side-by-side screenshots.
 
 Special thanks to [IkeC](https://github.com/IkeC) for all his brilliant work on [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, testing feedback, and tireless collaboration that continues to drive MDropDX12 forward.
 
 ## Preset Rendering Fixes
 
-- **Fix `_safe_sqrt` to return always-positive values**: Changed from `sign(x)*sqrt(abs(x))` to `sqrt(abs(x))`, matching DX9 SM3.0 native sqrt behavior. The sign-preserving form created singularities in presets like "martin - axon3" where `sqrt(negative_uv)+offset` crossed zero, producing infinity that blew out to white through the feedback loop.
-- **Implement DX12 motion vector rendering**: Ported `DrawMotionVectors()` to DX12 using `PSO_LINE_ALPHABLEND_WFVERTEX`. Motion vectors are now drawn into VS[0] before the warp pass, entering the feedback loop as persistent colored traces. Fixes presets like "Illusion & Rovastar - Clouded Bottle" which appeared too dark because their motion vector lines (the primary light source) were missing.
-- **Fix `[loop]` attribute injection for shader compatibility**: Inject `[loop]` only on `while` loops (raymarching constructs), not `for` loops. Small fixed-count `for` loops caused `error X3531` when marked `[loop]` because the compiler insists on unrolling them. Fixes "LamersAss - The Vortex 2077rmx" and "lara - Flexi ate a magical broccoli" presets which had black screens.
+- **Fix alpha blend feedback amplification in textured shapes**: SPRITEVERTEX PSOs used `SrcBlendAlpha=ONE` instead of `SRC_ALPHA`, causing textured shapes to write excess alpha that compounded through the feedback loop. DX9 has no separate alpha blend, so alpha uses the same factors as color. Fixes "BrainStain - re entry" and other presets with textured shapes appearing much brighter than reference.
+- **Fix HLSL variable shadowing user-defined functions**: Added `FixShadowedUserFunctions()` to rename local variables that reuse user-defined function names (valid in GLSL, rejected by HLSL with error X3005). The existing `FixShadowedBuiltins` only handled intrinsic functions. Fixes "Marex + IkeC - Shadow Party Shader Jam 2025" rendering as black screen.
 
-## Shader Compilation Improvements
+## Documentation
 
-- **Add `D3DCOMPILE_PARTIAL_PRECISION` flag**: Hints to the SM5.0 compiler that lower precision is acceptable, nudging instruction selection closer to SM3.0 hardware behavior for complex raymarching presets.
-- **Add `D3DCOMPILE_PREFER_FLOW_CONTROL` flag**: Hints compiler to prefer dynamic branching over predication, reinforcing `[loop]` injection for SM3.0-like codegen in branching shaders.
-- **Fix D3DXCompileShader flag passthrough**: All caller flags now pass through to D3DCompile instead of only mapping DEBUG and SKIPVALIDATION.
-- **Replace `i = I_MAX` break hack with native `break`**: SM3.0+ supports break natively; the transpiler hack caused incorrect loop behavior with some D3DCompile optimization paths.
-
-## Diagnostics
-
-- **Bytecode disassembly dump**: At verbose log level, writes SM5.0 instruction listing to `log/diag_asm_warp.txt` / `log/diag_asm_comp.txt` via `D3DDisassemble()` for diagnosing codegen differences.
+- **Visual comparison document**: New [docs/comparison.md](https://github.com/shanevbg/MDropDX12/blob/main/docs/comparison.md) with side-by-side screenshots of 11 presets rendered on both MDropDX12 and Milkwave Visualizer. All 11 presets now render equivalently.
 
 ## Installation
 
