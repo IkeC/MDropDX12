@@ -29,13 +29,15 @@ Both render the deep blue-purple background, concentric swirl rings, and bright 
 | --------- | -------- |
 | ![MDropDX12](images/comparison/02_re_entry_mdrop.jpg) | ![Milkwave](images/comparison/02_re_entry_milkwave.jpg) |
 
-MDropDX12 renders nearly black while Milkwave shows a bright, audio-reactive cyan starburst. This preset uses two textured non-additive custom shapes (99-sided circles) with aggressive decay (`fDecay=0.5`) and audio-driven zoom (`bass_att`). The shapes are the sole source of brightness — they sample the feedback texture (VS[0]) and blend it back each frame.
+This preset uses two textured non-additive custom shapes (99-sided circles) with aggressive decay (`fDecay=0.5`) and audio-driven zoom (`bass_att`). Multiple DX9→DX12 differences were found and fixed:
 
-**Root cause:** DX9 used `D3DFMT_X8R8G8B8` render targets (no alpha channel — the X bits are ignored). DX12 uses `DXGI_FORMAT_R8G8B8A8_UNORM` which stores and reads back alpha. When shapes render with `SrcAlpha/InvSrcAlpha` blend, they write alpha < 1.0 into VS[1]. The warp pass reads this back, and the low alpha compounds through the feedback loop, progressively darkening the scene. In DX9, alpha was simply never stored, so shapes always blended against an implicit alpha of 1.0.
+1. **Alpha feedback** (fixed): DX9 used `X8R8G8B8` render targets (no alpha). DX12's `R8G8B8A8_UNORM` stored alpha, which compounded through the feedback loop. Fixed with RGB-only write mask on all shape PSOs.
+2. **Warp decay** (fixed): DX9 applied decay via fixed-function texture stage modulate (`D3DTOP_MODULATE × D3DTA_DIFFUSE`). DX12 warp shader was missing this — now injects `ret *= _vDiffuse.rgb` in the output wrapper, and `GenWarpPShaderText` generates the decay multiply in the shader body for auto-gen presets.
+3. **VS[1] clear alpha** (fixed): Changed from 0.0 to 1.0 to match DX9's implicit alpha.
 
-A previous fix (commit 1d4a961) changed `SrcBlendAlpha` from `ONE` to `SRC_ALPHA` to match DX9 behavior — this was correct for the blend equation but doesn't address the underlying format difference. The real fix needs to either force alpha=1.0 in the render target write mask, or ensure shapes don't accumulate alpha in the feedback loop.
+With these fixes, BrainStain is audio-reactive and shows the correct starburst structure. Brightness level is close but not identical — MDropDX12 runs slightly brighter at moderate volumes. The extreme `fDecay=0.5` amplifies any small difference in the feedback loop. Color differences are expected (time-based wave color modulation cycles independently).
 
-**Verdict:** Open bug — MDropDX12 too dark, no audio reactivity visible. Needs alpha channel handling fix.
+**Verdict:** Close match — structure and reactivity correct, minor brightness difference at some volumes.
 
 ### 3. balkhan + IkeC - Tunnel Cylinders
 
@@ -134,7 +136,7 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | # | Preset | Result |
 |---|--------|--------|
 | 1 | Martin - blue haze | Equivalent |
-| 2 | BrainStain - re entry | **Open bug** — too dark, RT alpha feedback (DX9 X8R8G8B8 vs DX12 R8G8B8A8) |
+| 2 | BrainStain - re entry | Close match — fixed alpha/decay, minor brightness diff at some volumes |
 | 3 | balkhan + IkeC - Tunnel Cylinders | Equivalent |
 | 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | Equivalent (fixed — was black, X3005 variable/function shadow) |
 | 5 | Illusion & Rovastar - Clouded Bottle | Equivalent |
@@ -145,4 +147,4 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 10 | martin - axon3 | Equivalent |
 | 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
 
-**10 of 11 presets** render equivalently. One preset (#4) required a fix (variable shadowing a user-defined function, HLSL error X3005). One preset (#2) has an open bug: render target alpha feedback causes progressive darkening due to DX9 `X8R8G8B8` (no alpha) vs DX12 `R8G8B8A8_UNORM` (stores alpha).
+**All 11 presets** render with matching structure and behavior. Three presets required fixes: #2 (RT alpha feedback + missing warp decay), #4 (variable shadowing user function, HLSL X3005), and #7 (FixShadowedUserFunctions). #2 has a minor brightness difference at some volumes due to extreme `fDecay=0.5` amplifying small feedback loop differences.
