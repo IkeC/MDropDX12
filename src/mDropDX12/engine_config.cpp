@@ -101,7 +101,7 @@ void Engine::AdjustSetting(int id, int direction) {
   if (*pFloat > s.fMax) *pFloat = s.fMax;
   if (id == SET_AUDIO_SENSITIVITY) {
     if (m_fAudioSensitivity <= 0.0f) m_fAudioSensitivity = 1.0f;
-    mdropdx12_audio_sensitivity = (m_fAudioSensitivity <= 1.0f) ? 1.0f : m_fAudioSensitivity;
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   }
   SaveSettingToINI(id);
 }
