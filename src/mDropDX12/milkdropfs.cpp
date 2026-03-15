@@ -2830,11 +2830,18 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Auto-gen warp shaders use vDiffuse.r for per-frame decay (vertex color).
       // Fallback PSO (no shader) also uses vertex color for decay modulation.
       float fDecay = (float)(*m_pState->var_pf_decay);
-      // Decay is applied via vertex color for ALL warp shaders (custom and auto-gen).
-      // DX9 applied decay via fixed-function texture stage modulate (D3DTOP_MODULATE
-      // × D3DTA_DIFFUSE) AFTER the pixel shader — the shader never handled it internally.
-      // DX12 equivalent: output wrapper multiplies ret by _vDiffuse.rgb.
-      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      D3DCOLOR cDecay;
+      if (m_dx12WarpPSO && !m_pState->m_bAutoGenWarpShader) {
+        // Custom warp shader: white vertices (no decay via vertex color).
+        // DX9 fixed-function texture stage modulate is BYPASSED when a pixel shader is active.
+        // Milkwave's WarpedBlit_Shaders does NOT set decay on vertices.
+        // Custom warp shaders that need decay encode it in their own shader math.
+        cDecay = 0xFFFFFFFF;
+      } else {
+        // Auto-gen warp or fallback (no shader): decay via vertex color,
+        // matching DX9's fixed-function D3DTOP_MODULATE × D3DTA_DIFFUSE.
+        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      }
 
       drawWarpMesh(cDecay, false, false);
     }
