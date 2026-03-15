@@ -1602,10 +1602,37 @@ void EngineShell::DrawAndDisplay(int redraw) {
                       rowPtr[x * 4 + 2] = tmp;                // B←R
                     }
                   }
-                  hr = pFrame->WritePixels(screenshotHeight,
-                                           screenshotLayout.Footprint.RowPitch,
-                                           screenshotLayout.Footprint.RowPitch * screenshotHeight,
-                                           (BYTE*)pData);
+
+                  // Scale down to 25% to keep file size small
+                  UINT outWidth = max(1u, screenshotWidth / 4);
+                  UINT outHeight = max(1u, screenshotHeight / 4);
+                  hr = pFrame->SetSize(outWidth, outHeight);
+
+                  IWICBitmap* pBitmap = nullptr;
+                  if (SUCCEEDED(hr))
+                    hr = pFactory->CreateBitmapFromMemory(
+                        screenshotWidth, screenshotHeight,
+                        GUID_WICPixelFormat32bppBGRA,
+                        screenshotLayout.Footprint.RowPitch,
+                        screenshotLayout.Footprint.RowPitch * screenshotHeight,
+                        (BYTE*)pData, &pBitmap);
+
+                  IWICBitmapScaler* pScaler = nullptr;
+                  if (SUCCEEDED(hr))
+                    hr = pFactory->CreateBitmapScaler(&pScaler);
+                  if (SUCCEEDED(hr))
+                    hr = pScaler->Initialize(pBitmap, outWidth, outHeight,
+                                             WICBitmapInterpolationModeLinear);
+                  if (SUCCEEDED(hr)) {
+                    UINT scaledStride = outWidth * 4;
+                    UINT scaledSize = scaledStride * outHeight;
+                    std::vector<BYTE> scaledPixels(scaledSize);
+                    hr = pScaler->CopyPixels(nullptr, scaledStride, scaledSize, scaledPixels.data());
+                    if (SUCCEEDED(hr))
+                      hr = pFrame->WritePixels(outHeight, scaledStride, scaledSize, scaledPixels.data());
+                  }
+                  if (pScaler) pScaler->Release();
+                  if (pBitmap) pBitmap->Release();
                 }
                 if (SUCCEEDED(hr))
                   hr = pFrame->Commit();
