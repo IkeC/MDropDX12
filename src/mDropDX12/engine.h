@@ -251,6 +251,7 @@ typedef struct td_supertext {
   float	fX;
   float fY;
   float	fFontSize;			// [0..100] for custom messages, [0..4] for song titles
+  bool	bExplicitSize = false;	// true if size was explicitly set (skip autosize)
   float fGrowth;			// applies to custom messages only
   int		nFontSizeUsed;		// height IN PIXELS
   int		nTextWidthUsed = 0;	// width IN PIXELS of the rendered text in the title texture

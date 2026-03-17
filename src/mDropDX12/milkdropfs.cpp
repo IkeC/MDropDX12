@@ -314,7 +314,8 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       // accounting for aspect ratio correction and off-center positioning.
       // The visible half-width on screen is: fSizeX * growth * textFillRatio / aspectScale
       // This must fit within: 1.0 - abs(dx), where dx = fX*2-1 (offset from center in clip space).
-      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0
+      if (m_bMessageAutoSize && !m_supertexts[supertextIndex].bExplicitSize
+                              && m_supertexts[supertextIndex].nFontSizeUsed > 0
                               && m_supertexts[supertextIndex].nTextWidthUsed > 0) {
         float maxGrowth = max(1.0f, m_supertexts[supertextIndex].fGrowth);
         float aspectCorr = (float)m_nTexSizeX / ((float)m_nTexSizeY * 4.0f / 3.0f) * 1.4f;

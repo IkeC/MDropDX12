@@ -601,6 +601,7 @@ void Engine::ApplyAnimProfileToSupertext(td_supertext& st, const td_anim_profile
   if (prof.szFontFace[0])
     wcscpy(st.nFontFace, prof.szFontFace);
   st.fFontSize = prof.fFontSize;
+  st.bExplicitSize = true;
   st.bBold = prof.bBold;
   st.bItal = prof.bItal;
   st.nColorR = prof.nColorR;
@@ -2160,6 +2161,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
 
     if (params.find(L"size") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fFontSize = std::stof(params[L"size"]);
+      m_supertexts[nextFreeSupertextIndex].bExplicitSize = true;
     }
     else if (!hasProfile) {
       m_supertexts[nextFreeSupertextIndex].fFontSize = 30.0f;
