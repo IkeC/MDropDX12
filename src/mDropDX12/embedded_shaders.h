@@ -31,7 +31,7 @@ float4 _c14 = float4(0.5, 0.5, 0, 0); // mouse
 float4 _c15 = float4(0, 0, 0, 0); // bass_smooth, mid_smooth, treb_smooth, vol_smooth
 float4 _c16 = float4(1, 0, 1, 0); // vis_intensity, vis_shift, vis_version
 float4 _c17 = float4(0, 0, 0, 0); // colshift_hue, colshift_saturation, colshift_brightness
-float4 _c18 = float4(1, 0, 0, 0); // gamma_adj (default 1.0 = no change)
+float4 _c18 = float4(1, 0, 0, 0); // gamma_adj, echo_alpha, echo_inv_zoom, echo_orient
 float4 _c19 = float4(0, 0, 0, 0); // iDate: year, month (0-11), day, seconds since midnight
 
 float4 _qa; // q vars bank 1 [q1-q4]
@@ -106,6 +106,9 @@ float4x3 rot_rand4;
 #define colshift_brightness _c17.z
 
 #define gamma_adj _c18.x
+#define echo_alpha_param  _c18.y
+#define echo_inv_zoom     _c18.z
+#define echo_orient_param _c18.w
 
 #define idate _c19
 #define idate_year _c19.x

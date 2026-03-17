@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// MCP Server for MDropDX12 / Milkwave / BeatDrop Named Pipe IPC
+// MCP Server for MDropDX12 / Milkwave Named Pipe IPC
 // Lets Claude Code interact with running visualizers.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -33,23 +33,36 @@ function getProcessNames(pids) {
 function classifyPipe(p) {
   const exe = (p.exe || '').toLowerCase();
   if (exe.includes('mdropdx12')) return 'mdrop';
-  if (exe.includes('beatdrop')) return 'beatdrop';
   return 'milkwave';
 }
 
 // Human-readable label for a pipe type
 function pipeLabel(type) {
   if (type === 'mdrop') return 'MDropDX12';
-  if (type === 'beatdrop') return 'BeatDrop';
   return 'Milkwave Visualizer';
+}
+
+// List named pipes matching a prefix. Uses fs.readdirSync with PowerShell fallback.
+function listPipes(prefix) {
+  const pipeDir = '//./pipe/';
+  try {
+    return fs.readdirSync(pipeDir).filter(name => name.startsWith(prefix));
+  } catch {
+    // fs.readdirSync('//./pipe/') can fail on some Windows configs — fallback to PowerShell
+    try {
+      const output = execSync(
+        `powershell -NoProfile -Command "[IO.Directory]::GetFiles('\\\\.\\pipe\\','${prefix}*') | ForEach-Object { [IO.Path]::GetFileName($_) }"`,
+        { encoding: 'utf8', timeout: 5000 }
+      );
+      return output.split(/\r?\n/).filter(Boolean);
+    } catch { return []; }
+  }
 }
 
 function discoverPipes(target = 'auto') {
   try {
     const pipeDir = '//./pipe/';
-    // All visualizers (MDropDX12, Milkwave, BeatDrop) use Milkwave_<PID> pipes
-    const pipes = fs.readdirSync(pipeDir)
-      .filter(name => name.startsWith('Milkwave_'))
+    const pipes = listPipes('Milkwave_')
       .map(name => {
         const match = name.match(/Milkwave_(\d+)/);
         return match ? { path: pipeDir + name, pid: parseInt(match[1]), exe: null, type: null } : null;
@@ -75,9 +88,6 @@ function discoverPipes(target = 'auto') {
     } else if (target === 'milkwave') {
       const filtered = pipes.filter(p => p.type === 'milkwave');
       if (filtered.length > 0) return filtered;
-    } else if (target === 'beatdrop') {
-      const filtered = pipes.filter(p => p.type === 'beatdrop');
-      if (filtered.length > 0) return filtered;
     } else if (pipes.length > 1) {
       // Auto mode: prefer MDropDX12
       const mdropPipes = pipes.filter(p => p.type === 'mdrop');
@@ -90,8 +100,17 @@ function discoverPipes(target = 'auto') {
   }
 }
 
-function sendPipeMessage(pipePath, message, expectResponse = false) {
+function sendPipeMessage(pipePath, message, expectResponse = false, overallTimeoutMs = 5000) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+    // Overall timeout to prevent hanging
+    const overallTimer = setTimeout(() => {
+      try { client.destroy(); } catch {}
+      settle(reject, new Error(`Pipe timeout after ${overallTimeoutMs}ms`));
+    }, overallTimeoutMs);
+
     const client = net.connect(pipePath, () => {
       // Send as UTF-16LE with null terminator
       const sendBuf = Buffer.from(message + '\0', 'utf16le');
@@ -99,7 +118,7 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
 
       if (!expectResponse) {
         // Pipe is message-mode — write completes atomically, minimal flush needed
-        setTimeout(() => { client.end(); resolve('OK'); }, 10);
+        setTimeout(() => { client.end(); clearTimeout(overallTimer); settle(resolve, 'OK'); }, 10);
         return;
       }
 
@@ -109,10 +128,11 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
 
       const finish = () => {
         if (timer) clearTimeout(timer);
+        clearTimeout(overallTimer);
         client.end();
         // Decode UTF-16LE, strip null terminators
         const text = recvBuf.toString('utf16le').replace(/\0/g, '');
-        resolve(text);
+        settle(resolve, text);
       };
 
       client.on('data', (chunk) => {
@@ -136,7 +156,8 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
     });
 
     client.on('error', (err) => {
-      reject(new Error(`Pipe connection failed: ${err.message}`));
+      clearTimeout(overallTimer);
+      settle(reject, new Error(`Pipe connection failed: ${err.message}`));
     });
   });
 }
@@ -156,6 +177,61 @@ function sendPipeBatch(pipePath, messages) {
   });
 }
 
+// ── Restart helpers ──
+
+// Get the exe path for a given PID
+function getExePath(pid) {
+  try {
+    const output = execSync(
+      `wmic process where "ProcessId=${pid}" get ExecutablePath /value`,
+      { encoding: 'utf8', timeout: 5000 }
+    );
+    const match = output.match(/ExecutablePath=(.+)/);
+    return match ? match[1].trim() : null;
+  } catch { return null; }
+}
+
+// Restart a visualizer: kill the process, relaunch its exe, wait for its pipe to appear
+// Returns the new pipe entry or null on failure
+async function restartVisualizer(pipe, log) {
+  const exePath = getExePath(pipe.pid);
+  if (!exePath) {
+    log(`Could not find exe path for PID ${pipe.pid}`);
+    return null;
+  }
+
+  log(`Restarting ${pipeLabel(pipe.type)} (PID ${pipe.pid})...`);
+
+  // Kill the old process
+  try { execSync(`taskkill /PID ${pipe.pid} /F`, { timeout: 5000 }); } catch { /* may already be dead */ }
+
+  // Wait a moment for the process to fully exit
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Relaunch from its own directory
+  const exeDir = path.dirname(exePath);
+  try {
+    execSync(`start "" "${exePath}"`, { cwd: exeDir, timeout: 5000, shell: true });
+  } catch (e) {
+    log(`Failed to relaunch: ${e.message}`);
+    return null;
+  }
+
+  // Poll for the new pipe to appear (up to 10 seconds)
+  const targetType = pipe.type;
+  for (let elapsed = 0; elapsed < 10000; elapsed += 500) {
+    await new Promise(r => setTimeout(r, 500));
+    const pipes = discoverPipes(targetType);
+    if (pipes.length > 0 && pipes[0].pid !== pipe.pid) {
+      log(`${pipeLabel(targetType)} restarted (new PID ${pipes[0].pid})`);
+      return pipes[0];
+    }
+  }
+
+  log(`${pipeLabel(targetType)} did not reconnect within timeout`);
+  return null;
+}
+
 // ── Cached connection ──
 
 let cachedPipePath = null;
@@ -173,7 +249,7 @@ function findPipe() {
 
   const pipes = discoverPipes();
   if (pipes.length === 0) {
-    throw new Error('No running visualizer found (MDropDX12, Milkwave Visualizer, or BeatDrop). Start a visualizer first.');
+    throw new Error('No running visualizer found (MDropDX12 or Milkwave Visualizer). Start a visualizer first.');
   }
 
   cachedPipePath = pipes[0].path;
@@ -300,16 +376,16 @@ const server = new McpServer({
 // Tool: Connect / discover
 server.tool(
   'mdrop_connect',
-  'Discover and connect to a running visualizer. Use target to pick which one: "mdrop" (MDropDX12), "milkwave" (Milkwave Visualizer), "beatdrop" (BeatDrop), or "auto" (prefer MDropDX12). Lists all found instances.',
+  'Discover and connect to a running visualizer. Use target to pick which one: "mdrop" (MDropDX12), "milkwave" (Milkwave Visualizer), or "auto" (prefer MDropDX12). Lists all found instances.',
   {
-    target: z.enum(['auto', 'mdrop', 'milkwave', 'beatdrop']).optional()
-      .describe('Which visualizer to connect to: "mdrop", "milkwave", "beatdrop", or "auto" (default, prefers MDropDX12)'),
+    target: z.enum(['auto', 'mdrop', 'milkwave']).optional()
+      .describe('Which visualizer to connect to: "mdrop", "milkwave", or "auto" (default, prefers MDropDX12)'),
   },
   async ({ target }) => {
     // Always discover ALL pipes first to show what's available
     const allPipes = discoverPipes('all');
     if (allPipes.length === 0) {
-      return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12, Milkwave Visualizer, or BeatDrop). Start a visualizer first.' }] };
+      return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12 or Milkwave Visualizer). Start a visualizer first.' }] };
     }
 
     // Now filter by target preference
@@ -497,9 +573,67 @@ function waitForFile(filePath, timeoutMs = 3000) {
   });
 }
 
+// Helper: send a command and wait for a response matching a prefix, ignoring unrelated broadcasts.
+// The pipe broadcasts to ALL clients, so a capture connection may receive stale broadcasts
+// (e.g. DEVICE_VOLUME=...) before the actual CAPTURE_PATH= response arrives.
+function sendAndWaitFor(pipePath, message, prefix, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+    const overallTimer = setTimeout(() => {
+      try { client.destroy(); } catch {}
+      settle(reject, new Error(`Timed out waiting for ${prefix} response`));
+    }, timeoutMs);
+
+    const client = net.connect(pipePath, () => {
+      const sendBuf = Buffer.from(message + '\0', 'utf16le');
+      client.write(sendBuf);
+
+      let recvBuf = Buffer.alloc(0);
+
+      client.on('data', (chunk) => {
+        recvBuf = Buffer.concat([recvBuf, chunk]);
+
+        // Split on null terminators — each message is null-terminated UTF-16LE
+        while (recvBuf.length >= 2) {
+          // Find first null wchar (two zero bytes at even offset)
+          let nullIdx = -1;
+          for (let i = 0; i < recvBuf.length - 1; i += 2) {
+            if (recvBuf[i] === 0 && recvBuf[i + 1] === 0) {
+              nullIdx = i;
+              break;
+            }
+          }
+          if (nullIdx < 0) break; // no complete message yet
+
+          // Extract one message (everything before the null)
+          const msgBuf = recvBuf.subarray(0, nullIdx);
+          recvBuf = recvBuf.subarray(nullIdx + 2); // skip past the null wchar
+
+          const text = msgBuf.toString('utf16le');
+          if (text.startsWith(prefix)) {
+            // Found the response we're waiting for
+            clearTimeout(overallTimer);
+            client.end();
+            settle(resolve, text);
+            return;
+          }
+          // else: unrelated broadcast — discard and keep reading
+        }
+      });
+    });
+
+    client.on('error', (err) => {
+      clearTimeout(overallTimer);
+      settle(reject, new Error(`Pipe connection failed: ${err.message}`));
+    });
+  });
+}
+
 // Helper: send CAPTURE command and parse CAPTURE_PATH response
 async function captureWithPath(pipePath) {
-  const response = await sendPipeMessage(pipePath, 'CAPTURE', true);
+  const response = await sendAndWaitFor(pipePath, 'CAPTURE', 'CAPTURE_PATH=', 5000);
   // Parse CAPTURE_PATH=<full path> from response
   const match = response.match(/CAPTURE_PATH=(.+)/);
   if (!match || match[1] === 'ERROR') {
@@ -840,20 +974,76 @@ server.tool(
         }
       }
 
-      // Load preset on both simultaneously if specified (single connection per pipe)
+      // --- Sync audio device: query MDropDX12's active device, set it on Milkwave ---
+      try {
+        const devResp = await sendPipeMessage(mdropPipe.path, 'GET_AUDIO_DEVICES', true);
+        const activeMatch = devResp.match(/\|active=(.+)/);
+        if (activeMatch) {
+          const activeDevice = activeMatch[1].trim();
+          const devCmd = `DEVICE=OUT|${activeDevice}`;
+          const devResult = await sendPipeMessage(milkwavePipe.path, devCmd, true).catch(e => e.message);
+          results.push({ type: 'text', text: `Audio sync: ${devResult}` });
+        }
+      } catch { /* best effort — don't fail the compare */ }
+
+      // Helper: verify preset is loaded by polling STATE until PRESET= contains the expected filename
+      const verifyPresetLoaded = async (pipePath, presetBasename, timeoutMs = 8000) => {
+        const target = presetBasename.toLowerCase();
+        for (let elapsed = 0; elapsed < timeoutMs; elapsed += 500) {
+          try {
+            const state = await sendPipeMessage(pipePath, 'STATE', true);
+            const match = state.match(/PRESET=([^\r\n|]+)/);
+            if (match && path.basename(match[1].trim()).toLowerCase() === target) return true;
+          } catch { /* pipe may be recovering */ }
+          await new Promise(r => setTimeout(r, 500));
+        }
+        return false;
+      };
+
+      // Helper: attempt capture, restart visualizer on failure, retry once
+      const captureWithRetry = async (pipe, label, logLines) => {
+        let currentPipe = pipe;
+        const result = await captureWithPath(currentPipe.path).catch(e => ({ error: e.message }));
+        if (!result.error && result.filePath) return { ...result, pipe: currentPipe };
+
+        // Capture failed — restart and retry
+        logLines.push(`${label}: capture failed (${result.error}), restarting...`);
+        const newPipe = await restartVisualizer(currentPipe, (msg) => logLines.push(msg));
+        if (!newPipe) return { error: `restart failed for ${label}`, pipe: currentPipe };
+
+        // If we had a preset, reload it on the restarted instance
+        if (preset) {
+          const resolvedPreset = await resolvePresetPath(preset, newPipe.path);
+          await sendPipeMessage(newPipe.path, `PRESET=${resolvedPreset}`, false).catch(() => {});
+          await verifyPresetLoaded(newPipe.path, path.basename(resolvedPreset), 8000);
+        }
+
+        const retry = await captureWithPath(newPipe.path).catch(e => ({ error: e.message }));
+        return { ...retry, pipe: newPipe };
+      };
+
+      // Load preset on both simultaneously if specified
       if (preset) {
-        // Resolve bare filename using MDropDX12's preset dir — use the SAME path for both
         const resolvedPreset = await resolvePresetPath(preset, mdropPipe.path);
         const presetCmd = `PRESET=${resolvedPreset}`;
         await Promise.all([
-          sendPipeBatch(mdropPipe.path, [presetCmd]),
-          sendPipeBatch(milkwavePipe.path, [presetCmd]),
+          sendPipeMessage(mdropPipe.path, presetCmd, false).catch(() => {}),
+          sendPipeMessage(milkwavePipe.path, presetCmd, false).catch(() => {}),
         ]);
-        results.push({ type: 'text', text: `Loaded "${preset}" on both visualizers\n  Path: ${resolvedPreset}` });
+        results.push({ type: 'text', text: `Loading "${preset}" on both visualizers...\n  Path: ${resolvedPreset}` });
 
-        // Wait for preset to settle
+        // Wait for initial settle time
         const waitMs = ((delay || 2) * 1000);
         await new Promise(r => setTimeout(r, waitMs));
+
+        // Verify preset is loaded on both before capturing
+        const presetBase = path.basename(resolvedPreset);
+        const [mdropReady, mwReady] = await Promise.all([
+          verifyPresetLoaded(mdropPipe.path, presetBase, 8000),
+          verifyPresetLoaded(milkwavePipe.path, presetBase, 8000),
+        ]);
+        if (!mdropReady) results.push({ type: 'text', text: `Warning: ${primaryLabel} may not have loaded the preset` });
+        if (!mwReady) results.push({ type: 'text', text: `Warning: ${secondaryLabel} may not have loaded the preset` });
       }
 
       // Query state from both simultaneously
@@ -861,21 +1051,25 @@ server.tool(
         sendPipeMessage(mdropPipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
         sendPipeMessage(milkwavePipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
       ]);
-      // Truncate state text to avoid bloating the response
       const maxStateLen = 1000;
       const truncState = (s) => s.length > maxStateLen ? s.slice(0, maxStateLen) + '\n...(truncated)' : s;
       results.push({ type: 'text', text: `--- ${primaryLabel} State ---\n${truncState(mdropState)}` });
       results.push({ type: 'text', text: `--- ${secondaryLabel} State ---\n${truncState(milkwaveState)}` });
 
-      // Capture from both simultaneously — each responds with CAPTURE_PATH=<full path>
+      // Capture from both with restart-on-failure
+      const captureLog = [];
       const targets = [
         { pipe: mdropPipe, label: primaryLabel, tag: mdropPipe.type },
         { pipe: milkwavePipe, label: secondaryLabel, tag: milkwavePipe.type },
       ];
-      const captures = await Promise.all(targets.map(async (t) => {
-        const result = await captureWithPath(t.pipe.path).catch(e => ({ error: e.message }));
-        return { ...t, ...result };
-      }));
+      const captures = [];
+      for (const t of targets) {
+        const result = await captureWithRetry(t.pipe, t.label, captureLog);
+        captures.push({ ...t, ...result });
+      }
+      if (captureLog.length > 0) {
+        results.push({ type: 'text', text: `Capture log:\n  ${captureLog.join('\n  ')}` });
+      }
 
       // Generate timestamp for comparison filenames
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -914,8 +1108,8 @@ server.tool(
   {
     command: z.string().describe('Raw pipe command (e.g. "SIGNAL|NEXT_PRESET", "SET_AUDIO_GAIN=2.0")'),
     expect_response: z.boolean().optional().describe('Whether to wait for a response (default: false)'),
-    target: z.enum(['auto', 'all', 'mdrop', 'milkwave', 'beatdrop']).optional().default('auto')
-      .describe('Target: "auto" (default, prefers MDropDX12), "all" (all running), "mdrop", "milkwave", or "beatdrop"'),
+    target: z.enum(['auto', 'all', 'mdrop', 'milkwave']).optional().default('auto')
+      .describe('Target: "auto" (default, prefers MDropDX12), "all" (all running), "mdrop", or "milkwave"'),
   },
   async ({ command, expect_response, target }) => {
     try {

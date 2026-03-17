@@ -7513,7 +7513,18 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (h[15]) pCT->SetVector(lpDevice, h[15], &D3DXVECTOR4(mysound.smooth[0], mysound.smooth[1], mysound.smooth[2], 0.3333f * (mysound.smooth[0], mysound.smooth[1], mysound.smooth[2])));
   if (h[16]) pCT->SetVector(lpDevice, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
   if (h[17]) pCT->SetVector(lpDevice, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));
-  if (h[18]) pCT->SetVector(lpDevice, h[18], &D3DXVECTOR4((float)(*pState->var_pf_gamma), 0, 0, 0));
+  if (h[18]) {
+    float ve_alpha = (float)(*pState->var_pf_echo_alpha);
+    float ve_zoom  = (float)(*pState->var_pf_echo_zoom);
+    int   ve_orient = (int)(*pState->var_pf_echo_orient) % 4;
+    float inv_zoom = (ve_zoom > 0.001f) ? (1.0f / ve_zoom) : 1.0f;
+    pCT->SetVector(lpDevice, h[18], &D3DXVECTOR4(
+        (float)(*pState->var_pf_gamma),
+        ve_alpha,
+        inv_zoom,
+        (float)ve_orient
+    ));
+  }
   if (h[19]) {
     SYSTEMTIME st;
     GetLocalTime(&st);

@@ -1238,7 +1238,7 @@ public:
   char        m_szBlurPSX[32768];
   char        m_szBlurPSY[32768];
   void        GenWarpPShaderText(char* szShaderText, bool bWrap);
-  void        GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert);
+  void        GenCompPShaderText(char* szShaderText, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert);
 
   //====[ 2. methods added: ]=====================================================================================
 

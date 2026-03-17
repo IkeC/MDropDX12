@@ -2152,7 +2152,7 @@ void Engine::GenWarpPShaderText(char* szShaderText, bool bWrap) {
   p += sprintf(p, "}%c", LF);
 }
 
-void Engine::GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert) {
+void Engine::GenCompPShaderText(char* szShaderText, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert) {
   // find the pixel shader body and replace it with custom code.
 
   lstrcpyA(szShaderText, m_szDefaultCompPShaderText);
@@ -2163,20 +2163,21 @@ void Engine::GenCompPShaderText(char* szShaderText, float brightness, float ve_a
   p++;
   p += sprintf(p, "%c", 1);
 
-  if (ve_alpha > 0.001f) {
-    int orient_x = (ve_orient % 2) ? -1 : 1;
-    int orient_y = (ve_orient >= 2) ? -1 : 1;
-    p += sprintf(p, "    float2 uv_echo = (uv - 0.5)*%.3f*float2(%d,%d) + 0.5;%c", 1.0f / ve_zoom, orient_x, orient_y, LF);
-    p += sprintf(p, "    ret = lerp( tex2D(sampler_main, uv).xyz, %c", LF);
-    p += sprintf(p, "                tex2D(sampler_main, uv_echo).xyz, %c", LF);
-    p += sprintf(p, "                %.2f %c", ve_alpha, LF);
-    p += sprintf(p, "              ); //video echo%c", LF);
-    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
-  }
-  else {
-    p += sprintf(p, "    ret = tex2D(sampler_main, uv).xyz;%c", LF);
-    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
-  }
+  // Video echo: read params from _c18 uniforms (updated every frame in ApplyShaderParams)
+  p += sprintf(p, "    float ve_a = echo_alpha_param;%c", LF);
+  p += sprintf(p, "    float ve_iz = echo_inv_zoom;%c", LF);
+  p += sprintf(p, "    int ve_o = (int)echo_orient_param;%c", LF);
+  p += sprintf(p, "    if (ve_a > 0.001) {%c", LF);
+  p += sprintf(p, "        int ox = (ve_o %% 2) ? -1 : 1;%c", LF);
+  p += sprintf(p, "        int oy = (ve_o >= 2) ? -1 : 1;%c", LF);
+  p += sprintf(p, "        float2 uv_echo = (uv - 0.5) * ve_iz * float2(ox, oy) + 0.5;%c", LF);
+  p += sprintf(p, "        ret = lerp(tex2D(sampler_main, uv).xyz,%c", LF);
+  p += sprintf(p, "                   tex2D(sampler_main, uv_echo).xyz,%c", LF);
+  p += sprintf(p, "                   ve_a); //video echo%c", LF);
+  p += sprintf(p, "    } else {%c", LF);
+  p += sprintf(p, "        ret = tex2D(sampler_main, uv).xyz;%c", LF);
+  p += sprintf(p, "    }%c", LF);
+  p += sprintf(p, "    ret *= gamma_adj; //gamma%c", LF);
   if (hue_shader >= 1.0f)
     p += sprintf(p, "    ret *= hue_shader; //old hue shader effect%c", LF);
   else if (hue_shader > 0.001f)
