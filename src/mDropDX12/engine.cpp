@@ -1200,12 +1200,9 @@ void Engine::MyPreInitialize() {
   m_nMaxBytes = 2000000000;
 
 #ifdef _DEBUG
-  m_dwShaderFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY
-                  | D3DCOMPILE_PARTIAL_PRECISION | D3DCOMPILE_PREFER_FLOW_CONTROL;
+  m_dwShaderFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 #else
-  m_dwShaderFlags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY
-                  | D3DCOMPILE_PARTIAL_PRECISION    // Hint: lower precision OK (closer to SM3.0 hardware)
-                  | D3DCOMPILE_PREFER_FLOW_CONTROL; // Hint: prefer dynamic branching (SM3.0 couldn't predicate)
+  m_dwShaderFlags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 #endif
   //m_pFragmentLinker = NULL;
   //m_pCompiledFragments = NULL;
@@ -1449,7 +1446,7 @@ void Engine::MyReadConfig() {
   m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
   if (m_fAudioSensitivity <= 0.0f) m_fAudioSensitivity = 1.0f;  // migrate old -1/-2 adaptive settings; 0 is invalid
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  mdropdx12_audio_sensitivity = (m_fAudioSensitivity <= 1.0f) ? 1.0f : m_fAudioSensitivity;
+  mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);

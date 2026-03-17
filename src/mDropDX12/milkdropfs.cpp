@@ -314,7 +314,8 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       // accounting for aspect ratio correction and off-center positioning.
       // The visible half-width on screen is: fSizeX * growth * textFillRatio / aspectScale
       // This must fit within: 1.0 - abs(dx), where dx = fX*2-1 (offset from center in clip space).
-      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0
+      if (m_bMessageAutoSize && !m_supertexts[supertextIndex].bExplicitSize
+                              && m_supertexts[supertextIndex].nFontSizeUsed > 0
                               && m_supertexts[supertextIndex].nTextWidthUsed > 0) {
         float maxGrowth = max(1.0f, m_supertexts[supertextIndex].fGrowth);
         float aspectCorr = (float)m_nTexSizeX / ((float)m_nTexSizeY * 4.0f / 3.0f) * 1.4f;
@@ -2830,11 +2831,18 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Auto-gen warp shaders use vDiffuse.r for per-frame decay (vertex color).
       // Fallback PSO (no shader) also uses vertex color for decay modulation.
       float fDecay = (float)(*m_pState->var_pf_decay);
-      // Decay is applied via vertex color for ALL warp shaders (custom and auto-gen).
-      // DX9 applied decay via fixed-function texture stage modulate (D3DTOP_MODULATE
-      // × D3DTA_DIFFUSE) AFTER the pixel shader — the shader never handled it internally.
-      // DX12 equivalent: output wrapper multiplies ret by _vDiffuse.rgb.
-      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      D3DCOLOR cDecay;
+      if (m_dx12WarpPSO && !m_pState->m_bAutoGenWarpShader) {
+        // Custom warp shader: white vertices (no decay via vertex color).
+        // DX9 fixed-function texture stage modulate is BYPASSED when a pixel shader is active.
+        // Milkwave's WarpedBlit_Shaders does NOT set decay on vertices.
+        // Custom warp shaders that need decay encode it in their own shader math.
+        cDecay = 0xFFFFFFFF;
+      } else {
+        // Auto-gen warp or fallback (no shader): decay via vertex color,
+        // matching DX9's fixed-function D3DTOP_MODULATE × D3DTA_DIFFUSE.
+        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      }
 
       drawWarpMesh(cDecay, false, false);
     }
@@ -7505,7 +7513,18 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (h[15]) pCT->SetVector(lpDevice, h[15], &D3DXVECTOR4(mysound.smooth[0], mysound.smooth[1], mysound.smooth[2], 0.3333f * (mysound.smooth[0], mysound.smooth[1], mysound.smooth[2])));
   if (h[16]) pCT->SetVector(lpDevice, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
   if (h[17]) pCT->SetVector(lpDevice, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));
-  if (h[18]) pCT->SetVector(lpDevice, h[18], &D3DXVECTOR4((float)(*pState->var_pf_gamma), 0, 0, 0));
+  if (h[18]) {
+    float ve_alpha = (float)(*pState->var_pf_echo_alpha);
+    float ve_zoom  = (float)(*pState->var_pf_echo_zoom);
+    int   ve_orient = (int)(*pState->var_pf_echo_orient) % 4;
+    float inv_zoom = (ve_zoom > 0.001f) ? (1.0f / ve_zoom) : 1.0f;
+    pCT->SetVector(lpDevice, h[18], &D3DXVECTOR4(
+        (float)(*pState->var_pf_gamma),
+        ve_alpha,
+        inv_zoom,
+        (float)ve_orient
+    ));
+  }
   if (h[19]) {
     SYSTEMTIME st;
     GetLocalTime(&st);

@@ -48,3 +48,4 @@ src/settings.ini
 src/messages.ini
 .worktrees/
 
+tools/comparison/

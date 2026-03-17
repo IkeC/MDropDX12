@@ -265,6 +265,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_RESET_WINDOW         2110   // Reset Window Size button (General tab)
 #define IDC_MW_FONT_PLUS            2111   // Font size + button (General tab)
 #define IDC_MW_FONT_MINUS           2112   // Font size - button (General tab)
+#define IDC_MW_MESH_SIZE            2113   // Mesh size slider (Visual tab)
+#define IDC_MW_MESH_SIZE_LABEL      2114   // Mesh size value label
+#define IDC_MW_TEX_BITS             2115   // Texture bits combo (Visual tab)
 
 // -- GPU Protection controls (Visual tab) --
 #define IDC_MW_GPU_MAX_INST         2100

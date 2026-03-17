@@ -222,6 +222,8 @@ ToolWindows can be opened from the **Tools tab** in Settings, via hotkeys, or fr
 - **Opacity**: Window transparency (0-100%)
 - **Render Quality**: Internal render buffer scale (0-100%). A low quality yields a pixellated retro look. Quality setting is ignored when fixed Spout resolution is used.
 - **Auto Quality**: Automatically adjusts quality to maintain similar perceived quality on different window sizes
+- **Mesh Size**: Warp/shape mesh vertex density (8–192, step 8). Higher values produce smoother curves and distortion effects. Default: 64. Also settable via `nMeshSize` in `settings.ini`.
+- **Texture Precision**: Internal render target bit depth — 8-bit (default), 16-bit float, or 32-bit float. Higher precision reduces color banding in dark gradients and improves feedback loop accuracy at the cost of GPU memory and bandwidth. Also settable via `nTexBitsPerCh` in `settings.ini`.
 - **Time/Frame/FPS Factor**: Change internal time, FPS, and frame counters sent to presets. This may speed up, slow down, or otherwise change preset behavior depending on how the preset uses these variables.
 - **Vis Intensity / Shift / Version**: Custom preset variable overrides (see Preset Variables below)
 - **GPU Protection**: Max shape instances, skip heavy presets, heavy threshold

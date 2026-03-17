@@ -736,7 +736,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             if (p->m_fAudioSensitivity <= 0.0f) p->m_fAudioSensitivity = 1.0f;
             if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
             extern float mdropdx12_audio_sensitivity;
-            mdropdx12_audio_sensitivity = (p->m_fAudioSensitivity <= 1.0f) ? 1.0f : p->m_fAudioSensitivity;
+            mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
             p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
             return 0;
         }

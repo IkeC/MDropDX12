@@ -1,17 +1,34 @@
-# MDropDX12 v2.4.0
+# MDropDX12 v2.5.0
 
-Preset compatibility and visual accuracy release. Fixes two rendering bugs that caused presets to render differently from the reference Milkwave Visualizer, and adds a visual comparison document with side-by-side screenshots.
+Rendering accuracy, quality controls, and stability release. Adds NaN-safe atan2, UI-accessible mesh size and texture precision controls, media key support, Windows volume control via IPC, and resize crash fixes from community PRs.
 
 Special thanks to [IkeC](https://github.com/IkeC) for all his brilliant work on [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, testing feedback, and tireless collaboration that continues to drive MDropDX12 forward.
 
 ## Preset Rendering Fixes
 
-- **Fix alpha blend feedback amplification in textured shapes**: SPRITEVERTEX PSOs used `SrcBlendAlpha=ONE` instead of `SRC_ALPHA`, causing textured shapes to write excess alpha that compounded through the feedback loop. DX9 has no separate alpha blend, so alpha uses the same factors as color. Fixes "BrainStain - re entry" and other presets with textured shapes appearing much brighter than reference.
-- **Fix HLSL variable shadowing user-defined functions**: Added `FixShadowedUserFunctions()` to rename local variables that reuse user-defined function names (valid in GLSL, rejected by HLSL with error X3005). The existing `FixShadowedBuiltins` only handled intrinsic functions. Fixes "Marex + IkeC - Shadow Party Shader Jam 2025" rendering as black screen.
+- **NaN-safe atan2**: `atan2(0, 0)` returns NaN on DX12 (DX9 NVIDIA returns 0). Added `_safe_atan2(y, x)` wrapper that prevents NaN at the origin — fixes persistent black holes in tunnel/radial presets.
+- **Safe denominator intrinsics**: Added `_safe_normalize()` overloads that guard against zero-length vectors, preventing NaN propagation in raymarching and particle presets.
+- **Fix message SIZE parameter**: Messages with explicit `SIZE=N` parameter now respect the specified size instead of always autosizing.
 
-## Documentation
+## New Features
 
-- **Visual comparison document**: New [docs/comparison.md](https://github.com/shanevbg/MDropDX12/blob/main/docs/comparison.md) with side-by-side screenshots of 11 presets rendered on both MDropDX12 and Milkwave Visualizer. All 11 presets now render equivalently.
+- **Mesh Size control** (Visual window): Slider to adjust warp/shape mesh vertex density (8–192, step 8). Higher values produce smoother curves and distortion effects. Previously only changeable via `settings.ini`.
+- **Texture Precision control** (Visual window): Combo box to select internal render target bit depth — 8-bit (default), 16-bit float, or 32-bit float. Higher precision reduces color banding and improves feedback loop accuracy.
+- **Media key routing**: Media keys (play/pause, next, previous, stop) now route through `keybd_event` for system-level handling, fixing media control when the visualizer has focus.
+- **Windows volume control via IPC**: New `SET_VOLUME` / `GET_VOLUME` / `SET_MUTE` / `GET_MUTE` IPC commands for controlling system audio device volume and mute state.
+- **Audio gain attenuation**: Audio sensitivity can now be set below 1.0 for attenuation (previously clamped to 1.0 minimum).
+
+## Stability Fixes
+
+- **Fix resize crash** (PR #32): Restore DX12 command infrastructure after `ResizeBuffers` failure so the render loop doesn't crash accessing null objects during recovery.
+- **Fix display output cleanup**: Release display mirror Spout wrapped backbuffers during device cleanup to prevent crashes on resize.
+- **Fix preset startup default** (PR #31): `m_bEnablePresetStartup` now defaults to `true` for expected out-of-box behavior with fresh `settings.ini`.
+
+## MCP Server
+
+- BeatDrop pipe discovery support for comparison tooling
+- Capture path included in response for automation workflows
+- Null-terminator framing fix for reliable message parsing
 
 ## Installation
 

@@ -601,6 +601,7 @@ void Engine::ApplyAnimProfileToSupertext(td_supertext& st, const td_anim_profile
   if (prof.szFontFace[0])
     wcscpy(st.nFontFace, prof.szFontFace);
   st.fFontSize = prof.fFontSize;
+  st.bExplicitSize = true;
   st.bBold = prof.bBold;
   st.bItal = prof.bItal;
   st.nColorR = prof.nColorR;
@@ -2160,6 +2161,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
 
     if (params.find(L"size") != params.end()) {
       m_supertexts[nextFreeSupertextIndex].fFontSize = std::stof(params[L"size"]);
+      m_supertexts[nextFreeSupertextIndex].bExplicitSize = true;
     }
     else if (!hasProfile) {
       m_supertexts[nextFreeSupertextIndex].fFontSize = 30.0f;
@@ -2481,6 +2483,15 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     }
     else {
       PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
+    }
+    // Send device volume state
+    {
+      float curVol = 0; BOOL muted = FALSE;
+      if (SUCCEEDED(GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted))) {
+        wchar_t buf[128];
+        swprintf_s(buf, L"DEVICE_VOLUME=%.2f|muted=%d", curVol, (int)muted);
+        SendMessageToMDropDX12Remote(buf, true);
+      }
     }
   }
   else if (wcsncmp(sMessage, L"LINK=", 5) == 0) {
@@ -3075,53 +3086,47 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
   else if (wcsncmp(sMessage, L"SET_DEVICE_VOLUME=", 18) == 0) {
     float vol = (float)_wtof(sMessage + 18);
     HRESULT hr = SetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, vol);
-    extern PipeServer g_pipeServer;
+    wchar_t buf[128];
     if (SUCCEEDED(hr)) {
       float curVol = 0; BOOL muted = FALSE;
       GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
-      wchar_t buf[128];
       swprintf_s(buf, L"DEVICE_VOLUME=%.2f|muted=%d", curVol, (int)muted);
-      g_pipeServer.Send(buf);
     } else {
-      wchar_t buf[128];
       swprintf_s(buf, L"DEVICE_VOLUME_ERROR=0x%08x", (unsigned)hr);
-      g_pipeServer.Send(buf);
     }
+    SendMessageToMDropDX12Remote(buf, true);
   }
   else if (wcsncmp(sMessage, L"GET_DEVICE_VOLUME", 17) == 0) {
     float curVol = 0; BOOL muted = FALSE;
     HRESULT hr = GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
-    extern PipeServer g_pipeServer;
     wchar_t buf[128];
     if (SUCCEEDED(hr))
       swprintf_s(buf, L"DEVICE_VOLUME=%.2f|muted=%d", curVol, (int)muted);
     else
       swprintf_s(buf, L"DEVICE_VOLUME_ERROR=0x%08x", (unsigned)hr);
-    g_pipeServer.Send(buf);
+    SendMessageToMDropDX12Remote(buf, true);
   }
   else if (wcsncmp(sMessage, L"SET_DEVICE_MUTE=", 16) == 0) {
     int mute = _wtoi(sMessage + 16);
     HRESULT hr = SetDeviceMute(m_szAudioDevice, m_nAudioDeviceRequestType, mute ? TRUE : FALSE);
-    extern PipeServer g_pipeServer;
     wchar_t buf[128];
     if (SUCCEEDED(hr))
       swprintf_s(buf, L"DEVICE_MUTE=%d", mute ? 1 : 0);
     else
       swprintf_s(buf, L"DEVICE_MUTE_ERROR=0x%08x", (unsigned)hr);
-    g_pipeServer.Send(buf);
+    SendMessageToMDropDX12Remote(buf, true);
   }
   else if (wcsncmp(sMessage, L"TOGGLE_DEVICE_MUTE", 18) == 0) {
     float curVol = 0; BOOL muted = FALSE;
     HRESULT hr = GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
     if (SUCCEEDED(hr))
       hr = SetDeviceMute(m_szAudioDevice, m_nAudioDeviceRequestType, muted ? FALSE : TRUE);
-    extern PipeServer g_pipeServer;
     wchar_t buf[128];
     if (SUCCEEDED(hr))
       swprintf_s(buf, L"DEVICE_MUTE=%d", muted ? 0 : 1);
     else
       swprintf_s(buf, L"DEVICE_MUTE_ERROR=0x%08x", (unsigned)hr);
-    g_pipeServer.Send(buf);
+    SendMessageToMDropDX12Remote(buf, true);
   }
   else if (wcsncmp(sMessage, L"GET_RENDER_DIAG", 15) == 0) {
     // Dump rendering diagnostic values for comparing with Milkwave
@@ -3390,6 +3395,57 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     g_tcpServer.DisconnectDevice(deviceId);
     g_tcpServer.SaveAuthorizedDevices(GetConfigIniFile());
     g_pipeServer.Send(L"DEAUTH_OK");
+  }
+  else if (wcscmp(sMessage, L"GET_AUDIO_DEVICES") == 0) {
+    // Enumerate active audio render devices using WASAPI
+    IMMDeviceEnumerator* pEnumerator = nullptr;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                  __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+    if (SUCCEEDED(hr) && pEnumerator) {
+      IMMDeviceCollection* pCollection = nullptr;
+      hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollection);
+      if (SUCCEEDED(hr) && pCollection) {
+        UINT count = 0;
+        pCollection->GetCount(&count);
+
+        // Get active device name for comparison
+        std::wstring activeName;
+        if (m_szAudioDevice[0]) {
+          activeName = m_szAudioDevice;
+        } else {
+          // Default device — resolve its friendly name
+          IMMDevice* pDefault = nullptr;
+          if (SUCCEEDED(GetDefaultLoopbackDevice(&pDefault, activeName)) && pDefault)
+            pDefault->Release();
+        }
+
+        std::wstring response = L"AUDIO_DEVICES|count=" + std::to_wstring(count);
+        for (UINT i = 0; i < count; i++) {
+          IMMDevice* pDevice = nullptr;
+          if (SUCCEEDED(pCollection->Item(i, &pDevice)) && pDevice) {
+            IPropertyStore* pProps = nullptr;
+            if (SUCCEEDED(pDevice->OpenPropertyStore(STGM_READ, &pProps)) && pProps) {
+              PROPVARIANT varName;
+              PropVariantInit(&varName);
+              if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &varName)) && varName.pwszVal) {
+                response += L"|dev" + std::to_wstring(i) + L"=" + varName.pwszVal;
+              }
+              PropVariantClear(&varName);
+              pProps->Release();
+            }
+            pDevice->Release();
+          }
+        }
+        response += L"|active=" + activeName;
+        SendMessageToMDropDX12Remote(response.c_str(), true);
+        pCollection->Release();
+      }
+      pEnumerator->Release();
+    }
+    if (!pEnumerator || FAILED(hr)) {
+      // Send empty response so client knows the request was processed
+      SendMessageToMDropDX12Remote(L"AUDIO_DEVICES|count=0", true);
+    }
   }
   else if (wcscmp(sMessage, L"LIST_DEVICES") == 0) {
     extern TcpServer g_tcpServer;

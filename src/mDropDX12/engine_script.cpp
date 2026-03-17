@@ -240,14 +240,25 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
   }
   else if (_wcsnicmp(cmd.c_str(), L"SEND=", 5) == 0) {
     std::wstring val = cmd.substr(5);
-    HWND hWnd = GetPluginWindow();
-    if (hWnd) {
-      if (val.size() >= 2 && val[0] == L'0' && (val[1] == L'x' || val[1] == L'X')) {
-        // Hex keycode
-        int keyCode = (int)wcstol(val.c_str(), nullptr, 16);
-        PostMessage(hWnd, WM_KEYDOWN, keyCode, 0);
-        PostMessage(hWnd, WM_KEYUP, keyCode, 0);
+    if (val.size() >= 2 && val[0] == L'0' && (val[1] == L'x' || val[1] == L'X')) {
+      // Hex keycode
+      int keyCode = (int)wcstol(val.c_str(), nullptr, 16);
+      // Media keys (VK_MEDIA_NEXT_TRACK..VK_LAUNCH_APP2, 0xB0-0xB7) are
+      // system-level virtual keys — they must go through keybd_event so the
+      // OS media-key handler picks them up.
+      if (keyCode >= 0xB0 && keyCode <= 0xB7) {
+        keybd_event((BYTE)keyCode, 0, 0, 0);
+        keybd_event((BYTE)keyCode, 0, KEYEVENTF_KEYUP, 0);
       } else {
+        HWND hWnd = GetPluginWindow();
+        if (hWnd) {
+          PostMessage(hWnd, WM_KEYDOWN, keyCode, 0);
+          PostMessage(hWnd, WM_KEYUP, keyCode, 0);
+        }
+      }
+    } else {
+      HWND hWnd = GetPluginWindow();
+      if (hWnd) {
         // Send as WM_CHAR sequence
         for (wchar_t ch : val)
           PostMessage(hWnd, WM_CHAR, ch, 0);
