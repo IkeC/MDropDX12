@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// MCP Server for MDropDX12 Named Pipe IPC
-// Lets Claude Code interact with the running visualizer.
+// MCP Server for MDropDX12 / Milkwave / BeatDrop Named Pipe IPC
+// Lets Claude Code interact with running visualizers.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -29,23 +29,40 @@ function getProcessNames(pids) {
   return names;
 }
 
+// Classify a pipe entry by exe name into a type string
+function classifyPipe(p) {
+  const exe = (p.exe || '').toLowerCase();
+  if (exe.includes('mdropdx12')) return 'mdrop';
+  if (exe.includes('beatdrop')) return 'beatdrop';
+  return 'milkwave';
+}
+
+// Human-readable label for a pipe type
+function pipeLabel(type) {
+  if (type === 'mdrop') return 'MDropDX12';
+  if (type === 'beatdrop') return 'BeatDrop';
+  return 'Milkwave Visualizer';
+}
+
 function discoverPipes(target = 'auto') {
   try {
     const pipeDir = '//./pipe/';
+    // All visualizers (MDropDX12, Milkwave, BeatDrop) use Milkwave_<PID> pipes
     const pipes = fs.readdirSync(pipeDir)
       .filter(name => name.startsWith('Milkwave_'))
       .map(name => {
         const match = name.match(/Milkwave_(\d+)/);
-        return match ? { path: pipeDir + name, pid: parseInt(match[1]), exe: null } : null;
+        return match ? { path: pipeDir + name, pid: parseInt(match[1]), exe: null, type: null } : null;
       })
       .filter(Boolean);
 
-    // Look up process names for all discovered pipes
+    // Look up process names to classify each pipe
     if (pipes.length > 0) {
       const pidSet = new Set(pipes.map(p => p.pid));
       const names = getProcessNames(pidSet);
       for (const p of pipes) {
         p.exe = names.get(p.pid) || 'unknown';
+        p.type = classifyPipe(p);
       }
     }
 
@@ -53,16 +70,17 @@ function discoverPipes(target = 'auto') {
     if (target === 'all') {
       return pipes;
     } else if (target === 'mdrop') {
-      const filtered = pipes.filter(p => p.exe.toLowerCase().includes('mdropdx12'));
+      const filtered = pipes.filter(p => p.type === 'mdrop');
       if (filtered.length > 0) return filtered;
-      // Fall through to all if no MDropDX12 found
     } else if (target === 'milkwave') {
-      const filtered = pipes.filter(p => !p.exe.toLowerCase().includes('mdropdx12'));
+      const filtered = pipes.filter(p => p.type === 'milkwave');
       if (filtered.length > 0) return filtered;
-      // Fall through to all if no Milkwave found
+    } else if (target === 'beatdrop') {
+      const filtered = pipes.filter(p => p.type === 'beatdrop');
+      if (filtered.length > 0) return filtered;
     } else if (pipes.length > 1) {
       // Auto mode: prefer MDropDX12
-      const mdropPipes = pipes.filter(p => p.exe.toLowerCase().includes('mdropdx12'));
+      const mdropPipes = pipes.filter(p => p.type === 'mdrop');
       if (mdropPipes.length > 0) return mdropPipes;
     }
 
@@ -155,7 +173,7 @@ function findPipe() {
 
   const pipes = discoverPipes();
   if (pipes.length === 0) {
-    throw new Error('No running visualizer found (MDropDX12 or Milkwave Visualizer). Start the visualizer first.');
+    throw new Error('No running visualizer found (MDropDX12, Milkwave Visualizer, or BeatDrop). Start a visualizer first.');
   }
 
   cachedPipePath = pipes[0].path;
@@ -282,16 +300,16 @@ const server = new McpServer({
 // Tool: Connect / discover
 server.tool(
   'mdrop_connect',
-  'Discover and connect to a running visualizer. Use target to pick which one: "mdrop" (MDropDX12), "milkwave" (Milkwave Visualizer), or "auto" (prefer MDropDX12). Lists all found instances.',
+  'Discover and connect to a running visualizer. Use target to pick which one: "mdrop" (MDropDX12), "milkwave" (Milkwave Visualizer), "beatdrop" (BeatDrop), or "auto" (prefer MDropDX12). Lists all found instances.',
   {
-    target: z.enum(['auto', 'mdrop', 'milkwave']).optional()
-      .describe('Which visualizer to connect to: "mdrop", "milkwave", or "auto" (default, prefers MDropDX12)'),
+    target: z.enum(['auto', 'mdrop', 'milkwave', 'beatdrop']).optional()
+      .describe('Which visualizer to connect to: "mdrop", "milkwave", "beatdrop", or "auto" (default, prefers MDropDX12)'),
   },
   async ({ target }) => {
     // Always discover ALL pipes first to show what's available
     const allPipes = discoverPipes('all');
     if (allPipes.length === 0) {
-      return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12 or Milkwave Visualizer). Start the visualizer first.' }] };
+      return { content: [{ type: 'text', text: 'No running visualizer found (MDropDX12, Milkwave Visualizer, or BeatDrop). Start a visualizer first.' }] };
     }
 
     // Now filter by target preference
@@ -299,9 +317,8 @@ server.tool(
     cachedPipePath = chosen[0].path;
 
     // Build a summary of all discovered instances
-    // Re-discover with 'auto' to get all pipes with exe names populated
     const summary = allPipes.map(p => {
-      const label = p.exe?.toLowerCase().includes('mdropdx12') ? 'MDropDX12' : 'Milkwave Visualizer';
+      const label = pipeLabel(p.type);
       const active = p.path === cachedPipePath ? ' ← connected' : '';
       return `  ${label} (PID ${p.pid})${active}`;
     }).join('\n');
@@ -762,20 +779,24 @@ server.tool(
         return { content: [{ type: 'text', text: 'No running visualizers found.' }] };
       }
 
-      const mdropPipe = allPipes.find(p => p.exe?.toLowerCase().includes('mdropdx12'));
-      const milkwavePipe = allPipes.find(p => !p.exe?.toLowerCase().includes('mdropdx12'));
-
-      if (!mdropPipe || !milkwavePipe) {
-        const found = mdropPipe ? 'MDropDX12' : milkwavePipe ? 'Milkwave Visualizer' : 'none';
-        return { content: [{ type: 'text', text: `Need both visualizers running for comparison. Found: ${found}` }] };
+      if (allPipes.length < 2) {
+        const found = allPipes.map(p => pipeLabel(p.type)).join(', ') || 'none';
+        return { content: [{ type: 'text', text: `Need at least 2 visualizers running for comparison. Found: ${found}` }] };
       }
+
+      // Pick the first two distinct visualizers (prefer mdrop as primary)
+      const mdropPipe = allPipes.find(p => p.type === 'mdrop') || allPipes[0];
+      const milkwavePipe = allPipes.find(p => p !== mdropPipe) || allPipes[1];
 
       const results = [];
 
       // --- Position MDropDX12 alongside Milkwave ---
+      const primaryLabel = pipeLabel(mdropPipe.type);
+      const secondaryLabel = pipeLabel(milkwavePipe.type);
+
       const mwRect = getWindowRect(milkwavePipe.pid);
       if (mwRect) {
-        // Get MDropDX12's current state to check current size
+        // Get primary visualizer's current state to check current size
         const mdropStateForSize = await sendPipeMessage(mdropPipe.path, 'STATE', true).catch(() => '');
         const mdRect = parseMdropWindowRect(mdropStateForSize);
 
@@ -784,16 +805,14 @@ server.tool(
           mdRect.width === mwRect.width && mdRect.height === mwRect.height;
 
         if (!alreadyMatched) {
-          // Find the monitor Milkwave is on
+          // Find the monitor the secondary visualizer is on
           const mwCenterX = mwRect.left + Math.floor(mwRect.width / 2);
           const mwCenterY = mwRect.top + Math.floor(mwRect.height / 2);
           const monitor = getMonitorWorkArea(mwCenterX, mwCenterY);
 
           if (monitor) {
-            // Horizontal: space to the right vs left of Milkwave
             const spaceRight = monitor.right - mwRect.right;
             const spaceLeft = mwRect.left - monitor.left;
-            // Vertical: space below vs above
             const spaceBelow = monitor.bottom - mwRect.bottom;
             const spaceAbove = mwRect.top - monitor.top;
 
@@ -802,25 +821,22 @@ server.tool(
             const canFitVertically = Math.max(spaceBelow, spaceAbove) >= mwRect.height;
 
             if (canFitHorizontally) {
-              // Place horizontally — pick side with more room
               newX = spaceRight >= spaceLeft ? mwRect.right : mwRect.left - mwRect.width;
               newY = mwRect.top;
             } else if (canFitVertically) {
-              // Place vertically on same display
               newX = mwRect.left;
               newY = spaceBelow >= spaceAbove ? mwRect.bottom : mwRect.top - mwRect.height;
             } else {
-              // Not enough room — just place to the right, clipped
               newX = spaceRight >= spaceLeft ? mwRect.right : mwRect.left - mwRect.width;
               newY = mwRect.top;
             }
 
             const setCmd = `SET_WINDOW=${newX},${newY},${mwRect.width},${mwRect.height}`;
             const posResult = await sendPipeMessage(mdropPipe.path, setCmd, true).catch(e => e.message);
-            results.push({ type: 'text', text: `Positioned MDropDX12: ${posResult}` });
+            results.push({ type: 'text', text: `Positioned ${primaryLabel}: ${posResult}` });
           }
         } else {
-          results.push({ type: 'text', text: 'MDropDX12 already matches Milkwave size — skipping reposition' });
+          results.push({ type: 'text', text: `${primaryLabel} already matches ${secondaryLabel} size — skipping reposition` });
         }
       }
 
@@ -848,13 +864,13 @@ server.tool(
       // Truncate state text to avoid bloating the response
       const maxStateLen = 1000;
       const truncState = (s) => s.length > maxStateLen ? s.slice(0, maxStateLen) + '\n...(truncated)' : s;
-      results.push({ type: 'text', text: `--- MDropDX12 State ---\n${truncState(mdropState)}` });
-      results.push({ type: 'text', text: `--- Milkwave Visualizer State ---\n${truncState(milkwaveState)}` });
+      results.push({ type: 'text', text: `--- ${primaryLabel} State ---\n${truncState(mdropState)}` });
+      results.push({ type: 'text', text: `--- ${secondaryLabel} State ---\n${truncState(milkwaveState)}` });
 
       // Capture from both simultaneously — each responds with CAPTURE_PATH=<full path>
       const targets = [
-        { pipe: mdropPipe, label: 'MDropDX12', tag: 'mdrop' },
-        { pipe: milkwavePipe, label: 'Milkwave Visualizer', tag: 'milkwave' },
+        { pipe: mdropPipe, label: primaryLabel, tag: mdropPipe.type },
+        { pipe: milkwavePipe, label: secondaryLabel, tag: milkwavePipe.type },
       ];
       const captures = await Promise.all(targets.map(async (t) => {
         const result = await captureWithPath(t.pipe.path).catch(e => ({ error: e.message }));
@@ -894,12 +910,12 @@ server.tool(
 // Tool: Raw command (escape hatch)
 server.tool(
   'mdrop_command',
-  'Send a raw IPC command to the visualizer (advanced). Use target="all" to send to both MDropDX12 and Milkwave simultaneously (e.g. SET_AUDIO_GAIN=2.0).',
+  'Send a raw IPC command to the visualizer (advanced). Use target="all" to send to all running visualizers simultaneously (e.g. SET_AUDIO_GAIN=2.0).',
   {
     command: z.string().describe('Raw pipe command (e.g. "SIGNAL|NEXT_PRESET", "SET_AUDIO_GAIN=2.0")'),
     expect_response: z.boolean().optional().describe('Whether to wait for a response (default: false)'),
-    target: z.enum(['auto', 'all', 'mdrop', 'milkwave']).optional().default('auto')
-      .describe('Target: "auto" (default, prefers MDropDX12), "all" (both), "mdrop", or "milkwave"'),
+    target: z.enum(['auto', 'all', 'mdrop', 'milkwave', 'beatdrop']).optional().default('auto')
+      .describe('Target: "auto" (default, prefers MDropDX12), "all" (all running), "mdrop", "milkwave", or "beatdrop"'),
   },
   async ({ command, expect_response, target }) => {
     try {
@@ -910,8 +926,7 @@ server.tool(
         }
         const results = [];
         for (const pipe of allPipes) {
-          const isMdrop = pipe.exe.toLowerCase().includes('mdropdx12');
-          const label = isMdrop ? 'MDropDX12' : 'Milkwave';
+          const label = pipeLabel(pipe.type);
           try {
             const response = await sendPipeMessage(pipe.path, command, expect_response ?? false);
             results.push(`${label}: ${response || 'OK'}`);
