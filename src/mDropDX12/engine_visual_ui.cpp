@@ -68,6 +68,38 @@ void VisualWindow::DoBuildControls() {
   TrackControl(CreateCheck(hw, L"Auto Quality", IDC_MW_QUALITY_AUTO, x, y, rw, lineH, hFont, p->bQualityAuto));
   y += lineH + gap + 4;
 
+  // Mesh Size (slider: 8..192, step 8)
+  TrackControl(CreateLabel(hw, L"Mesh Size:", x, y, lw, lineH, hFont));
+  TrackControl(CreateSlider(hw, IDC_MW_MESH_SIZE, x + lw + 4, y, sliderW, lineH, 1, 24, p->m_nGridX / 8));
+  swprintf(buf, 64, L"%d", p->m_nGridX);
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | WS_VISIBLE | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_MESH_SIZE_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(hLbl);
+  }
+  y += lineH + gap;
+
+  // Texture Bits Per Channel (combo)
+  TrackControl(CreateLabel(hw, L"Texture Precision:", x, y, lw, lineH, hFont));
+  {
+    HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+      x + lw + 4, y, 120, lineH * 6, hw,
+      (HMENU)(INT_PTR)IDC_MW_TEX_BITS, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    const wchar_t* texLabels[] = { L"8-bit", L"16-bit float", L"32-bit float" };
+    const int texValues[] = { 8, 16, 32 };
+    int selIdx = 0;
+    for (int i = 0; i < 3; i++) {
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)texLabels[i]);
+      if (texValues[i] == p->m_nTexBitsPerCh) selIdx = i;
+    }
+    SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
+    TrackControl(hCombo);
+  }
+  y += lineH + gap + 4;
+
   // Time/Frame/FPS Factors
   TrackControl(CreateLabel(hw, L"Time Factor:", x, y, lw, lineH, hFont));
   swprintf(buf, 64, L"%.2f", p->m_timeFactor);
@@ -179,6 +211,18 @@ LRESULT VisualWindow::DoHScroll(HWND hWnd, int id, int pos) {
     if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
     break;
   }
+  case IDC_MW_MESH_SIZE: {
+    int gridX = pos * 8;
+    if (gridX < 8) gridX = 8;
+    if (gridX > MAX_GRID_X) gridX = MAX_GRID_X;
+    m_pEngine->m_nGridX = gridX;
+    m_pEngine->m_nGridY = gridX * 3 / 4;
+    wchar_t buf[32]; swprintf(buf, 32, L"%d", gridX);
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MESH_SIZE_LABEL), buf);
+    HWND hw = m_pEngine->GetPluginWindow();
+    if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+    break;
+  }
   default:
     return -1;
   }
@@ -220,6 +264,14 @@ LRESULT VisualWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), L"1.00");
     // Update checkbox
     SetChecked(IDC_MW_QUALITY_AUTO, false);
+    // Reset mesh size
+    p->m_nGridX = 64;
+    p->m_nGridY = 48;
+    SendMessage(GetDlgItem(hWnd, IDC_MW_MESH_SIZE), TBM_SETPOS, TRUE, 8); // 64/8
+    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MESH_SIZE_LABEL), L"64");
+    // Reset texture precision
+    p->m_nTexBitsPerCh = 8;
+    SendMessage(GetDlgItem(hWnd, IDC_MW_TEX_BITS), CB_SETCURSEL, 0, 0); // index 0 = 8-bit
     // Update edit boxes
     SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), L"1.00");
     SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), L"1.00");
@@ -253,6 +305,18 @@ LRESULT VisualWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     const int fpsValues[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
     if (sel >= 0 && sel < 9)
       p->SetFPSCap(fpsValues[sel]);
+    return 0;
+  }
+
+  // Texture Precision combo box
+  if (id == IDC_MW_TEX_BITS && code == CBN_SELCHANGE) {
+    int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+    const int texValues[] = { 8, 16, 32 };
+    if (sel >= 0 && sel < 3) {
+      p->m_nTexBitsPerCh = texValues[sel];
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+    }
     return 0;
   }
 

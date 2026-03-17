@@ -1,5 +1,35 @@
 # MDropDX12 Changelog
 
+## v2.5.0 (2026-03-17)
+
+Rendering accuracy, quality controls, and stability release.
+
+### Preset Rendering Fixes
+
+- **NaN-safe atan2**: `atan2(0, 0)` returns NaN on DX12 (DX9 NVIDIA returns 0). Added `_safe_atan2(y, x)` wrapper that prevents NaN at the origin — fixes persistent black holes in tunnel/radial presets.
+- **Safe denominator intrinsics**: Added `_safe_normalize()` overloads that guard against zero-length vectors, preventing NaN propagation in raymarching and particle presets.
+- **Fix message SIZE parameter**: Messages with explicit `SIZE=N` parameter now respect the specified size instead of always autosizing.
+
+### New Features
+
+- **Mesh Size control** (Visual window): Slider to adjust warp/shape mesh vertex density (8–192, step 8). Previously only changeable via `settings.ini`.
+- **Texture Precision control** (Visual window): Combo box to select internal render target bit depth — 8-bit, 16-bit float, or 32-bit float. Previously only changeable via `settings.ini`.
+- **Media key routing**: Media keys route through `keybd_event` for system-level handling.
+- **Windows volume control via IPC**: `SET_VOLUME` / `GET_VOLUME` / `SET_MUTE` / `GET_MUTE` IPC commands.
+- **Audio gain attenuation**: Audio sensitivity can now be set below 1.0 (previously clamped to 1.0 minimum).
+
+### Stability Fixes
+
+- **Fix resize crash** (PR #32): Restore DX12 command infrastructure after `ResizeBuffers` failure.
+- **Fix display output cleanup**: Release display mirror Spout wrapped backbuffers during device cleanup.
+- **Fix preset startup default** (PR #31): `m_bEnablePresetStartup` defaults to `true` for fresh installs.
+
+### MCP Server
+
+- BeatDrop pipe discovery support
+- Capture path included in response
+- Null-terminator framing fix for reliable message parsing
+
 ## v2.4.0 (2026-03-15)
 
 Preset compatibility and visual accuracy release. Fixes two rendering bugs that caused presets to render differently from the reference Milkwave Visualizer, and adds a visual comparison document with side-by-side screenshots.

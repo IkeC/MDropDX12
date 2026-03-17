@@ -361,7 +361,21 @@ async function resolvePresetPath(preset, pipePath) {
   try {
     const state = await sendPipeMessage(pipePath, 'STATE', true);
     const dir = extractPresetDir(state);
-    if (dir) return path.join(dir, preset);
+    if (dir) {
+      // Check immediate directory first
+      const direct = path.join(dir, preset);
+      if (fs.existsSync(direct)) return direct;
+      // Search subdirectories (e.g. Shader/)
+      try {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            const sub = path.join(dir, entry.name, preset);
+            if (fs.existsSync(sub)) return sub;
+          }
+        }
+      } catch { /* best effort */ }
+      return direct; // fall back to original path
+    }
   } catch { /* fall through */ }
   return preset; // best effort — send as-is
 }
