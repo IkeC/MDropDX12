@@ -1827,6 +1827,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
   m_nLoadingPreset = 1;
   m_bPresetLoadReady = false;
+  m_bMilk2FrozenBlend = false;  // clear frozen blend from any previous .milk2
   m_fLoadingPresetBlendTime = fBlendTime;
   lstrcpyW(m_szLoadingPreset, szPresetFilename);
   m_fLoadStartTime = GetTime();
@@ -1865,6 +1866,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       return;
     }
     m_nMilk2MixType = mixType;
+    m_fMilk2FrozenProgress = progress;
 
     float loadTime = GetTime();
     uint64_t myGeneration = ++m_nLoadGeneration;
@@ -2125,12 +2127,14 @@ void Engine::LoadPresetTick() {
 
     // Apply blend or hard-cut based on the requested blend time
     if (m_bLoadingMilk2) {
-      // .milk2 uses its own blend pattern from metadata
+      // .milk2: frozen blend — both presets render simultaneously at fixed progress
       int savedMixType = m_nMixType;
       m_nMixType = m_nMilk2MixType;
       RandomizeBlendPattern();
       m_nMixType = savedMixType;
-      m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), 1.0f); // duration doesn't matter — we freeze it
+      m_pState->m_fBlendProgress = m_fMilk2FrozenProgress;
+      m_bMilk2FrozenBlend = true;
     } else if (m_fLoadingPresetBlendTime >= 0.001f) {
       RandomizeBlendPattern();
       m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
