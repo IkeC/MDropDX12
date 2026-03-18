@@ -98,6 +98,10 @@ void VisualWindow::DoBuildControls() {
     SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
     TrackControl(hCombo);
   }
+  y += lineH + gap;
+
+  // Anisotropic Filtering
+  TrackControl(CreateCheck(hw, L"Anisotropic Filtering", IDC_MW_ANISO, x, y, rw, lineH, hFont, p->m_bAnisotropicFiltering));
   y += lineH + gap + 4;
 
   // Time/Frame/FPS Factors
@@ -292,10 +296,13 @@ LRESULT VisualWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), L"4096");
     p->m_bEnableVSync = true;
     SetChecked(IDC_MW_VSYNC_ENABLED, true);
+    p->m_bAnisotropicFiltering = false;
+    if (p->m_lpDX) p->m_lpDX->m_bAnisotropicFiltering = false;
+    SetChecked(IDC_MW_ANISO, false);
     // Apply side-effects
     HWND hw = p->GetPluginWindow();
     if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
-    if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+    if (hw) PostMessage(hw, WM_MW_RESET_PIPELINE, 0, 0);
     return 0;
   }
 
@@ -337,6 +344,12 @@ LRESULT VisualWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     case IDC_MW_VSYNC_ENABLED:
       p->m_bEnableVSync = bChecked;
+      return 0;
+    case IDC_MW_ANISO:
+      p->m_bAnisotropicFiltering = bChecked;
+      if (p->m_lpDX) p->m_lpDX->m_bAnisotropicFiltering = bChecked;
+      { HWND hw = p->GetPluginWindow();
+        if (hw) PostMessage(hw, WM_MW_RESET_PIPELINE, 0, 0); }
       return 0;
     }
   }

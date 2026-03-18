@@ -27,6 +27,7 @@ enum class RenderCmd : uint8_t {
     LoadShaders,         // LoadShaders + CreateDX12PresetPSOs
     RecompileCompShader, // Recompile comp shader from m_pState text + rebuild PSOs
     DisableAllOutputs,   // Ctrl+F2 kill switch
+    ResetPipeline,       // RecreateRootSigAndPipelines() + ResetBufferAndFonts()
     Quit,                // Clean shutdown
 };
 
