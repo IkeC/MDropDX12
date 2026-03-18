@@ -1411,6 +1411,36 @@ void Engine::RandomizeBlendPattern() {
       }
     }
   }
+  else if (mixtype == 19) {
+    // Fixed vertical wipe (left-to-right) — for .milk2 "vertical" pattern
+    float band = 0.15f;
+    float inv_band = 1.0f / band;
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = (x / (float)m_nGridX);
+        float t = fx;
+        m_vertinfo[nVert].a = inv_band * (1 + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 20) {
+    // Fixed horizontal wipe (top-to-bottom) — for .milk2 "horizontal" pattern
+    float band = 0.15f;
+    float inv_band = 1.0f / band;
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = (y / (float)m_nGridY);
+      for (int x = 0; x <= m_nGridX; x++) {
+        float t = fy;
+        m_vertinfo[nVert].a = inv_band * (1 + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
 }
 
 void Engine::GenPlasma(int x0, int x1, int y0, int y1, float dt) {
@@ -1539,8 +1569,8 @@ static int Milk2PatternNameToMixtype(const char* name) {
     {"square",           8},  // square/diamond
     {"checkerboard",     9},  // animated checkerboard
     {"curtain",         10},  // curtain
-    {"vertical",        10},  // curtain variant
-    {"horizontal",      10},
+    {"vertical",        19},  // fixed left-to-right directional wipe
+    {"horizontal",      20},  // fixed top-to-bottom directional wipe
     {"bubbles",         11},  // bubble
     {"donuts",          11},  // donuts -> bubble (concentric circles)
     {"stars",           12},  // kaleidoscope wipe
