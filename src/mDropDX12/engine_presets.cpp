@@ -1524,17 +1524,36 @@ void Engine::RemoveAngleBrackets(wchar_t* str) {
 // Returns -1 (random) for any name that is not explicitly mapped.
 static int Milk2PatternNameToMixtype(const char* name) {
   struct { const char* name; int type; } kMap[] = {
-    {"zoom",     0},  // uniform fade
-    {"side",     1},  // directional wipe
-    {"plasma",   2},  // fractal plasma
-    {"cercle",   3},  // radial / circle
-    {"clock",    4},  // angular clock sweep
-    {"snail",    5},  // spiral
-    {"snail2",   5},
-    {"snail3",   5},
-    {"triangle", 6},
-    {"plasma2",  2},  // plasma variants -> plasma
-    {"plasma3",  2},
+    {"zoom",             0},  // uniform fade
+    {"side",             1},  // directional wipe
+    {"plasma",           2},  // fractal plasma
+    {"plasma2",          2},  // plasma variants -> plasma
+    {"plasma3",          2},
+    {"cercle",           3},  // radial / circle
+    {"clock",            4},  // angular clock sweep
+    {"snail",            5},  // spiral
+    {"snail2",           5},
+    {"snail3",           5},
+    {"triangle",         6},  // rhombus/diamond
+    {"nuclear",          7},  // nuclear clock wipe
+    {"square",           8},  // square/diamond
+    {"checkerboard",     9},  // animated checkerboard
+    {"curtain",         10},  // curtain
+    {"vertical",        10},  // curtain variant
+    {"horizontal",      10},
+    {"bubbles",         11},  // bubble
+    {"donuts",          11},  // donuts -> bubble (concentric circles)
+    {"stars",           12},  // kaleidoscope wipe
+    {"stars2",          12},
+    {"cisor",           13},  // moebius strip
+    {"wave",            14},  // star wipe
+    {"linesvertical",   15},  // disco floor
+    {"lineshorizontal", 15},
+    {"patches",         16},  // fire/flame
+    {"corner",          17},  // drain swirl
+    {"cross",           18},  // julia fractal
+    {"cross2",          18},
+    {"arrow",            1},  // arrow -> directional wipe
   };
   for (auto& e : kMap)
     if (_stricmp(name, e.name) == 0) return e.type;
