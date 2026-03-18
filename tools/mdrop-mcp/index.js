@@ -891,35 +891,71 @@ server.tool(
   }
 );
 
-// Helper: get window rect for a process by PID using PowerShell
-function getWindowRect(pid) {
+// Helper: parse window rect from STATE response
+// MDropDX12: renderwin=(left,top)-(right,bottom)
+// MilkDrop3/Milkwave: WINDOW=(left,top)-(right,bottom) WxH
+function parseWindowRect(stateText) {
+  const m = stateText.match(/(?:renderwin|WINDOW)=\((-?\d+),(-?\d+)\)-\((-?\d+),(-?\d+)\)/);
+  if (!m) return null;
+  const [, l, t, r, b] = m.map(Number);
+  return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+}
+
+// Helper: send a command and collect ALL null-terminated messages until timeout.
+// Returns array of decoded message strings.
+function sendAndCollectAll(pipePath, message, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const messages = [];
+    let recvBuf = Buffer.alloc(0);
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; try { client.destroy(); } catch {} resolve(messages); } };
+
+    const timer = setTimeout(settle, timeoutMs);
+
+    const client = net.connect(pipePath, () => {
+      client.write(Buffer.from(message + '\0', 'utf16le'));
+      client.on('data', (chunk) => {
+        recvBuf = Buffer.concat([recvBuf, chunk]);
+        // Extract all complete null-terminated messages
+        while (recvBuf.length >= 2) {
+          let nullIdx = -1;
+          for (let i = 0; i < recvBuf.length - 1; i += 2) {
+            if (recvBuf[i] === 0 && recvBuf[i + 1] === 0) { nullIdx = i; break; }
+          }
+          if (nullIdx < 0) break;
+          messages.push(recvBuf.subarray(0, nullIdx).toString('utf16le'));
+          recvBuf = recvBuf.subarray(nullIdx + 2);
+        }
+      });
+    });
+    client.on('error', () => settle());
+  });
+}
+
+// Helper: get window rect for a visualizer by querying its pipe
+// STATE sends multiple messages; renderwin=/WINDOW= may not be the first.
+async function getWindowRectViaPipe(pipePath) {
   try {
-    // PowerShell one-liner to get main window position and size
-    const ps = `Add-Type -Name W -Namespace Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }'; $p=Get-Process -Id ${pid} -EA Stop; $r=New-Object Win32.W+RECT; [Win32.W]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null; "$($r.L),$($r.T),$($r.R),$($r.B)"`;
-    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
-    const [l, t, r, b] = output.split(',').map(Number);
-    if ([l, t, r, b].some(isNaN)) return null;
-    return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+    const msgs = await sendAndCollectAll(pipePath, 'STATE', 2000);
+    for (const msg of msgs) {
+      const rect = parseWindowRect(msg);
+      if (rect) return rect;
+    }
+    return null;
   } catch { return null; }
 }
 
 // Helper: get monitor work area for a point using PowerShell
 function getMonitorWorkArea(x, y) {
   try {
-    const ps = `Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::FromPoint([System.Drawing.Point]::new(${x},${y})); $w=$s.WorkingArea; "$($w.X),$($w.Y),$($w.Width),$($w.Height)"`;
-    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
+    const output = execSync(
+      `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::FromPoint([System.Drawing.Point]::new(${x},${y})); $w=$s.WorkingArea; \\"$($w.X),$($w.Y),$($w.Width),$($w.Height)\\""`,
+      { encoding: 'utf8', timeout: 5000 }
+    ).trim();
     const [mx, my, mw, mh] = output.split(',').map(Number);
     if ([mx, my, mw, mh].some(isNaN)) return null;
     return { left: mx, top: my, width: mw, height: mh, right: mx + mw, bottom: my + mh };
   } catch { return null; }
-}
-
-// Helper: parse renderwin from MDropDX12 STATE response
-function parseMdropWindowRect(stateText) {
-  const m = stateText.match(/renderwin=\((-?\d+),(-?\d+)\)-\((-?\d+),(-?\d+)\)/);
-  if (!m) return null;
-  const [, l, t, r, b] = m.map(Number);
-  return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
 }
 
 // Tool: Compare both visualizers side by side
@@ -949,22 +985,23 @@ server.tool(
 
       const results = [];
 
-      // --- Position MDropDX12 alongside Milkwave ---
+      // --- Resize and position MDropDX12 to match reference visualizer ---
       const primaryLabel = pipeLabel(mdropPipe.type);
       const secondaryLabel = pipeLabel(milkwavePipe.type);
 
-      const mwRect = getWindowRect(milkwavePipe.pid);
-      if (mwRect) {
-        // Get primary visualizer's current state to check current size
-        const mdropStateForSize = await sendPipeMessage(mdropPipe.path, 'STATE', true).catch(() => '');
-        const mdRect = parseMdropWindowRect(mdropStateForSize);
+      // Get window rects via pipe STATE (no PowerShell needed)
+      const [mwRect, mdRect] = await Promise.all([
+        getWindowRectViaPipe(milkwavePipe.path),
+        getWindowRectViaPipe(mdropPipe.path),
+      ]);
 
+      if (mwRect) {
         // Only reposition if sizes differ
         const alreadyMatched = mdRect &&
           mdRect.width === mwRect.width && mdRect.height === mwRect.height;
 
         if (!alreadyMatched) {
-          // Find the monitor the secondary visualizer is on
+          // Find the monitor the reference visualizer is on
           const mwCenterX = mwRect.left + Math.floor(mwRect.width / 2);
           const mwCenterY = mwRect.top + Math.floor(mwRect.height / 2);
           const monitor = getMonitorWorkArea(mwCenterX, mwCenterY);
@@ -991,12 +1028,14 @@ server.tool(
             }
 
             const setCmd = `SET_WINDOW=${newX},${newY},${mwRect.width},${mwRect.height}`;
-            const posResult = await sendPipeMessage(mdropPipe.path, setCmd, true).catch(e => e.message);
-            results.push({ type: 'text', text: `Positioned ${primaryLabel}: ${posResult}` });
+            const posResult = await sendAndWaitFor(mdropPipe.path, setCmd, 'WINDOW=', 3000).catch(e => e.message);
+            results.push({ type: 'text', text: `Resized ${primaryLabel} to match ${secondaryLabel}: ${posResult}` });
           }
         } else {
           results.push({ type: 'text', text: `${primaryLabel} already matches ${secondaryLabel} size — skipping reposition` });
         }
+      } else {
+        results.push({ type: 'text', text: `Could not get ${secondaryLabel} window rect from STATE` });
       }
 
       // --- Sync audio device: query MDropDX12's active device, set it on Milkwave ---
