@@ -1866,7 +1866,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       return;
     }
     m_nMilk2MixType = mixType;
-    m_fMilk2FrozenProgress = progress;
+    // direction=-1 reverses the blend (swap which preset is "from" vs "to")
+    m_fMilk2FrozenProgress = (direction < 0) ? (1.0f - progress) : progress;
 
     float loadTime = GetTime();
     uint64_t myGeneration = ++m_nLoadGeneration;
