@@ -29,17 +29,27 @@ function getProcessNames(pids) {
   return names;
 }
 
-// Classify a pipe entry by exe name into a type string
+// Classify a pipe entry by exe name into a type tag (lowercase, no extension)
 function classifyPipe(p) {
   const exe = (p.exe || '').toLowerCase();
   if (exe.includes('mdropdx12')) return 'mdrop';
-  return 'milkwave';
+  if (exe.includes('milkdrop3')) return 'milkdrop3';
+  if (exe.includes('milkwavevisualizer') || exe.includes('milkwave')) return 'milkwave';
+  // Unknown exe — derive tag from exe name (strip .exe, lowercase)
+  const base = exe.replace(/\.exe$/i, '').replace(/[^a-z0-9]/g, '_');
+  return base || 'unknown';
 }
 
-// Human-readable label for a pipe type
-function pipeLabel(type) {
-  if (type === 'mdrop') return 'MDropDX12';
-  return 'Milkwave Visualizer';
+// Human-readable label from exe name or type tag
+function pipeLabel(typeOrExe) {
+  const known = {
+    'mdrop': 'MDropDX12',
+    'milkwave': 'Milkwave Visualizer',
+    'milkdrop3': 'MilkDrop3',
+  };
+  if (known[typeOrExe]) return known[typeOrExe];
+  // Fall back to exe name without extension
+  return typeOrExe.replace(/\.exe$/i, '') || 'Unknown';
 }
 
 // List named pipes matching a prefix. Uses fs.readdirSync with PowerShell fallback.
@@ -86,7 +96,8 @@ function discoverPipes(target = 'auto') {
       const filtered = pipes.filter(p => p.type === 'mdrop');
       if (filtered.length > 0) return filtered;
     } else if (target === 'milkwave') {
-      const filtered = pipes.filter(p => p.type === 'milkwave');
+      // 'milkwave' target = any non-MDropDX12 visualizer (Milkwave, MilkDrop3, etc.)
+      const filtered = pipes.filter(p => p.type !== 'mdrop');
       if (filtered.length > 0) return filtered;
     } else if (pipes.length > 1) {
       // Auto mode: prefer MDropDX12
