@@ -669,7 +669,7 @@ public:
   //bool		m_bFixSlowText;
   //bool		m_bWarningsDisabled;		// messageboxes
   bool		    m_bWarningsDisabled2;		// warnings/errors in upper-right corner (m_szUserMessage)
-  //bool        m_bAnisotropicFiltering;
+  bool        m_bAnisotropicFiltering;
   bool        m_bPresetLockOnAtStartup;
   bool        m_bPreventScollLockHandling;
   int         m_nMaxPSVersion_ConfigPanel;  // -1 = auto, 0 = disable shaders, 2 = ps_2_0, 3 = ps_3_0

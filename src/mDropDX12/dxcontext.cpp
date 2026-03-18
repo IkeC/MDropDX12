@@ -87,6 +87,9 @@ DXContext::DXContext(
         swprintf(m_szFallbackTexturesDir, MAX_PATH, L"%sresources\\textures\\", szDir);
     }
 
+    // Read anisotropic filtering setting from INI (needed before CreateRootSignature in Internal_Init)
+    m_bAnisotropicFiltering = GetPrivateProfileIntW(L"Settings", L"bAnisotropicFiltering", 0, m_szIniFile) != 0;
+
     // Store device references passed from the initializer
     m_device       = device;
     m_commandQueue = commandQueue;
@@ -934,6 +937,14 @@ bool DXContext::CreateRootSignature()
     // s3: POINT + WRAP
     staticSamplers[3].Filter   = D3D12_FILTER_MIN_MAG_MIP_POINT;
 
+    // Anisotropic filtering: upgrade LINEAR samplers (s0, s1) to ANISOTROPIC
+    if (m_bAnisotropicFiltering) {
+        staticSamplers[0].Filter = D3D12_FILTER_ANISOTROPIC;
+        staticSamplers[0].MaxAnisotropy = 16;
+        staticSamplers[1].Filter = D3D12_FILTER_ANISOTROPIC;
+        staticSamplers[1].MaxAnisotropy = 16;
+    }
+
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
     rootSigDesc.NumParameters     = 2;
     rootSigDesc.pParameters       = rootParams;
@@ -958,6 +969,18 @@ bool DXContext::CreateRootSignature()
     // Blur root signature: same as main. Blur shaders use _samp_lc (s1) directly
     // via text substitution in LoadShaderFromMemory, so no special s0 override needed.
     m_blurRootSignature = m_rootSignature;
+    return true;
+}
+
+bool DXContext::RecreateRootSigAndPipelines()
+{
+    WaitForGpu();
+    m_rootSignature.Reset();
+    m_blurRootSignature.Reset();
+    for (auto& pso : m_PSOs)
+        pso.Reset();
+    if (!CreateRootSignature()) return false;
+    if (!CreatePipelines()) return false;
     return true;
 }
 

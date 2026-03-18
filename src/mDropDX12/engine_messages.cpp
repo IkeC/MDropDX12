@@ -2493,6 +2493,24 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
         SendMessageToMDropDX12Remote(buf, true);
       }
     }
+    // Send render window rect for MCP compare positioning (via pipe, not WM_COPYDATA)
+    {
+      HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+      if (hRender) {
+        RECT wr;
+        GetWindowRect(hRender, &wr);
+        wchar_t buf[128];
+        swprintf_s(buf, L"renderwin=(%d,%d)-(%d,%d)",
+            wr.left, wr.top, wr.right, wr.bottom);
+        extern PipeServer g_pipeServer;
+        g_pipeServer.Send(buf);
+      }
+    }
+    // Send end-of-batch sentinel — MCP detects this to resolve immediately
+    {
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(L"END_BATCH");
+    }
   }
   else if (wcsncmp(sMessage, L"LINK=", 5) == 0) {
     std::wstring message(sMessage + 5);

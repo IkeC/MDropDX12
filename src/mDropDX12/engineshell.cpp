@@ -2975,6 +2975,10 @@ void EngineShell::ExecuteRenderCommand(const RenderCommand& cmd) {
     case RenderCmd::ResetBuffers:
       ResetBufferAndFonts();
       break;
+    case RenderCmd::ResetPipeline:
+      if (m_lpDX && m_lpDX->RecreateRootSigAndPipelines())
+        ResetBufferAndFonts();
+      break;
     case RenderCmd::ResizeWindow:
       OnUserResizeWindow();
       break;

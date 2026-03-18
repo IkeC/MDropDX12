@@ -33,7 +33,7 @@ function getProcessNames(pids) {
 function classifyPipe(p) {
   const exe = (p.exe || '').toLowerCase();
   if (exe.includes('mdropdx12')) return 'mdrop';
-  if (exe.includes('milkdrop3')) return 'milkdrop3';
+  if (exe.includes('milkdrop3') || exe.includes('milkdrop 3')) return 'milkdrop3';
   if (exe.includes('milkwavevisualizer') || exe.includes('milkwave')) return 'milkwave';
   // Unknown exe — derive tag from exe name (strip .exe, lowercase)
   const base = exe.replace(/\.exe$/i, '').replace(/[^a-z0-9]/g, '_');
@@ -241,6 +241,58 @@ async function restartVisualizer(pipe, log) {
 
   log(`${pipeLabel(targetType)} did not reconnect within timeout`);
   return null;
+}
+
+// Launch MDropDX12 if not running. Returns the new pipe entry or null on failure.
+async function launchMDropDX12(log) {
+  // Check known build output locations
+  const candidates = [
+    path.join(projectRoot, 'src/mDropDX12/Release_x64/MDropDX12.exe'),
+    path.join(projectRoot, 'src/mDropDX12/Debug_x64/MDropDX12.exe'),
+  ];
+  let exePath = null;
+  for (const c of candidates) {
+    if (fs.existsSync(c)) { exePath = c; break; }
+  }
+  if (!exePath) {
+    log('MDropDX12.exe not found in Release_x64 or Debug_x64');
+    return null;
+  }
+
+  log(`Launching MDropDX12 from ${exePath}...`);
+  const exeDir = path.dirname(exePath);
+  try {
+    execSync(`start "" "${exePath}"`, { cwd: exeDir, timeout: 5000, shell: true });
+  } catch (e) {
+    log(`Failed to launch: ${e.message}`);
+    return null;
+  }
+
+  // Poll for pipe to appear (up to 15 seconds — startup includes shader precompile)
+  for (let elapsed = 0; elapsed < 15000; elapsed += 500) {
+    await new Promise(r => setTimeout(r, 500));
+    const pipes = discoverPipes('mdrop');
+    if (pipes.length > 0) {
+      log(`MDropDX12 started (PID ${pipes[0].pid})`);
+      return pipes[0];
+    }
+  }
+  log('MDropDX12 did not start within timeout');
+  return null;
+}
+
+// Check if a captured image is mostly black (< threshold mean brightness).
+// Uses ImageMagick to compute mean brightness. Returns true if black.
+function isCaptureBlack(filePath, threshold = 5) {
+  try {
+    // Get mean brightness (0-255 scale) via ImageMagick
+    const output = execSync(
+      `magick "${filePath}" -colorspace Gray -format "%[fx:mean*255]" info:`,
+      { encoding: 'utf8', timeout: 10000 }
+    ).trim();
+    const mean = parseFloat(output);
+    return !isNaN(mean) && mean < threshold;
+  } catch { return false; } // can't check — assume not black
 }
 
 // ── Cached connection ──
@@ -891,35 +943,78 @@ server.tool(
   }
 );
 
-// Helper: get window rect for a process by PID using PowerShell
-function getWindowRect(pid) {
+// Helper: parse window rect from STATE response
+// MDropDX12: renderwin=(left,top)-(right,bottom)
+// MilkDrop3/Milkwave: WINDOW=(left,top)-(right,bottom) WxH
+function parseWindowRect(stateText) {
+  const m = stateText.match(/(?:renderwin|WINDOW)=\((-?\d+),(-?\d+)\)-\((-?\d+),(-?\d+)\)/);
+  if (!m) return null;
+  const [, l, t, r, b] = m.map(Number);
+  return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+}
+
+// Helper: send a command and collect ALL null-terminated messages until END_BATCH or timeout.
+// Returns array of decoded message strings (END_BATCH sentinel is not included).
+function sendAndCollectAll(pipePath, message, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const messages = [];
+    let recvBuf = Buffer.alloc(0);
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; try { client.destroy(); } catch {} resolve(messages); } };
+
+    const timer = setTimeout(settle, timeoutMs);
+
+    const client = net.connect(pipePath, () => {
+      client.write(Buffer.from(message + '\0', 'utf16le'));
+      client.on('data', (chunk) => {
+        recvBuf = Buffer.concat([recvBuf, chunk]);
+        // Extract all complete null-terminated messages
+        while (recvBuf.length >= 2) {
+          let nullIdx = -1;
+          for (let i = 0; i < recvBuf.length - 1; i += 2) {
+            if (recvBuf[i] === 0 && recvBuf[i + 1] === 0) { nullIdx = i; break; }
+          }
+          if (nullIdx < 0) break;
+          const msg = recvBuf.subarray(0, nullIdx).toString('utf16le');
+          recvBuf = recvBuf.subarray(nullIdx + 2);
+          if (msg === 'END_BATCH') {
+            // Sentinel received — all messages collected, resolve immediately
+            clearTimeout(timer);
+            settle();
+            return;
+          }
+          messages.push(msg);
+        }
+      });
+    });
+    client.on('error', () => settle());
+  });
+}
+
+// Helper: get window rect for a visualizer by querying its pipe
+// STATE sends multiple messages; renderwin=/WINDOW= may not be the first.
+async function getWindowRectViaPipe(pipePath) {
   try {
-    // PowerShell one-liner to get main window position and size
-    const ps = `Add-Type -Name W -Namespace Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }'; $p=Get-Process -Id ${pid} -EA Stop; $r=New-Object Win32.W+RECT; [Win32.W]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null; "$($r.L),$($r.T),$($r.R),$($r.B)"`;
-    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
-    const [l, t, r, b] = output.split(',').map(Number);
-    if ([l, t, r, b].some(isNaN)) return null;
-    return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
+    const msgs = await sendAndCollectAll(pipePath, 'STATE', 2000);
+    for (const msg of msgs) {
+      const rect = parseWindowRect(msg);
+      if (rect) return rect;
+    }
+    return null;
   } catch { return null; }
 }
 
 // Helper: get monitor work area for a point using PowerShell
 function getMonitorWorkArea(x, y) {
   try {
-    const ps = `Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::FromPoint([System.Drawing.Point]::new(${x},${y})); $w=$s.WorkingArea; "$($w.X),$($w.Y),$($w.Width),$($w.Height)"`;
-    const output = execSync(`powershell -NoProfile -Command "${ps}"`, { encoding: 'utf8', timeout: 5000 }).trim();
+    const output = execSync(
+      `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::FromPoint([System.Drawing.Point]::new(${x},${y})); $w=$s.WorkingArea; \\"$($w.X),$($w.Y),$($w.Width),$($w.Height)\\""`,
+      { encoding: 'utf8', timeout: 5000 }
+    ).trim();
     const [mx, my, mw, mh] = output.split(',').map(Number);
     if ([mx, my, mw, mh].some(isNaN)) return null;
     return { left: mx, top: my, width: mw, height: mh, right: mx + mw, bottom: my + mh };
   } catch { return null; }
-}
-
-// Helper: parse renderwin from MDropDX12 STATE response
-function parseMdropWindowRect(stateText) {
-  const m = stateText.match(/renderwin=\((-?\d+),(-?\d+)\)-\((-?\d+),(-?\d+)\)/);
-  if (!m) return null;
-  const [, l, t, r, b] = m.map(Number);
-  return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
 }
 
 // Tool: Compare both visualizers side by side
@@ -932,10 +1027,26 @@ server.tool(
   },
   async ({ preset, delay }) => {
     try {
-      // Discover all pipes with process identification (must use 'all' to get both)
-      const allPipes = discoverPipes('all');
+      // Discover all pipes — auto-launch MDropDX12 if missing
+      let allPipes = discoverPipes('all');
+      const results = [];
+
       if (allPipes.length === 0) {
-        return { content: [{ type: 'text', text: 'No running visualizers found.' }] };
+        return { content: [{ type: 'text', text: 'No running visualizers found. Start at least one reference visualizer (Milkwave/MilkDrop3) first.' }] };
+      }
+
+      // If only a reference visualizer is running, auto-launch MDropDX12
+      if (!allPipes.find(p => p.type === 'mdrop')) {
+        const launchLog = [];
+        const launched = await launchMDropDX12((msg) => launchLog.push(msg));
+        if (launched) {
+          allPipes = discoverPipes('all');
+          results.push({ type: 'text', text: launchLog.join('\n') });
+          // Give MDropDX12 time to initialize rendering
+          await new Promise(r => setTimeout(r, 3000));
+        } else {
+          return { content: [{ type: 'text', text: `Only reference visualizer found. Failed to auto-launch MDropDX12:\n${launchLog.join('\n')}` }] };
+        }
       }
 
       if (allPipes.length < 2) {
@@ -947,24 +1058,23 @@ server.tool(
       const mdropPipe = allPipes.find(p => p.type === 'mdrop') || allPipes[0];
       const milkwavePipe = allPipes.find(p => p !== mdropPipe) || allPipes[1];
 
-      const results = [];
-
-      // --- Position MDropDX12 alongside Milkwave ---
+      // --- Resize and position MDropDX12 to match reference visualizer ---
       const primaryLabel = pipeLabel(mdropPipe.type);
       const secondaryLabel = pipeLabel(milkwavePipe.type);
 
-      const mwRect = getWindowRect(milkwavePipe.pid);
-      if (mwRect) {
-        // Get primary visualizer's current state to check current size
-        const mdropStateForSize = await sendPipeMessage(mdropPipe.path, 'STATE', true).catch(() => '');
-        const mdRect = parseMdropWindowRect(mdropStateForSize);
+      // Get window rects via pipe STATE (no PowerShell needed)
+      const [mwRect, mdRect] = await Promise.all([
+        getWindowRectViaPipe(milkwavePipe.path),
+        getWindowRectViaPipe(mdropPipe.path),
+      ]);
 
+      if (mwRect) {
         // Only reposition if sizes differ
         const alreadyMatched = mdRect &&
           mdRect.width === mwRect.width && mdRect.height === mwRect.height;
 
         if (!alreadyMatched) {
-          // Find the monitor the secondary visualizer is on
+          // Find the monitor the reference visualizer is on
           const mwCenterX = mwRect.left + Math.floor(mwRect.width / 2);
           const mwCenterY = mwRect.top + Math.floor(mwRect.height / 2);
           const monitor = getMonitorWorkArea(mwCenterX, mwCenterY);
@@ -991,12 +1101,14 @@ server.tool(
             }
 
             const setCmd = `SET_WINDOW=${newX},${newY},${mwRect.width},${mwRect.height}`;
-            const posResult = await sendPipeMessage(mdropPipe.path, setCmd, true).catch(e => e.message);
-            results.push({ type: 'text', text: `Positioned ${primaryLabel}: ${posResult}` });
+            const posResult = await sendAndWaitFor(mdropPipe.path, setCmd, 'WINDOW=', 3000).catch(e => e.message);
+            results.push({ type: 'text', text: `Resized ${primaryLabel} to match ${secondaryLabel}: ${posResult}` });
           }
         } else {
           results.push({ type: 'text', text: `${primaryLabel} already matches ${secondaryLabel} size — skipping reposition` });
         }
+      } else {
+        results.push({ type: 'text', text: `Could not get ${secondaryLabel} window rect from STATE` });
       }
 
       // --- Sync audio device: query MDropDX12's active device, set it on Milkwave ---
@@ -1081,17 +1193,38 @@ server.tool(
       results.push({ type: 'text', text: `--- ${primaryLabel} State ---\n${truncState(mdropState)}` });
       results.push({ type: 'text', text: `--- ${secondaryLabel} State ---\n${truncState(milkwaveState)}` });
 
-      // Capture from both with restart-on-failure
+      // Capture from both with restart-on-failure and black frame retry
       const captureLog = [];
       const targets = [
         { pipe: mdropPipe, label: primaryLabel, tag: mdropPipe.type },
         { pipe: milkwavePipe, label: secondaryLabel, tag: milkwavePipe.type },
       ];
-      const captures = [];
-      for (const t of targets) {
-        const result = await captureWithRetry(t.pipe, t.label, captureLog);
-        captures.push({ ...t, ...result });
+
+      const maxBlackRetries = 2;
+      let captures = [];
+      let blackRetry = 0;
+
+      for (;;) {
+        captures = [];
+        for (const t of targets) {
+          const result = await captureWithRetry(t.pipe, t.label, captureLog);
+          captures.push({ ...t, ...result });
+        }
+
+        // Check reference (secondary) capture for black frame
+        const refCapture = captures.find(c => c.pipe === milkwavePipe);
+        if (refCapture?.filePath && isCaptureBlack(refCapture.filePath)) {
+          blackRetry++;
+          if (blackRetry <= maxBlackRetries) {
+            captureLog.push(`${secondaryLabel} capture is black (attempt ${blackRetry}/${maxBlackRetries}) — waiting 3s and retrying...`);
+            await new Promise(r => setTimeout(r, 3000));
+            continue; // retry the capture loop
+          }
+          captureLog.push(`${secondaryLabel} capture is still black after ${maxBlackRetries} retries. The reference preset may render black, or the visualizer may need more time to initialize.`);
+        }
+        break; // captures are good (or we exhausted retries)
       }
+
       if (captureLog.length > 0) {
         results.push({ type: 'text', text: `Capture log:\n  ${captureLog.join('\n  ')}` });
       }
