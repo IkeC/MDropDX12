@@ -33,7 +33,7 @@ function getProcessNames(pids) {
 function classifyPipe(p) {
   const exe = (p.exe || '').toLowerCase();
   if (exe.includes('mdropdx12')) return 'mdrop';
-  if (exe.includes('milkdrop3')) return 'milkdrop3';
+  if (exe.includes('milkdrop3') || exe.includes('milkdrop 3')) return 'milkdrop3';
   if (exe.includes('milkwavevisualizer') || exe.includes('milkwave')) return 'milkwave';
   // Unknown exe — derive tag from exe name (strip .exe, lowercase)
   const base = exe.replace(/\.exe$/i, '').replace(/[^a-z0-9]/g, '_');
