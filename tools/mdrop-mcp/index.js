@@ -901,8 +901,8 @@ function parseWindowRect(stateText) {
   return { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t };
 }
 
-// Helper: send a command and collect ALL null-terminated messages until timeout.
-// Returns array of decoded message strings.
+// Helper: send a command and collect ALL null-terminated messages until END_BATCH or timeout.
+// Returns array of decoded message strings (END_BATCH sentinel is not included).
 function sendAndCollectAll(pipePath, message, timeoutMs = 2000) {
   return new Promise((resolve) => {
     const messages = [];
@@ -923,8 +923,15 @@ function sendAndCollectAll(pipePath, message, timeoutMs = 2000) {
             if (recvBuf[i] === 0 && recvBuf[i + 1] === 0) { nullIdx = i; break; }
           }
           if (nullIdx < 0) break;
-          messages.push(recvBuf.subarray(0, nullIdx).toString('utf16le'));
+          const msg = recvBuf.subarray(0, nullIdx).toString('utf16le');
           recvBuf = recvBuf.subarray(nullIdx + 2);
+          if (msg === 'END_BATCH') {
+            // Sentinel received — all messages collected, resolve immediately
+            clearTimeout(timer);
+            settle();
+            return;
+          }
+          messages.push(msg);
         }
       });
     });

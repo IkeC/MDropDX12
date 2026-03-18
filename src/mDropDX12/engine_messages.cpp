@@ -2506,6 +2506,11 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
         g_pipeServer.Send(buf);
       }
     }
+    // Send end-of-batch sentinel — MCP detects this to resolve immediately
+    {
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(L"END_BATCH");
+    }
   }
   else if (wcsncmp(sMessage, L"LINK=", 5) == 0) {
     std::wstring message(sMessage + 5);
