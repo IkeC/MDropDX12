@@ -243,6 +243,58 @@ async function restartVisualizer(pipe, log) {
   return null;
 }
 
+// Launch MDropDX12 if not running. Returns the new pipe entry or null on failure.
+async function launchMDropDX12(log) {
+  // Check known build output locations
+  const candidates = [
+    path.join(projectRoot, 'src/mDropDX12/Release_x64/MDropDX12.exe'),
+    path.join(projectRoot, 'src/mDropDX12/Debug_x64/MDropDX12.exe'),
+  ];
+  let exePath = null;
+  for (const c of candidates) {
+    if (fs.existsSync(c)) { exePath = c; break; }
+  }
+  if (!exePath) {
+    log('MDropDX12.exe not found in Release_x64 or Debug_x64');
+    return null;
+  }
+
+  log(`Launching MDropDX12 from ${exePath}...`);
+  const exeDir = path.dirname(exePath);
+  try {
+    execSync(`start "" "${exePath}"`, { cwd: exeDir, timeout: 5000, shell: true });
+  } catch (e) {
+    log(`Failed to launch: ${e.message}`);
+    return null;
+  }
+
+  // Poll for pipe to appear (up to 15 seconds — startup includes shader precompile)
+  for (let elapsed = 0; elapsed < 15000; elapsed += 500) {
+    await new Promise(r => setTimeout(r, 500));
+    const pipes = discoverPipes('mdrop');
+    if (pipes.length > 0) {
+      log(`MDropDX12 started (PID ${pipes[0].pid})`);
+      return pipes[0];
+    }
+  }
+  log('MDropDX12 did not start within timeout');
+  return null;
+}
+
+// Check if a captured image is mostly black (< threshold mean brightness).
+// Uses ImageMagick to compute mean brightness. Returns true if black.
+function isCaptureBlack(filePath, threshold = 5) {
+  try {
+    // Get mean brightness (0-255 scale) via ImageMagick
+    const output = execSync(
+      `magick "${filePath}" -colorspace Gray -format "%[fx:mean*255]" info:`,
+      { encoding: 'utf8', timeout: 10000 }
+    ).trim();
+    const mean = parseFloat(output);
+    return !isNaN(mean) && mean < threshold;
+  } catch { return false; } // can't check — assume not black
+}
+
 // ── Cached connection ──
 
 let cachedPipePath = null;
@@ -975,10 +1027,26 @@ server.tool(
   },
   async ({ preset, delay }) => {
     try {
-      // Discover all pipes with process identification (must use 'all' to get both)
-      const allPipes = discoverPipes('all');
+      // Discover all pipes — auto-launch MDropDX12 if missing
+      let allPipes = discoverPipes('all');
+      const results = [];
+
       if (allPipes.length === 0) {
-        return { content: [{ type: 'text', text: 'No running visualizers found.' }] };
+        return { content: [{ type: 'text', text: 'No running visualizers found. Start at least one reference visualizer (Milkwave/MilkDrop3) first.' }] };
+      }
+
+      // If only a reference visualizer is running, auto-launch MDropDX12
+      if (!allPipes.find(p => p.type === 'mdrop')) {
+        const launchLog = [];
+        const launched = await launchMDropDX12((msg) => launchLog.push(msg));
+        if (launched) {
+          allPipes = discoverPipes('all');
+          results.push({ type: 'text', text: launchLog.join('\n') });
+          // Give MDropDX12 time to initialize rendering
+          await new Promise(r => setTimeout(r, 3000));
+        } else {
+          return { content: [{ type: 'text', text: `Only reference visualizer found. Failed to auto-launch MDropDX12:\n${launchLog.join('\n')}` }] };
+        }
       }
 
       if (allPipes.length < 2) {
@@ -989,8 +1057,6 @@ server.tool(
       // Pick the first two distinct visualizers (prefer mdrop as primary)
       const mdropPipe = allPipes.find(p => p.type === 'mdrop') || allPipes[0];
       const milkwavePipe = allPipes.find(p => p !== mdropPipe) || allPipes[1];
-
-      const results = [];
 
       // --- Resize and position MDropDX12 to match reference visualizer ---
       const primaryLabel = pipeLabel(mdropPipe.type);
@@ -1127,17 +1193,38 @@ server.tool(
       results.push({ type: 'text', text: `--- ${primaryLabel} State ---\n${truncState(mdropState)}` });
       results.push({ type: 'text', text: `--- ${secondaryLabel} State ---\n${truncState(milkwaveState)}` });
 
-      // Capture from both with restart-on-failure
+      // Capture from both with restart-on-failure and black frame retry
       const captureLog = [];
       const targets = [
         { pipe: mdropPipe, label: primaryLabel, tag: mdropPipe.type },
         { pipe: milkwavePipe, label: secondaryLabel, tag: milkwavePipe.type },
       ];
-      const captures = [];
-      for (const t of targets) {
-        const result = await captureWithRetry(t.pipe, t.label, captureLog);
-        captures.push({ ...t, ...result });
+
+      const maxBlackRetries = 2;
+      let captures = [];
+      let blackRetry = 0;
+
+      for (;;) {
+        captures = [];
+        for (const t of targets) {
+          const result = await captureWithRetry(t.pipe, t.label, captureLog);
+          captures.push({ ...t, ...result });
+        }
+
+        // Check reference (secondary) capture for black frame
+        const refCapture = captures.find(c => c.pipe === milkwavePipe);
+        if (refCapture?.filePath && isCaptureBlack(refCapture.filePath)) {
+          blackRetry++;
+          if (blackRetry <= maxBlackRetries) {
+            captureLog.push(`${secondaryLabel} capture is black (attempt ${blackRetry}/${maxBlackRetries}) — waiting 3s and retrying...`);
+            await new Promise(r => setTimeout(r, 3000));
+            continue; // retry the capture loop
+          }
+          captureLog.push(`${secondaryLabel} capture is still black after ${maxBlackRetries} retries. The reference preset may render black, or the visualizer may need more time to initialize.`);
+        }
+        break; // captures are good (or we exhausted retries)
       }
+
       if (captureLog.length > 0) {
         results.push({ type: 'text', text: `Capture log:\n  ${captureLog.join('\n  ')}` });
       }
