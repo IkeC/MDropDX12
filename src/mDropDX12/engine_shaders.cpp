@@ -1787,6 +1787,112 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix matrix * vector multiplication (HLSL requires mul())
   FixMatrixVarMultiply(szShaderText);
 
+  // Safe division: wrap variable denominators with _safe_denom() inside the main PS body only.
+  // DX9 returns 0 for 0/0 (non-IEEE); DX12 returns NaN (IEEE 754) which propagates through
+  // += and poisons the entire frame. _safe_denom(0)=1e-30, so 0/1e-30=0 matching DX9.
+  // IMPORTANT: Only process inside void PS(...){...} — NOT helper functions before shader_body.
+  // Uses output buffer approach (not in-place memmove) to avoid pointer arithmetic bugs.
+  if ((shaderType == SHADER_WARP || shaderType == SHADER_COMP) && szProfile[0] == 'p') {
+    char* psStart = strstr(szShaderText, "void PS(");
+    if (psStart) {
+      char* bodyStart = strchr(psStart, '{');
+      if (bodyStart) {
+        bodyStart++;
+        int depth = 1;
+        char* bodyEnd = bodyStart;
+        while (*bodyEnd && depth > 0) {
+          if (*bodyEnd == '{') depth++;
+          else if (*bodyEnd == '}') depth--;
+          if (depth > 0) bodyEnd++;
+        }
+        // Build output in a separate buffer
+        size_t totalLen = strlen(szShaderText);
+        size_t extraRoom = 16384;
+        char* outBuf = (char*)malloc(totalLen + extraRoom);
+        if (outBuf) {
+          // Copy everything before bodyStart verbatim
+          size_t prefixLen = bodyStart - szShaderText;
+          memcpy(outBuf, szShaderText, prefixLen);
+          char* dst = outBuf + prefixLen;
+          char* src = bodyStart;
+          auto isIdent = [](char c) -> bool {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+          };
+          while (src < bodyEnd) {
+            if (*src == '/' && src[1] != '/' && src[1] != '*' && src[1] != '=') {
+              if (src > szShaderText && *(src - 1) == '*') { *dst++ = *src++; continue; }
+              *dst++ = *src++; // copy '/'
+              // Skip whitespace (copy to output)
+              while (*src == ' ' || *src == '\t') *dst++ = *src++;
+              // Skip numeric/dot constants
+              if ((*src >= '0' && *src <= '9') || *src == '.') continue;
+              if (*src == '-') {
+                char* am = src + 1; while (*am == ' ') am++;
+                if (*am >= '0' && *am <= '9') continue;
+              }
+              if (*src == '(') {
+                // Parenthesized expr — find matching ')' and wrap
+                memcpy(dst, "_safe_denom(", 12); dst += 12;
+                int pd = 1;
+                *dst++ = *src++; // copy '('
+                while (*src && pd > 0) {
+                  if (*src == '(') pd++;
+                  else if (*src == ')') pd--;
+                  *dst++ = *src++;
+                }
+                *dst++ = ')'; // close _safe_denom
+                continue;
+              }
+              if (isIdent(*src) && !(*src >= '0' && *src <= '9')) {
+                char* idStart = src;
+                while (isIdent(*src)) src++;
+                // Check for function call
+                char* peek = src;
+                while (*peek == ' ' || *peek == '\t') peek++;
+                if (*peek == '(') {
+                  // Function call — copy name + args, wrap whole thing
+                  memcpy(dst, "_safe_denom(", 12); dst += 12;
+                  // Copy identifier
+                  memcpy(dst, idStart, src - idStart); dst += (src - idStart);
+                  // Copy whitespace between name and (
+                  while (src < peek) *dst++ = *src++;
+                  // Copy parens + args
+                  int pd = 1;
+                  *dst++ = *src++; // copy '('
+                  while (*src && pd > 0) {
+                    if (*src == '(') pd++;
+                    else if (*src == ')') pd--;
+                    *dst++ = *src++;
+                  }
+                  *dst++ = ')'; // close _safe_denom
+                } else {
+                  // Simple variable (+ .swizzle)
+                  memcpy(dst, "_safe_denom(", 12); dst += 12;
+                  memcpy(dst, idStart, src - idStart); dst += (src - idStart);
+                  while (*src == '.') { *dst++ = *src++; while (isIdent(*src)) *dst++ = *src++; }
+                  *dst++ = ')'; // close _safe_denom
+                }
+                continue;
+              }
+              continue;
+            }
+            *dst++ = *src++;
+          }
+          // Copy from bodyEnd to end of string (closing '}' + any trailing text)
+          size_t suffixLen = strlen(bodyEnd);
+          memcpy(dst, bodyEnd, suffixLen + 1);
+          dst += suffixLen;
+          // Copy back if it fits
+          size_t outLen = dst - outBuf;
+          if (outLen < totalLen + extraRoom) {
+            memcpy(szShaderText, outBuf, outLen + 1);
+          }
+          free(outBuf);
+        }
+      }
+    }
+  }
+
   // Replace normalize() with _safe_normalize() to prevent NaN from zero-length vectors.
   // DX9 SM3.0 normalize(0) returns 0; DX12 SM5.0 returns NaN which propagates through
   // the feedback loop and darkens the image over time.
