@@ -900,14 +900,19 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 
       // update m_fBlendProgress;
       if (m_pState->m_bBlending) {
-        m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
-        if (m_pState->m_fBlendProgress > 1.0f) {
-          m_pState->m_bBlending = false;
-          // Release blend-only PSOs (no longer needed after blend completes)
-          m_dx12OldWarpPSO.Reset();
-          m_dx12WarpBlendPSO.Reset();
-          m_dx12OldCompPSO.Reset();
-          m_dx12CompBlendPSO.Reset();
+        if (m_bMilk2FrozenBlend) {
+          // .milk2: blend stays frozen at the progress value from the file metadata
+          m_pState->m_fBlendProgress = m_fMilk2FrozenProgress;
+        } else {
+          m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
+          if (m_pState->m_fBlendProgress > 1.0f) {
+            m_pState->m_bBlending = false;
+            // Release blend-only PSOs (no longer needed after blend completes)
+            m_dx12OldWarpPSO.Reset();
+            m_dx12WarpBlendPSO.Reset();
+            m_dx12OldCompPSO.Reset();
+            m_dx12CompBlendPSO.Reset();
+          }
         }
       }
 

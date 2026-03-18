@@ -753,6 +753,8 @@ public:
   CState* m_pMilk2OldState;      // 4th CState for .milk2 preset 1 (old/blend-from state)
   PShaderSet m_Milk2OldShaders;   // preset 1's shaders during .milk2 async load
   int     m_nMilk2MixType = -1;   // blend pattern from .milk2 metadata
+  bool    m_bMilk2FrozenBlend = false;  // true when .milk2 blend is permanently frozen
+  float   m_fMilk2FrozenProgress = 0.5f; // frozen blend progress from .milk2 metadata
   wchar_t m_szMilk2Temp1[MAX_PATH] = {};  // temp file for preset 1 (deleted after load)
   wchar_t m_szMilk2Temp2[MAX_PATH] = {};  // temp file for preset 2 (deleted after load)
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS

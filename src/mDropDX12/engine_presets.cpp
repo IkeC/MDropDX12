@@ -1524,17 +1524,36 @@ void Engine::RemoveAngleBrackets(wchar_t* str) {
 // Returns -1 (random) for any name that is not explicitly mapped.
 static int Milk2PatternNameToMixtype(const char* name) {
   struct { const char* name; int type; } kMap[] = {
-    {"zoom",     0},  // uniform fade
-    {"side",     1},  // directional wipe
-    {"plasma",   2},  // fractal plasma
-    {"cercle",   3},  // radial / circle
-    {"clock",    4},  // angular clock sweep
-    {"snail",    5},  // spiral
-    {"snail2",   5},
-    {"snail3",   5},
-    {"triangle", 6},
-    {"plasma2",  2},  // plasma variants -> plasma
-    {"plasma3",  2},
+    {"zoom",             0},  // uniform fade
+    {"side",             1},  // directional wipe
+    {"plasma",           2},  // fractal plasma
+    {"plasma2",          2},  // plasma variants -> plasma
+    {"plasma3",          2},
+    {"cercle",           3},  // radial / circle
+    {"clock",            4},  // angular clock sweep
+    {"snail",            5},  // spiral
+    {"snail2",           5},
+    {"snail3",           5},
+    {"triangle",         6},  // rhombus/diamond
+    {"nuclear",          7},  // nuclear clock wipe
+    {"square",           8},  // square/diamond
+    {"checkerboard",     9},  // animated checkerboard
+    {"curtain",         10},  // curtain
+    {"vertical",        10},  // curtain variant
+    {"horizontal",      10},
+    {"bubbles",         11},  // bubble
+    {"donuts",          11},  // donuts -> bubble (concentric circles)
+    {"stars",           12},  // kaleidoscope wipe
+    {"stars2",          12},
+    {"cisor",           13},  // moebius strip
+    {"wave",            14},  // star wipe
+    {"linesvertical",   15},  // disco floor
+    {"lineshorizontal", 15},
+    {"patches",         16},  // fire/flame
+    {"corner",          17},  // drain swirl
+    {"cross",           18},  // julia fractal
+    {"cross2",          18},
+    {"arrow",            1},  // arrow -> directional wipe
   };
   for (auto& e : kMap)
     if (_stricmp(name, e.name) == 0) return e.type;
@@ -1827,6 +1846,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
   m_nLoadingPreset = 1;
   m_bPresetLoadReady = false;
+  m_bMilk2FrozenBlend = false;  // clear frozen blend from any previous .milk2
   m_fLoadingPresetBlendTime = fBlendTime;
   lstrcpyW(m_szLoadingPreset, szPresetFilename);
   m_fLoadStartTime = GetTime();
@@ -1865,6 +1885,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       return;
     }
     m_nMilk2MixType = mixType;
+    // direction=-1 reverses the blend (swap which preset is "from" vs "to")
+    m_fMilk2FrozenProgress = (direction < 0) ? (1.0f - progress) : progress;
 
     float loadTime = GetTime();
     uint64_t myGeneration = ++m_nLoadGeneration;
@@ -2125,12 +2147,14 @@ void Engine::LoadPresetTick() {
 
     // Apply blend or hard-cut based on the requested blend time
     if (m_bLoadingMilk2) {
-      // .milk2 uses its own blend pattern from metadata
+      // .milk2: frozen blend — both presets render simultaneously at fixed progress
       int savedMixType = m_nMixType;
       m_nMixType = m_nMilk2MixType;
       RandomizeBlendPattern();
       m_nMixType = savedMixType;
-      m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), 1.0f); // duration doesn't matter — we freeze it
+      m_pState->m_fBlendProgress = m_fMilk2FrozenProgress;
+      m_bMilk2FrozenBlend = true;
     } else if (m_fLoadingPresetBlendTime >= 0.001f) {
       RandomizeBlendPattern();
       m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
