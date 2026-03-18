@@ -1723,6 +1723,7 @@ void mdrop::Engine::BlurPasses() {
 
   // set up fullscreen quad
   MYVERTEX v[4];
+  ZeroMemory(v, sizeof(v));
 
   v[0].x = -1;
   v[0].y = -1;
@@ -1733,7 +1734,12 @@ void mdrop::Engine::BlurPasses() {
   v[3].x = 1;
   v[3].y = 1;
 
-  v[0].tu = 0;    //kiv: upside-down?
+  for (int i = 0; i < 4; i++) {
+    v[i].Diffuse = 0xFFFFFFFF;
+    v[i].rad = 1.0f;
+  }
+
+  v[0].tu = 0;
   v[0].tv = 0;
   v[1].tu = 1;
   v[1].tv = 0;
