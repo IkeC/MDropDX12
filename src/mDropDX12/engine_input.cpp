@@ -520,6 +520,9 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
   case WM_MW_RESET_BUFFERS:
     EnqueueRenderCmd(RenderCmd::ResetBuffers);
     return 0;
+  case WM_MW_RESET_PIPELINE:
+    EnqueueRenderCmd(RenderCmd::ResetPipeline);
+    return 0;
   case WM_MW_RESTART_DEVICE:
     EnqueueRenderCmd(RenderCmd::DeviceRecovery);
     return 0;

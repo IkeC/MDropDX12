@@ -900,14 +900,19 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 
       // update m_fBlendProgress;
       if (m_pState->m_bBlending) {
-        m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
-        if (m_pState->m_fBlendProgress > 1.0f) {
-          m_pState->m_bBlending = false;
-          // Release blend-only PSOs (no longer needed after blend completes)
-          m_dx12OldWarpPSO.Reset();
-          m_dx12WarpBlendPSO.Reset();
-          m_dx12OldCompPSO.Reset();
-          m_dx12CompBlendPSO.Reset();
+        if (m_bMilk2FrozenBlend) {
+          // .milk2: blend stays frozen at the progress value from the file metadata
+          m_pState->m_fBlendProgress = m_fMilk2FrozenProgress;
+        } else {
+          m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
+          if (m_pState->m_fBlendProgress > 1.0f) {
+            m_pState->m_bBlending = false;
+            // Release blend-only PSOs (no longer needed after blend completes)
+            m_dx12OldWarpPSO.Reset();
+            m_dx12WarpBlendPSO.Reset();
+            m_dx12OldCompPSO.Reset();
+            m_dx12CompBlendPSO.Reset();
+          }
         }
       }
 
@@ -1718,6 +1723,7 @@ void mdrop::Engine::BlurPasses() {
 
   // set up fullscreen quad
   MYVERTEX v[4];
+  ZeroMemory(v, sizeof(v));
 
   v[0].x = -1;
   v[0].y = -1;
@@ -1728,7 +1734,12 @@ void mdrop::Engine::BlurPasses() {
   v[3].x = 1;
   v[3].y = 1;
 
-  v[0].tu = 0;    //kiv: upside-down?
+  for (int i = 0; i < 4; i++) {
+    v[i].Diffuse = 0xFFFFFFFF;
+    v[i].rad = 1.0f;
+  }
+
+  v[0].tu = 0;
   v[0].tv = 0;
   v[1].tu = 1;
   v[1].tv = 0;

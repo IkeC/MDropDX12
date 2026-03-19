@@ -1190,7 +1190,7 @@ void Engine::MyPreInitialize() {
   //m_bFixSlowText          = true;
   //m_bWarningsDisabled     = false;
   m_bWarningsDisabled2 = false;
-  //m_bAnisotropicFiltering = true;
+  m_bAnisotropicFiltering = false;
   m_bPresetLockOnAtStartup = true;
   m_bPreventScollLockHandling = false;
   m_nMaxPSVersion_ConfigPanel = -1;  // -1 = auto, 0 = disable shaders, 2 = ps_2_0, 3 = ps_3_0
@@ -1474,7 +1474,7 @@ void Engine::MyReadConfig() {
   //m_bAlwaysOnTop		= GetPrivateProfileBool("settings","bAlwaysOnTop",m_bAlwaysOnTop,pIni);
   //m_bWarningsDisabled		= GetPrivateProfileBool("settings","bWarningsDisabled",m_bWarningsDisabled,pIni);
   m_bWarningsDisabled2 = GetPrivateProfileBoolW(L"Settings", L"bWarningsDisabled2", m_bWarningsDisabled2, pIni);
-  //m_bAnisotropicFiltering = GetPrivateProfileBool("settings","bAnisotropicFiltering",m_bAnisotropicFiltering,pIni);
+  m_bAnisotropicFiltering = GetPrivateProfileBoolW(L"Settings", L"bAnisotropicFiltering", m_bAnisotropicFiltering, pIni);
   m_bPresetLockOnAtStartup = GetPrivateProfileBoolW(L"Settings", L"bPresetLockOnAtStartup", m_bPresetLockOnAtStartup, pIni);
   m_bSequentialPresetOrder = GetPrivateProfileBoolW(L"Settings", L"bSequentialPresetOrder", m_bSequentialPresetOrder, pIni);
   m_nSubdirMode = GetPrivateProfileIntW(L"Settings", L"nSubdirMode", m_nSubdirMode, pIni);
@@ -1773,7 +1773,7 @@ void Engine::MyWriteConfig() {
   //itePrivateProfileInt(m_bAlwaysOnTop,		    "bAlwaysOnTop",			pIni, "settings");
   //WritePrivateProfileIntW(m_bWarningsDisabled,	    "bWarningsDisabled",	pIni, "settings");
   WritePrivateProfileIntW(m_bWarningsDisabled2, L"bWarningsDisabled2", pIni, L"Settings");
-  //WritePrivateProfileIntW(m_bAnisotropicFiltering,	"bAnisotropicFiltering",pIni, "settings");
+  WritePrivateProfileIntW(m_bAnisotropicFiltering, L"bAnisotropicFiltering", pIni, L"Settings");
   WritePrivateProfileIntW(m_bPresetLockOnAtStartup, L"bPresetLockOnAtStartup", pIni, L"Settings");
   WritePrivateProfileIntW(m_bSequentialPresetOrder, L"bSequentialPresetOrder", pIni, L"Settings");
   WritePrivateProfileIntW(m_nSubdirMode, L"nSubdirMode", pIni, L"Settings");

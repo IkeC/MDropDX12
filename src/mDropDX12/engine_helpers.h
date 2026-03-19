@@ -349,6 +349,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WTP_OK              2190  // Button: OK
 #define IDC_MW_WTP_CANCEL          2191  // Button: Cancel
 #define IDC_MW_WTP_WINDOWS         2192  // ComboBox: enumerated windows dropdown
+#define IDC_MW_ANISO               2193  // Checkbox: Anisotropic Filtering (Visual tab)
 
 // Video Input source selector (Displays tab)
 #define IDC_MW_VIDINPUT_SOURCE      7050
@@ -982,6 +983,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_MIDI_DATA           (WM_APP + 23) // lParam = packed MIDI bytes from MidiInput callback
 #define WM_MW_NO_PRESETS_PROMPT   (WM_APP + 24) // show "no presets" dialog on UI thread
 #define WM_MW_BRING_TO_TOP        (WM_APP + 26) // raise tool window above fullscreen render
+#define WM_MW_RESET_PIPELINE      (WM_APP + 27) // recreate root signature + all PSOs (aniso toggle)
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

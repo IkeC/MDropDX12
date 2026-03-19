@@ -189,6 +189,8 @@ public:
   ComPtr<ID3D12RootSignature> m_rootSignature;
   ComPtr<ID3D12RootSignature> m_blurRootSignature; // Same layout but s0 = CLAMP (blur passes need CLAMP, not WRAP)
   bool CreateRootSignature();
+  bool RecreateRootSigAndPipelines();
+  bool m_bAnisotropicFiltering = false;
 
   // Pipeline state objects (Phase 3)
   ComPtr<ID3D12PipelineState> m_PSOs[PSO_COUNT];

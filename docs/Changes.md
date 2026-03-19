@@ -1,5 +1,29 @@
 # MDropDX12 Changelog
 
+## v2.6.0 (2026-03-18)
+
+Shader compatibility, rendering quality, and .milk2 blend improvements.
+
+### New Features
+
+- **Anisotropic Filtering** (Visual window): 16x anisotropic filtering toggle for linear DX12 samplers. Off by default.
+
+### Preset Rendering Fixes
+
+- **Safe division for DX9 compatibility**: `_safe_denom()` wrapper prevents NaN from `0/0` in shader bodies (DX9 returns 0, DX12 returns NaN).
+- **Initialize comp quad Diffuse**: Fixed uninitialized vertex diffuse color on fullscreen comp quad.
+
+### .milk2 Blend Improvements
+
+- **Fixed wipe patterns**: `blending_pattern=horizontal` and `blending_pattern=vertical` in `.milk2` files now use dedicated fixed-position wipe shaders.
+
+### MCP Server
+
+- Auto-launch MDropDX12 and black frame retry in compare tool
+- END_BATCH sentinel for instant multi-message pipe responses
+- MilkDrop 3 pipe classification fix (exe name with space)
+- Compare window positioning via pipe STATE
+
 ## v2.5.0 (2026-03-17)
 
 Rendering accuracy, quality controls, and stability release.
