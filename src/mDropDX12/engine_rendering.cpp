@@ -506,7 +506,7 @@ void Engine::MyRenderUI(
     // NOTE: custom timed msg comes at the end!!
   }
 
-  // 1b. render timed preset name display (Simple mode) — centered at top
+  // 1b. render timed preset name display (Simple mode) — right-aligned at top
   if (m_bShowNotifications && m_szPresetNameDisplay[0] && GetTime() < m_fPresetNameShowUntil) {
     SelectFont(DECORATIVE_FONT);
     float fAge = GetTime() - (m_fPresetNameShowUntil - 3.5f);
@@ -520,7 +520,7 @@ void Engine::MyRenderUI(
     DWORD cb = m_fontinfo[DECORATIVE_FONT].B;
     DWORD color = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
     SetRect(&r, xL, h / 2, xR, h / 2 + h * 2);
-    m_text.DrawTextW(pFont, m_szPresetNameDisplay, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_CENTER | DT_END_ELLIPSIS, color, false, 0xFF000000);
+    m_text.DrawTextW(pFont, m_szPresetNameDisplay, -1, &r, DT_NOPREFIX | DT_SINGLELINE | DT_RIGHT | DT_END_ELLIPSIS, color, false, 0xFF000000);
   }
 
   // 2. render text in lower-right corner

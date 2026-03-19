@@ -720,6 +720,13 @@ void CTextManager::DrawNow() {
           visibleChars++;
         }
         useEllipsis = true;
+
+        // Recalculate pen position for truncated text with DT_RIGHT/DT_CENTER
+        float truncatedW = accum + ellipsisW;
+        if (entry.flags & DT_CENTER)
+          penX = entry.rect.left + (rectW - truncatedW) * 0.5f;
+        else if (entry.flags & DT_RIGHT)
+          penX = (float)entry.rect.right - truncatedW;
       }
 
       // Lambda to emit a character quad

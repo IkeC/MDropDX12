@@ -1408,10 +1408,19 @@ void EngineShell::DrawAndDisplay(int redraw) {
     textMargin = (int)(textMargin * q);
   }
 
+  // Text overlay is drawn on the full-resolution backbuffer, so compute
+  // layout margins from unscaled client dimensions (not quality-scaled cx/cy).
+  // Quality scaling only affects internal render targets (warp/comp buffers).
+  int textCx = m_lpDX->m_client_width;
+  int textCy = m_lpDX->m_client_height;
+  if (IsSpoutActiveAndFixed()) {
+    textCx = nSpoutFixedWidth;
+    textCy = nSpoutFixedHeight;
+  }
   int marginTop = textMargin + GetCanvasMarginY();
-  int marginBottom = cy - textMargin - GetCanvasMarginY();
+  int marginBottom = textCy - textMargin - GetCanvasMarginY();
   int marginLeft = textMargin + GetCanvasMarginX();
-  int marginRight = cx - textMargin - GetCanvasMarginX();
+  int marginRight = textCx - textMargin - GetCanvasMarginX();
 
   m_upper_left_corner_y = marginTop;
   m_upper_right_corner_y = marginTop;
