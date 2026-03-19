@@ -2446,6 +2446,9 @@ unsigned __stdcall RenderThreadProc(void* data) {
 
     mdropdx12.LogInfo(L"RenderThread: Render loop starting");
     unsigned int frame = 0;
+    int consecutiveExceptions = 0;       // consecutive exceptions on current preset
+    int presetsSkippedForExceptions = 0; // total presets skipped this session
+    bool safeMode = false;               // true = black screen, stop loading presets
 
     while (!g_bQuitRequested.load()) {
       // Pump messages for windows owned by the render thread (mirror windows).
@@ -2458,8 +2461,23 @@ unsigned __stdcall RenderThreadProc(void* data) {
 
       try {
         GetAudioBuf(pcmLeftIn, pcmRightIn, SAMPLE_SIZE);
-        RenderFrame();
+        if (!safeMode) {
+          RenderFrame();
+        } else {
+          // Safe mode: process commands (so user can load a preset via IPC/UI)
+          // but don't render — prevents cascading GPU faults
+          g_engine.ProcessPendingCommands();
+          // Exit safe mode when user loads a new preset (nLoadingPreset set by commands)
+          if (g_engine.m_nLoadingPreset != 0) {
+            mdropdx12.LogInfo(L"SEH recovery: exiting safe mode (user loaded preset)");
+            safeMode = false;
+            presetsSkippedForExceptions = 0;
+          }
+          Sleep(16); // ~60fps idle
+        }
+        consecutiveExceptions = 0; // successful frame resets counter
       } catch (const std::exception& e) {
+        consecutiveExceptions++;
         try {
           std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
           std::wstring emsg = converter.from_bytes(e.what());
@@ -2469,8 +2487,30 @@ unsigned __stdcall RenderThreadProc(void* data) {
           mdropdx12.LogInfo(L"Exception in render loop (failed to convert exception message)");
         }
       } catch (...) {
+        consecutiveExceptions++;
         mdropdx12.LogInfo(L"Unknown non-standard exception in render loop");
       }
+
+      // SEH recovery: skip to next preset after 3 consecutive exceptions
+      if (consecutiveExceptions >= 3 && !safeMode) {
+        presetsSkippedForExceptions++;
+        wchar_t skipMsg[256];
+        swprintf(skipMsg, 256, L"SEH recovery: %d consecutive exceptions, skipping preset (%d skipped this session)",
+                 consecutiveExceptions, presetsSkippedForExceptions);
+        mdropdx12.LogInfo(skipMsg);
+        g_engine.AddError(L"Preset crashed - skipping to next", 4.0f, ERR_PRESET, true);
+        g_engine.AutoFlagPresetError(g_engine.m_szCurrentPresetFile, std::wstring(L"SEH: consecutive render exceptions"));
+        g_engine.NextPreset(0.0f); // hard cut, no blend
+        consecutiveExceptions = 0;
+
+        // Safe mode after 10 presets skipped: stop trying, show black screen
+        if (presetsSkippedForExceptions >= 10) {
+          mdropdx12.LogInfo(L"SEH recovery: 10 presets skipped - entering safe mode");
+          g_engine.AddError(L"Safe mode: too many preset crashes", 8.0f, ERR_ALL, true);
+          safeMode = true;
+        }
+      }
+
       frame++;
     }
 
