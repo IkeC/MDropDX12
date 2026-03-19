@@ -428,13 +428,13 @@ void Engine::MyRenderUI(
   // 1. render text in upper-right corner - EXCEPT USER MESSAGE - it goes last b/c it draws a box under itself
   //                                        and it should be visible over everything else (usually an error msg)
   {
-    // a) preset name
+    // a) preset name with lock icon (U+E000 = baked lock glyph in font atlas)
     if (m_bShowPresetInfo && !m_blackmode) {
       SelectFont(DECORATIVE_FONT);
       swprintf(
         buf,
         L"%s%s ",
-        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\u2022 " : L"",
+        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\uE000 " : L"",
         (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
 
       DWORD alpha = 255;

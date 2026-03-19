@@ -54,10 +54,14 @@ static const int ATLAS_LAST_CHAR  = 0xFF;
 // Extra Unicode characters beyond 0xFF, rendered into spare atlas slots (224..239).
 // These get atlas glyph index = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + i
 static const wchar_t ATLAS_EXTRA_CHARS[] = {
-    0x2022, // • BULLET (lock indicator)
+    0x2022, // • BULLET (unused, kept for index stability)
     0x2191, // ↑ UP ARROW (Shadertoy preset indicator)
 };
 static const int ATLAS_NUM_EXTRAS = (int)(sizeof(ATLAS_EXTRA_CHARS) / sizeof(ATLAS_EXTRA_CHARS[0]));
+
+// Special glyph codes for baked icons (mapped to unused control char slots)
+// These are NOT rendered by GDI — they are painted pixel-by-pixel into the atlas.
+static const int GLYPH_LOCK_ICON = 2; // glyphs[2] = baked lock icon
 
 // Map a Unicode character to its atlas glyph index, or -1 if not in atlas.
 // Main range (0x20-0xFF): glyph index = character code (direct indexing).
@@ -73,6 +77,9 @@ static int CharToGlyphIndex(int c) {
         if (c == (int)ATLAS_EXTRA_CHARS[i])
             return i; // map to glyphs[0], glyphs[1], ... (unused control char slots)
     }
+    // Baked lock icon: map U+E000 (Private Use Area) to GLYPH_LOCK_ICON slot
+    if (c == 0xE000)
+        return GLYPH_LOCK_ICON;
     return -1; // not in atlas
 }
 
@@ -305,6 +312,83 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   SelectObject(memDC, oldBmp);
   DeleteObject(hFont);
   DeleteDC(memDC);
+
+  // 5c. Bake lock icon into atlas slot GLYPH_LOCK_ICON.
+  // Pixel art lock: shackle (rounded arch) + body (filled rectangle with keyhole).
+  // Drawn at native cell resolution, scaled to 60% of cellH for vertical centering.
+  {
+    int gridSlot = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + ATLAS_NUM_EXTRAS; // next free slot
+    int col = gridSlot % ATLAS_COLS;
+    int row = gridSlot / ATLAS_COLS;
+    int ox = col * cellW; // origin x in atlas
+    int oy = row * cellH; // origin y in atlas
+
+    // Design lock at a fixed logical size, then scale to cell
+    // Lock proportions: width ~= 0.6*cellH, height ~= 0.85*cellH
+    int lockH = max(10, (int)(cellH * 0.75f));
+    int lockW = max(8, (int)(lockH * 0.7f));
+    int bodyH = lockH * 5 / 9;     // body is bottom 55%
+    int shackleH = lockH - bodyH;  // shackle is top 45%
+    int shackleThick = max(1, lockW / 6);
+    int bodyX = ox;                              // left-aligned
+    int bodyY = oy + (cellH - lockH) / 2 + shackleH; // below shackle
+    int shackleX = bodyX + shackleThick;
+    int shackleY = oy + (cellH - lockH) / 2;
+
+    BYTE* pixels = (BYTE*)dibBits;
+    auto setPixel = [&](int px, int py, BYTE val) {
+      if (px >= 0 && px < atlasW && py >= 0 && py < atlasH) {
+        int i = (py * atlasW + px) * 4;
+        pixels[i + 0] = val; pixels[i + 1] = val; pixels[i + 2] = val; // BGR
+      }
+    };
+
+    // Draw body (filled rectangle)
+    for (int py = bodyY; py < bodyY + bodyH && py < atlasH; py++)
+      for (int px = bodyX; px < bodyX + lockW && px < atlasW; px++)
+        setPixel(px, py, 255);
+
+    // Draw shackle (U-shaped arch)
+    int shInnerW = lockW - shackleThick * 2;
+    int shOuterW = lockW - shackleThick * 2;
+    for (int py = shackleY; py < bodyY; py++) {
+      // Left pillar
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(shackleX + t, py, 255);
+      // Right pillar
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(shackleX + shInnerW + t, py, 255);
+    }
+    // Top bar connecting pillars
+    for (int px = shackleX; px < shackleX + shInnerW + shackleThick; px++)
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(px, shackleY + t, 255);
+
+    // Keyhole (dark circle + slit in center of body)
+    int khX = bodyX + lockW / 2;
+    int khY = bodyY + bodyH / 3;
+    int khR = max(1, bodyH / 6);
+    for (int dy = -khR; dy <= khR; dy++)
+      for (int dx = -khR; dx <= khR; dx++)
+        if (dx * dx + dy * dy <= khR * khR)
+          setPixel(khX + dx, khY + dy, 0);
+    // Slit below circle
+    for (int sy = khY; sy < khY + bodyH / 3; sy++)
+      setPixel(khX, sy, 0);
+
+    // Store glyph metrics
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+    GlyphInfo& g = atlas.glyphs[GLYPH_LOCK_ICON];
+    g.u0       = (float)ox / (float)atlasW + halfTexelU;
+    g.v0       = (float)oy / (float)atlasH + halfTexelV;
+    g.u1       = (float)(ox + cellW) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(oy + cellH) / (float)atlasH - halfTexelV;
+    g.advanceX = (float)(lockW + 8); // advance = lock width + small gap
+    g.bearingX = 0;
+    g.glyphWidth  = (float)cellW;
+    g.glyphHeight = (float)cellH;
+  }
 
   // 6. Post-process: convert GDI grayscale to premultiplied alpha
   // GDI renders white text (R=G=B=intensity, A=0) on black (all zeros).
