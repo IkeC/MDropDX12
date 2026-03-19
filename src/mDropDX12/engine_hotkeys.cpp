@@ -168,6 +168,7 @@ void Engine::ResetHotkeyDefaults()
     // ── Misc ──
     HK_DEF(i++, HK_DEBUG_INFO,        0,                     'N',          HKSCOPE_LOCAL, HKCAT_MISC, L"Debug Info",              L"DebugInfo");
     HK_DEF(i++, HK_SPRITE_MODE,       0,                     'K',          HKSCOPE_LOCAL, HKCAT_MISC, L"Sprite/Message Mode",    L"SpriteMode");
+    HK_DEF(i++, HK_TOGGLE_MESSAGES,   0,                     0,            HKSCOPE_LOCAL, HKCAT_MISC, L"Toggle Messages",        L"ToggleMessages");
 
     // User-added hotkeys (Script/Launch) are NOT reset here — they're user-created.
 }
@@ -946,6 +947,11 @@ bool Engine::DispatchHotkeyAction(int actionId)
         }
         m_nNumericInputNum = 0;
         m_nNumericInputDigits = 0;
+        return true;
+
+    case HK_TOGGLE_MESSAGES:
+        m_nSpriteMessagesMode ^= 1; // toggle messages bit
+        AddNotification(MessagesEnabled() ? L"Messages ON" : L"Messages OFF");
         return true;
 
     default:

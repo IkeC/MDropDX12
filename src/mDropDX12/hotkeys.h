@@ -145,6 +145,7 @@ enum HotkeyAction : int {
     HK_POLL_TRACK_INFO,           // Middle Mouse — force track info poll
     HK_MIRROR_WATERMARK,          // (unbound) — toggle mirror watermark mode
     HK_WATERMARK,                 // (unbound) — toggle clickthrough/watermark mode
+    HK_TOGGLE_MESSAGES,           // (unbound) — toggle messages.ini messages on/off
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };
