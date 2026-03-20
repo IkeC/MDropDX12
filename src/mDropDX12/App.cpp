@@ -2716,7 +2716,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     g_tcpServer.LoadAuthorizedDevices(pIni);
 
     int tcpPort = GetPrivateProfileIntW(L"Network", L"TcpPort", 9270, pIni);
-    bool tcpEnabled = GetPrivateProfileIntW(L"Network", L"TcpEnabled", 1, pIni) != 0;
+    bool tcpEnabled = GetPrivateProfileIntW(L"Network", L"TcpEnabled", 0, pIni) != 0;
 
     if (tcpEnabled) {
       g_tcpServer.Start(tcpPort,
