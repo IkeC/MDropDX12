@@ -3480,6 +3480,30 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     }
     g_pipeServer.Send(response);
   }
+  else if (wcsncmp(sMessage, L"TOGGLE_MESSAGES", 15) == 0) {
+    m_nSpriteMessagesMode ^= 1; // toggle messages bit
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MESSAGES=%d", MessagesEnabled() ? 1 : 0);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"SET_MESSAGES=", 13) == 0) {
+    int val = _wtoi(sMessage + 13);
+    if (val)
+      m_nSpriteMessagesMode |= 1;  // enable messages bit
+    else
+      m_nSpriteMessagesMode &= ~1; // disable messages bit
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MESSAGES=%d", MessagesEnabled() ? 1 : 0);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"GET_MESSAGES", 12) == 0) {
+    extern PipeServer g_pipeServer;
+    wchar_t buf[64];
+    swprintf_s(buf, L"MESSAGES=%d", MessagesEnabled() ? 1 : 0);
+    g_pipeServer.Send(buf);
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.

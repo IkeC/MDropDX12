@@ -1,5 +1,22 @@
 # MDropDX12 Changelog
 
+## v2.7.0 (2026-03-20)
+
+Stability, rendering fixes, and quality-of-life improvements.
+
+### Stability
+
+- **SEH crash recovery**: Auto-skip preset after 3 consecutive render exceptions; safe mode after 10 skipped presets.
+- **TCP server off by default**: No firewall prompt on first launch. Enable in Settings or `settings.ini` for MilkRemote.
+
+### Rendering Fixes
+
+- **Normalize whitespace fix**: `normalize (` with space now correctly replaced with `_safe_normalize(`.
+
+### UI Improvements
+
+- **Baked lock icon**: Pixel-art padlock in font atlas replaces bullet dot as preset lock indicator.
+
 ## v2.6.0 (2026-03-18)
 
 Shader compatibility, rendering quality, and .milk2 blend improvements.

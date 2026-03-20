@@ -1,6 +1,7 @@
 #include "tcp_server.h"
 #include "utility.h"
 #include <algorithm>
+#include <mstcpip.h>
 
 thread_local TcpClientConnection* g_respondingTcpClient = nullptr;
 
@@ -78,6 +79,14 @@ void TcpServer::AcceptNewClients() {
     u_long mode = 1;
     ioctlsocket(clientSocket, FIONBIO, &mode);
 
+    // Enable TCP keepalive so OS detects dead connections
+    BOOL keepAlive = TRUE;
+    setsockopt(clientSocket, SOL_SOCKET, SO_KEEPALIVE, (const char*)&keepAlive, sizeof(keepAlive));
+    // Start probing after 15s idle, probe every 5s, fail after 3 probes (30s total)
+    DWORD keepIdle = 15000, keepInterval = 5000;
+    setsockopt(clientSocket, IPPROTO_TCP, TCP_KEEPIDLE, (const char*)&keepIdle, sizeof(keepIdle));
+    setsockopt(clientSocket, IPPROTO_TCP, TCP_KEEPINTVL, (const char*)&keepInterval, sizeof(keepInterval));
+
     TcpClientConnection conn;
     conn.socket = clientSocket;
     conn.lastActivity = GetTickCount64();
@@ -128,8 +137,32 @@ void TcpServer::ProcessFrames(TcpClientConnection& client) {
         std::string utf8((char*)client.readBuffer.data() + 4, payloadLen);
         client.readBuffer.erase(client.readBuffer.begin(), client.readBuffer.begin() + 4 + payloadLen);
 
-        // Handle AUTH specially
+        // Handle AUTH specially — evict stale connections from the same device
         if (utf8.rfind("AUTH|", 0) == 0) {
+            // Parse deviceId early for dedup (parts[2])
+            {
+                size_t p1 = utf8.find('|', 0);
+                size_t p2 = (p1 != std::string::npos) ? utf8.find('|', p1 + 1) : std::string::npos;
+                size_t p3 = (p2 != std::string::npos) ? utf8.find('|', p2 + 1) : std::string::npos;
+                if (p2 != std::string::npos) {
+                    std::string incomingId = utf8.substr(p2 + 1, (p3 != std::string::npos ? p3 : utf8.size()) - p2 - 1);
+                    if (!incomingId.empty()) {
+                        // Close any existing connections from this device
+                        for (size_t j = 0; j < m_clients.size(); ++j) {
+                            if (&m_clients[j] != &client && m_clients[j].deviceId == incomingId) {
+                                closesocket(m_clients[j].socket);
+                                m_clients[j].socket = INVALID_SOCKET;
+                            }
+                        }
+                        // Remove invalidated clients (iterate backward to keep indices stable)
+                        for (size_t j = m_clients.size(); j-- > 0; ) {
+                            if (m_clients[j].socket == INVALID_SOCKET && &m_clients[j] != &client) {
+                                m_clients.erase(m_clients.begin() + j);
+                            }
+                        }
+                    }
+                }
+            }
             std::vector<std::string> parts;
             size_t start = 0;
             for (size_t pos = 0; pos <= utf8.size(); ++pos) {

@@ -1893,6 +1893,26 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     }
   }
 
+  // Collapse whitespace between normalize and '(' — e.g. "normalize (" → "normalize("
+  // Some presets have spaces here which would skip the _safe_normalize replacement.
+  {
+    const char* fn = "normalize";
+    int fnLen = (int)strlen(fn);
+    char* p = szShaderText;
+    while ((p = strstr(p, fn)) != nullptr) {
+      if (p > szShaderText && ((*(p-1) >= 'a' && *(p-1) <= 'z') || (*(p-1) >= 'A' && *(p-1) <= 'Z') || (*(p-1) >= '0' && *(p-1) <= '9') || *(p-1) == '_')) {
+        p += fnLen; continue;
+      }
+      char* after = p + fnLen;
+      int spaces = 0;
+      while (after[spaces] == ' ' || after[spaces] == '\t') spaces++;
+      if (spaces > 0 && after[spaces] == '(') {
+        memmove(after, after + spaces, strlen(after + spaces) + 1);
+      }
+      p = after + 1;
+    }
+  }
+
   // Replace normalize() with _safe_normalize() to prevent NaN from zero-length vectors.
   // DX9 SM3.0 normalize(0) returns 0; DX12 SM5.0 returns NaN which propagates through
   // the feedback loop and darkens the image over time.
