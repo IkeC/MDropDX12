@@ -1,21 +1,21 @@
-# MDropDX12 v2.6.0
+# MDropDX12 v2.7.0
 
-Shader compatibility, rendering quality, and .milk2 blend improvements. Adds anisotropic filtering toggle, safe division for DX9-to-DX12 NaN prevention, and improved .milk2 double-preset blending patterns.
+Stability, rendering fixes, and quality-of-life improvements. Adds SEH crash recovery, baked lock icon, normalize whitespace fix, and TCP server default-off for clean first launch.
 
 Special thanks to [IkeC](https://github.com/IkeC) for [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer and tireless collaboration partner. Thanks to [Incubo_](https://github.com/OfficialIncubo) for [BeatDrop](https://github.com/OfficialIncubo/BeatDrop-Music-Visualizer) testing and comparison reports ([#30](https://github.com/shanevbg/MDropDX12/issues/30)).
 
-## New Features
+## Stability
 
-- **Anisotropic Filtering** (Visual window): Checkbox to enable 16x anisotropic filtering on the two linear DX12 samplers. Improves texture sharpness on warped/stretched surfaces. Off by default.
+- **SEH crash recovery**: Render loop no longer hangs on GPU faults. After 3 consecutive exceptions, auto-skips to the next preset and flags the crashing preset in annotations. After 10 skipped presets, enters safe mode (black screen, commands only). Safe mode exits when user manually loads a preset.
+- **TCP server off by default**: No Windows Defender firewall prompt on first launch. Users who want [MilkRemote](https://github.com/shanevbg/MilkRemote) Android control enable it in Settings or `settings.ini`.
 
-## Preset Rendering Fixes
+## Rendering Fixes
 
-- **Safe division for DX9 compatibility**: DX9 returns 0 for `0/0`; DX12 returns NaN which propagates through the feedback loop. Added `_safe_denom()` wrapper applied to divisions inside shader bodies — fixes presets that produce NaN from zero-denominator expressions (e.g. flash effects with unused q-variables).
-- **Initialize comp quad Diffuse**: Fixed uninitialized vertex diffuse color on the fullscreen comp quad, ensuring consistent alpha and color values for comp shader presets.
+- **Normalize whitespace fix**: Presets with `normalize (` (space before parenthesis) now correctly get the `_safe_normalize` replacement, preventing NaN from zero-length vectors on DX12.
 
-## .milk2 Blend Improvements
+## UI Improvements
 
-- **Fixed wipe patterns for horizontal/vertical**: `.milk2` double-preset files with `blending_pattern=horizontal` or `blending_pattern=vertical` now use dedicated fixed-position wipe shaders instead of recycling animated wipe types.
+- **Baked lock icon**: Preset lock indicator is now a pixel-art padlock drawn directly in the font atlas, replacing the barely-visible bullet dot. Appears before the preset name when locked.
 
 ## Related Apps
 
