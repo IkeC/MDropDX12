@@ -37,12 +37,17 @@
       "command": "msbuild",
       "args": [
         "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
+        "/t:Rebuild",
         "/p:Configuration=Release",
         "/p:Platform=x64",
         "/p:PlatformToolset=v143"
       ],
       "group": "build",
-      "problemMatcher": "$msCompile"
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
     },
     {
       "label": "Build RELEASE",
