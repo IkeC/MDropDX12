@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "glslsandbox_108459_0",
+  "source": {
+    "site": "glslsandbox",
+    "id": "108459.0",
+    "url": "https://glslsandbox.com/e#108459.0",
+    "user": "ce43745",
+    "parent": "/e#108168.0"
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Imported from https://glslsandbox.com/e#108459.0. Best-effort GLSL→HLSL; complex effects may need Shader Import tweaks."
+  },
+  "image": "// forked from https://www.shadertoy.com/view/MsjSzz\n#define WEIGHT (20.0 / texsize.x)\n\n// rasterize functions\nfloat line2(float2 p, float2 p0, float2 p1, float w) {\n    float2 d = p1 - p0;\n    float t = clamp(dot(d,p-p0) / dot(d,d), .0,22.0);\n    float2 proj = p0 + d * t;\n    float dist = length(p - proj);\n    dist = 6.0/dist*WEIGHT*w;\n    return min(dist*dist,1.0);\n}\n\nfloat3 hsv(float h, float s, float v) {\n    float4 t = float4(2.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n    float3 p = abs(frac(((float3)(h)) + t.xyz) * 6.0 - ((float3)(t.w)));\n    return v * lerp(((float3)(t.x)), clamp(p - ((float3)(t.x)), 0.0, 1.0), s);\n}\n\nshader_body {\n\n    float2 uvn = (uv * texsize.xy) / texsize.xy;\n    uvn = uvn * 2.0 - 1.0;\n    uvn.x *= texsize.x / texsize.y;\n    \n    float line_width = 0.4;\n    float gTime = time * 0.31415+sin(length(uvn)+time*.9)/length(uvn)*0.1;\n    float3 c = ((float3)(0.0)); //init to fix screenful of random garbage\n\n    for ( float i = 8.0; i < 24.0; i += 2.0 ) {\n        float f = line2(uvn, float2((gTime*i)/2.0, sin(gTime*i)/2.0), float2(sin(gTime*i)/2.0,-cos(gTime*i)/2.0), 0.5);\n\tc += hsv(i / 24.0, 1.0, 1.0) * f;\n    }        \n    ret = float4(c,1.0);\n}\n"
+}

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "glslsandbox_108186_0",
+  "source": {
+    "site": "glslsandbox",
+    "id": "108186.0",
+    "url": "https://glslsandbox.com/e#108186.0",
+    "user": "85b0ebd",
+    "parent": "/e#99919.395"
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Imported from https://glslsandbox.com/e#108186.0. Best-effort GLSL→HLSL; complex effects may need Shader Import tweaks."
+  },
+  "image": "// GLSL Sandbox surfaceSize (uniform) — set each pixel in shader_body\nstatic float2 surfaceSize;\n// GLSL Sandbox surfacePosition (varying) — set each pixel in shader_body\nstatic float2 _sb_surfPos;\nstatic float2 surfacePosition;\n\n//#define time 1.0/TAU\n//frac(TAU*time)/PI\n\nstatic const float PI = 3.1415926;\nstatic const float TAU = PI * 2.0;\n\nfloat f(float t)\n{\n#if 1\n\treturn t + asin( cos(t)-cos(t*t) );\n#else\n\tt = frac(t);\n\treturn t + acos( exp(-t)*exp(-t*t) );\n#endif\n}\n\nfloat g(float2 h)\n{\n\tfloat2 r = texsize.xy;\n\treturn f( (h.y * r.x + h.x) / (r.x*r.y) ) ;//* (TAU*TAU));// / (r.x*r.y*0.5);\n}\n\nfloat3 fn(float t)\n{\n\t//t = abs(t);\n\tfloat w = TAU * t * PI/2.0;\n\tfloat p = f(t);\n\t\n\treturn float3( cos(w)*sin(p), sin(w)*sin(p), cos(p) );\n}\n\nfloat qqt(float2 e)\n{\n\treturn frac(e.x*e.y);///TAU;\n\t\n\tif ( frac(time) > 0.5 )\n\t{\n\t\treturn 1.0-atan(e.x/e.y);//cos(e.x*e.y);\n\t}\n\t\n\treturn atan(e.y/e.x);\n}\n\nfloat3 wtf(float2 p)\n{\n\t//p-=texsize.xy/2.0;\n\tfloat2 p2 = p*p;\n\tfloat w = p2.x+p2.y;//-time+(PI/4.0+256.0*time)/((p2.x+p2.y));\n\tfloat2 sz = surfaceSize;//(frac(float2(w,1.0-w)) * 2.0 - 1.0); \n\tfloat q = sz.x+sz.y+w;//0.001;//PI/2.0;//g(p/sz);//+TAU*(frac(time*1e-4)*2.0-1.0);//TAU;\n\tfloat n = 17.0+11.0*q+w;\n\tfloat2 r = texsize.xy/q/(-abs(5.0-w-q)+n);\n\tfloat2 m = r/2.0;//mouse*r-r/2.0;//r/(1.0+r);\n\t//sz /= sz * sz * sz;\n\t//sz/=11.0+sz;\n\tfloat2 sp = surfacePosition;//TAU;\t\n\tfloat dp = dot(sp,sp);//*max(1.0,1.0+cos(m.x+sz.x*sz.y));\n\t//if ( 0.1 < abs(dp) ) dp = 7.0;\n\tsp = r/sz - sp/dp;//*f((1.0+dp)*(1.0-dp));\n\tfloat2 f = sz*cos(p.xy*r)-sz;\n\tfloat2 e = f - (f/2.0) * cos(sz * sp);\n\tfloat t = qqt(e);//atan(e.x/e.y);//*0.5+0.5;\n\t//t = f(t*TAU)*2.0-1.0;\n\tfloat3 o = (fn( time + t + g(m.y-t-e-f/sp) + sp.x * TAU + PI * sin( sp.y * PI ) ) * 0.5 + 0.5);\n\t\n\treturn o;\n}\n\nshader_body {\n  // GLSL Sandbox mouse is 0..1, y=0 at bottom; milk3 mouse is pixels\n  float2 _sb_mouse = float2(mouse.x * texsize.z, mouse.y * texsize.w);\n  // default surfaceSize: height=1, width=aspect\n  surfaceSize = float2(texsize.x / max(texsize.y, 1.0), 1.0);\n  // default surface (no pan/zoom): x ±aspect/2, y ±0.5, y+ up\n  _sb_surfPos = float2(\n    (uv.x - 0.5) * (texsize.x / max(texsize.y, 1.0)),\n    (uv.y - 0.5));\n  surfacePosition = _sb_surfPos;\n\t\n\t//float2 sp = surfacePosition;\n\tfloat2 p = float2(-surfacePosition.y,surfacePosition.x);//(uv * texsize.xy);//(texsize.xy/surfaceSize+(uv * texsize.xy)/surfaceSize);// + surfacePosition.xy/texsize.xy;\n\t\n\tfloat3 a = wtf( p );\n\tfloat3 b = wtf( float2(-p.y,p.x) );\n\t\n\tfloat3 o = lerp(a,b,0.5);//frac(dot(a,b)));\n\t\n\t//o = ((float3)((o.x+o.y+o.z)/3.0));\n\t//o = frac(o+time);\n\n\tret= float4( o, 1.0 );\n}\n"
+}

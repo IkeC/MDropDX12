@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "glslsandbox_108800_0",
+  "source": {
+    "site": "glslsandbox",
+    "id": "108800.0",
+    "url": "https://glslsandbox.com/e#108800.0",
+    "user": "f467e3e",
+    "parent": "/e#108793.0"
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Imported from https://glslsandbox.com/e#108800.0. Best-effort GLSL→HLSL; complex effects may need Shader Import tweaks."
+  },
+  "image": "// GLSL-compatible mod (floor-based; HLSL fmod differs for negatives)\nfloat  mod_glsl(float  x, float  y) { return x - y * floor(x / y); }\nfloat2 mod_glsl(float2 x, float2 y) { return x - y * floor(x / y); }\nfloat3 mod_glsl(float3 x, float3 y) { return x - y * floor(x / y); }\nfloat4 mod_glsl(float4 x, float4 y) { return x - y * floor(x / y); }\nfloat2 mod_glsl(float2 x, float  y) { return x - y * floor(x / y); }\nfloat3 mod_glsl(float3 x, float  y) { return x - y * floor(x / y); }\nfloat4 mod_glsl(float4 x, float  y) { return x - y * floor(x / y); }\n\nshader_body {\n\n  // GLSL Sandbox default surfacePosition (no pan/zoom)\n  // x: (-aspect/2 .. +aspect/2), y: (-0.5 .. +0.5) with y+ up\n  float2 surfacePosition = float2(\n    (uv.x - 0.5) * (texsize.x / max(texsize.y, 1.0)),\n    (uv.y - 0.5));\n    float3 c = float3(0,0,0);\n    float l, z = time;\n    for (int i = 0; i < 3; i++) {\n        float2 uvn, p = surfacePosition*float(i) - (uv * texsize.xy).xy / texsize.xy;\n        uvn = p;\n        //p -= .3;\n        //p.x *= texsize.x / texsize.y;\n        z += .07;\n\n        // Use mouse input to modify the shader behavior\n        uvn += float2(mouse.x * texsize.z, mouse.y * texsize.w) * 12.1; // Take the first two components of mouse\n\n        l = length(p);\n        uvn += p / l * (sin(z) + 7.0) * abs(sin(l * 5.0 - z - z));\n        if((i)==0) c.x = (.03 / length(mod_glsl(uvn, 1.0) - 0.5)); else if((i)==1) c.y = (.03 / length(mod_glsl(uvn, 1.0) - 0.5)); else c.z = (.03 / length(mod_glsl(uvn, 1.0) - 0.5));\n    }\n    ret = float4(c / l, time);\n}\n"
+}

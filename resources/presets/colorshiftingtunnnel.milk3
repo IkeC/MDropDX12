@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "colorshiftingtunnnel",
+  "source": {
+    "base": "glslsandbox_109521.0",
+    "url": "https://glslsandbox.com/e#109521.0",
+    "note": "Music-reactive color shift on the filled tunnel shapes (bass/mid/treb/vol)."
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Polar tunnel from glslsandbox #109521 with filled-shape color driven by bass (hue), mid (saturation), treb (brightness accents), vol (pulse). Empty/background stays dim."
+  },
+  "image": "// colorshiftingtunnnel — filled shapes shift color with the music\n// Geometry from glslsandbox e#109521.0; color keyed to bass/mid/treb/vol.\n\n// Simple HSV → RGB (h in 0..1)\nfloat3 hsv2rgb(float3 c)\n{\n    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n    float3 p = abs(frac(c.xxx + K.xyz) * 6.0 - K.www);\n    return c.z * lerp(K.xxx, saturate(p - K.xxx), c.y);\n}\n\nshader_body\n{\n    float2 position = -1.0 + 2.0 * (uv);\n    position.x *= texsize.x / max(texsize.y, 1.0);\n\n    // Slow orbit (same as original)\n    position += float2(cos(time * 0.25), sin(time * 0.5)) * 0.8;\n\n    float u = sqrt(dot(position, position)) + 1e-5;\n    float v = atan2(position.y, position.x);\n\n    float t = time + 1.0 / u;\n\n    // Shape mask (filled wedges / spiral segments)\n    float val = smoothstep(0.0, 1.0,\n        sin(5.0 * (time + sin(1.0 * u * 1.78)) + 10.0 * v) + cos(t * 10.0));\n\n    // ── Music → color ──────────────────────────────────────────────\n    // Smooth envelopes when available; fall back to instant levels.\n    float ba = saturate(max(bass_smooth, bass));\n    float mi = saturate(max(mid_smooth, mid));\n    float tr = saturate(max(treb_smooth, treb));\n    float vv = saturate(max(vol_smooth, vol));\n\n    // Hue walks with time, kicked by bass; mid adds a secondary swirl\n    float hue = frac(time * 0.07 + ba * 0.45 + mi * 0.18 + u * 0.08);\n    // Mid opens saturation; bass deepens it slightly\n    float sat = saturate(0.55 + mi * 0.40 + ba * 0.15);\n    // Base value from shape; boost with volume + treble sparkle\n    float pulse = 1.0 + vv * 0.55 + tr * 0.35;\n    float shapeV = saturate(val * 1.15) * pulse;\n\n    float3 fillCol = hsv2rgb(float3(hue, sat, shapeV));\n    // Treble edge pop (slight cool tint on the brightest bits)\n    fillCol += float3(0.15, 0.25, 0.55) * tr * val * val * 0.35;\n\n    // Dim residual background (original had a tiny floor so it never pure-black)\n    float3 bg = float3(0.03, 0.02, 0.04) * (0.4 + vv * 0.3);\n    float3 colour = lerp(bg, fillCol, saturate(val * 1.2));\n\n    // Distance falloff toward center of the polar tunnel\n    colour *= clamp(u / 1.0, 0.0, 1.0);\n\n    ret = float4(colour, 1.0);\n}\n"
+}

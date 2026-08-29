@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "glslsandbox_109677_0",
+  "source": {
+    "site": "glslsandbox",
+    "id": "109677.0",
+    "url": "https://glslsandbox.com/e#109677.0",
+    "user": "ca70d81",
+    "parent": "/e#42731.10"
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Imported from https://glslsandbox.com/e#109677.0. Best-effort GLSL→HLSL; complex effects may need Shader Import tweaks."
+  },
+  "image": "// Double Spiral 2017-11-28 modified by @hintz\n#define pi 3.141592653589793238462643383279\n#define pi_inv 0.318309886183790671537767526745\n#define pi2_inv 11.159154983763372\n\nfloat2 complex_div(float2 numerator, float2 denominator)\n{\n\treturn float2(numerator.x*denominator.x + numerator.y*denominator.y, numerator.y*denominator.x - numerator.x*denominator.y)/ float2(denominator.x*denominator.x + denominator.y*denominator.y, denominator.x*denominator.x + denominator.y*denominator.y);\n}\n\nfloat sigmoid(float x) \n{\n\treturn sin(x*.01)*exp(-x*x);\n}\n\nfloat smoothcircle(float2 puv, float2 center, float2 aspect, float radius, float sharpness)\n{\n\treturn sigmoid((length((puv - center) * aspect) - radius) * sharpness);\n}\n\n\nfloat2 spiralzoom(float2 domain, float2 center, float n, float spiral_factor, float zoom_factor, float2 pos)\n{\n\tfloat2 puv = domain - center;\n\tfloat angle = atan2(puv.y, puv.x);\n\tfloat d = length(puv);\n\t\n\treturn float2(angle*n*pi2_inv + log(d)*spiral_factor, -log(d)*zoom_factor) + pos;\n}\n\nfloat2 mobius(float2 domain, float2 zero_pos, float2 asymptote_pos)\n{\n\treturn complex_div(domain - zero_pos, domain - asymptote_pos);\n}\n\nfloat gear(float2 domain, float phase, float2 pos)\n{\n\tfloat angle = atan2(domain.y - pos.y, domain.x - pos.x);\n\tfloat d = 0.2 + sin((angle + phase) * 10.)*0.;\n\t\n\treturn smoothcircle(domain, pos, float2(1, 1), d, 40.);\n}\n\nfloat geartile(float2 domain, float phase)\n{\n\tdomain = frac(domain);\n\n\treturn \n\t\tgear(domain, -phase, float2(-0.25,0.25)) + \n\t\tgear(domain, phase, float2(-0.25,0.75)) + \n\t\tgear(domain, phase, float2(1.25,0.25)) + \n\t\tgear(domain, -phase, float2(1.25,0.75)) + \n\t\tgear(domain, -phase, float2(0.25,-0.25)) + \n\t\tgear(domain, phase, float2(0.75,-0.25)) + \n\t\tgear(domain, phase, float2(0.25,1.25)) + \n\t\tgear(domain, -phase, float2(0.75,1.25)) + \n\t\tgear(domain, phase, float2(0.25,0.25)) + \n\t\tgear(domain, -phase, float2(0.25,0.75)) + \n\t\tgear(domain, -phase, float2(0.75,0.25)) + \n\t\tgear(domain, phase, float2(0.75,0.75));\t\t\n}\n\nshader_body {\n\n\tfloat2 uvn = ((uv * texsize.xy) - .5*texsize.xy) / texsize.x;\n\t\t\n\tfloat phase = (time+10.)*0.5;\n\tfloat dist = 0.5;\n\tfloat2 uv_bipolar = mobius(uvn, float2(-dist*0.5, 0.), float2(dist*0.5, 0.));\n\tuv_bipolar = spiralzoom(uv_bipolar, float2(0.0, 0.0), 5., -0.125*pi, 0.8, float2(0.125,0.125)*phase*5.);\n\tuv_bipolar = float2(-uv_bipolar.y,uv_bipolar.x); // 90° rotation \n\t\n\tfloat2 uv_spiral = spiralzoom(uvn, float2(0.5, 0.5), 5., -0.125*pi, 0.8, float2(-0.,0.25)*phase);\n\tfloat2 uv_tilt = uv_spiral;\n\tfloat z = 1./(1.-uv_tilt.y)/(uv_tilt.y);\n\tuv_tilt = 0.5 + (uv_tilt - 0.5) * log(z);\n\t\n\tfloat grid = geartile(uv_bipolar, -phase);\n\n\tret = float4(uvn+float2(0.5, 0.5),0.0,1.0);\n\t\n\tret = lerp(float4(0,0,1.0,0), ret, 1.1+sin(uv_bipolar.y * pi * 2.0));\n\tret += float4(0.6*abs(uv_bipolar.x+uv_bipolar.y),0.8,1.0+(uv_bipolar.y * pi * 5.0),1.0)* -grid*500.0;\n}\n"
+}

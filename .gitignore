@@ -1,0 +1,96 @@
+src/**/Debug
+src/**/Debug_x64
+src/**/Release
+src/**/Release_x64
+controller.json
+**/.vs
+**/*.opendb
+**/*.aps
+**/*.suo
+**/*.db
+mDropDX12/bin
+/MDropDX12.slnLaunch.user
+/src/mDropDX12/log
+/install/_Archiv
+/config/roadmap.md
+*.exe
+*.zip
+/install/*.zip
+/.gitattributes
+/.idea/.idea.MDropDX12/.idea
+/install/sign.cmd
+/config/notes.md
+/Release/*
+!/Release/Developer*.*
+/packages
+enc_temp_folder/
+
+# External dependencies (fetched by build.ps1)
+/external/
+
+# Large binary assets (download separately)
+resources/textures/
+
+# Shader cache (regenerated at runtime)
+cache/
+
+# Scratch/diagnostic tree: debug logs, captures, ad-hoc scripts, and the
+# Milkwave reference install used for side-by-side comparison.
+
+# Runtime-generated files
+*.log
+diag_*.txt
+sprites.ini
+resources/presets/Quicksave2/
+resources/presets/test/
+settings.ini
+settings.ini.bak
+messages.ini
+messages.ini.bak
+src/settings.ini
+src/messages.ini
+.worktrees/
+
+tools/comparison/
+
+# MD3 PRO-derived shaders are personal-use only: recovered from a local licensed
+# install by tools/md3_shader_import.py, and never redistributable. Keep them
+# under a recovered/ directory so they cannot be committed by accident.
+resources/shaders/recovered/
+*.recovered.hlsl
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Lexer unit-test build output
+tools/lexer-test/bin/
+
+# npm dependencies are regenerable from package.json + package-lock.json and do
+# not belong in history. They were tracked here for a long time: 3,487 of the
+# repo's 3,984 files -- 88% of it -- while package.json itself was untracked.
+node_modules/
+
+# Editor and assistant working dirs, and loose captures that accumulate at the
+# repo root during display/preset testing. Ignored rather than deleted -- they
+# are working files, just not repository content.
+.grok/
+.kilo/
+.vscode/launch.json
+/d1_*.png
+/d2_*.png
+/d3_*.png
+/port_view_*.jpg
+
+# Everything private, in one place and never in git.
+#
+# tools/ (the probe harness and MCP server), mcps/, the agent working notes
+# under docs/superpowers and docs/plans, and the local push-guard hooks all
+# moved here. Previously they were tracked and stripped at publish time by a
+# nine-path list duplicated between sync-public.yml and the pre-push hook,
+# which had to be kept in step by hand.
+#
+# CLAUDE.md, .claude/ and .mcp.json cannot move: Claude Code discovers them at
+# the repo root, and the memory junction points into .claude/memory. They stay
+# tracked and stay on the publish strip list.
+private/

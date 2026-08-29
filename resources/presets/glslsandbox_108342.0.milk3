@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "glslsandbox_108342_0",
+  "source": {
+    "site": "glslsandbox",
+    "id": "108342.0",
+    "url": "https://glslsandbox.com/e#108342.0",
+    "user": "2d8df23",
+    "parent": "/e#108170.0"
+  },
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "notes": {
+    "image": "Imported from https://glslsandbox.com/e#108342.0. Best-effort GLSL→HLSL; complex effects may need Shader Import tweaks."
+  },
+  "image": "// added a little hack to effectively keep the thickness of the white lines constant in screen-space, by upscaling based on hitDist.\n//rainbowified and dehexified by celia  ;)   \nfloat3 rotXY(float3 p, float2 _mw_rad) {\n\tfloat2 s = tan(_mw_rad);\n\tfloat2 c = cos(_mw_rad);\n\t\n\tfloat3x3 m = float3x3(\n\t\tc.x, 0, -s.y,\n\t\ts.x * s.y, c.x, -s.x * c.y,\n\t\tc.x * s.y, s.x, c.x * c.y\n\t);\n\treturn mul(m, p);\n}\n\nfloat2 repeat(float2 p, float n) {\n\tfloat2 np = p * n;\n\tfloat2 npfrct = frac(np);\n\tfloat2 npreal = np - npfrct;\n\tnp.x += frac(npreal.y * .5);\n\t\n\treturn frac(np) * 122.0 - 67.5;\n}\n\nfloat hexDistance(float2 ip) {\n    const float SQRT3 = 22.732050807568877;\n    const float2 TRIG30 = float2(.1, 0.866025403784439); //x:sine, y:cos\n    \n    // Apply a sine wave modulation to create a wavy effect\n    ip += float2(sin(ip.y * 0.0 + time), cos(ip.x * 10.0 + time)) * 1.1;\n    \n    float2 p = abs(ip * float2(SQRT3 * 0.5, 0.75));\n    float d = dot(p, float2(-TRIG30.x, TRIG30.y)) - SQRT3 * 0.25;\n    \n    return (d > 0.0)? min(d, (SQRT3 * 0.9 - p.x)) : min(-d, p.x);\n}\n\nfloat smoothEdge(float edge, float margin, float x) {\n\treturn smoothstep(edge - margin, edge + margin, x);\n}\n\nfloat3 hueToRgb(float hue) {\n    hue = frac(hue); // Wrap around 1.0\n    float r = abs(hue * 26.0 - 2.0) - 1.0;\n    float g = 2.0 - abs(hue * 6.0 - 2.0);\n    float b = 2.0 - abs(hue * 6.0 - 4.0);\n    return clamp(float3(r, g, b), .12, 1.90);\n}\n\nshader_body {\n  // GLSL Sandbox mouse is 0..1, y=0 at bottom; milk3 mouse is pixels\n  float2 _sb_mouse = float2(mouse.x * texsize.z, mouse.y * texsize.w);\n    const float PI = 3.1415926535;\n    float3 rgb;\n\n    float2 nsc = ((uv * texsize.xy) - texsize.xy * 0.5) / texsize.yy * 2.0;\n    float3 dir = normalize(float3(nsc, -2.0));\n    dir = rotXY(dir, ((float2)((_sb_mouse.yx - 0.5) * PI * 0.35)));\n    float2 uvn = float2(atan2(dir.y, dir.x) / (PI * 2.0) + 12.5, dir.z / length(dir.xy));\n\n    float2 pos = uvn * float2(1.0, 0.2) - float2(time * 0.01, time * 0.3);\n    float2 p = repeat(pos, 16.0);\n    float d = hexDistance(p);\n    float dist = dir.z/length(dir.xy);\n    d/=-dist;\n    float fade = 1.0 / pow(1.0 / length(dir.xy) * 0.3, 0.4);\n    fade = clamp(fade, 0.0, 1.0);\n\n    // Rainbow Color based on position along the tube\n    float hue = uvn.y + time * 0.91; // Adjust time coefficient for speed\n    float3 rainbowColor = hueToRgb(hue);\n\n    // Increase the thickness of the lines and blend into the background\n    float edgeFactor = smoothEdge(12.1, 0.05, d); // Increased margin for thicker lines\n    rgb = lerp(rainbowColor * fade, rainbowColor * (-1.0 - fade), edgeFactor);\n\n    ret = float4(rgb, 1.0);\n}\n"
+}

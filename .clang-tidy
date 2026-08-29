@@ -1,0 +1,56 @@
+# clang-tidy for MDropDX12 — deliberately narrow.
+#
+# This is a CONSTRAINT, not a style tool. Every check enabled here corresponds
+# to a defect class that has actually been found in this tree, and each one is
+# something a human reviewer demonstrably does not catch by reading.
+#
+# It is not part of the MSBuild build: MSBuild produces no compile_commands.json,
+# so the include paths and defines are read off the real CL command line by
+# private/tools/clang-tidy/run.py. Run it before a commit that touches memory
+# handling, not on every save.
+#
+# WHY THESE AND NOTHING ELSE
+#
+# bugprone-undefined-memory-manipulation
+#   memcpy / memset over a type that is not trivially copyable. The tree has
+#   `memcpy(this, pOldState, sizeof(CState))` (state.cpp) over a type owning 50
+#   NSEEL VM handles and two std::vectors, and two more in engine_shaders.cpp
+#   over a struct containing a std::vector. All three compile silently and are
+#   reachable at runtime. This check is the whole reason the tool is here.
+#
+# bugprone-sizeof-expression
+#   `sizeof(buf)` used where a CHARACTER count is wanted. wasabiApiLangString
+#   hands its third argument to LoadStringW as cchBufferMax, and essentially
+#   every caller passes sizeof(wchar_t[N]) -- twice the real capacity.
+#
+# bugprone-suspicious-memory-comparison
+#   The same family: byte-level operations on things that are not bytes.
+#
+# DISABLED: bugprone-not-null-terminated-result
+#   All three of its findings in this tree were false positives, and a check
+#   that only ever cries wolf teaches people to skim past the ones that matter.
+#   The shader-text rewriters edit a null-terminated buffer IN PLACE: either a
+#   neighbouring memmove carries tailLen+1 bytes so the terminator moves with
+#   the tail (engine_shaders.cpp:2340, :2472), or the edit is a rotation of the
+#   same characters and cannot change the length at all (:2441). The check
+#   cannot see the terminator arriving from the adjacent call.
+#
+# Style checks are deliberately absent. This codebase has a consistent voice
+# and a linter arguing about braces would bury the three findings above.
+Checks: >
+  -*,
+  bugprone-undefined-memory-manipulation,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memory-comparison,
+  bugprone-macro-repeated-side-effects
+
+# Vendored code is not ours to fix. ns-eel2 is Cockos WDL, and Scintilla and
+# Spout are upstream projects; patching them means re-patching on every update.
+HeaderFilterRegex: '.*[\\/]src[\\/]mDropDX12[\\/][^\\/]+\.h$'
+
+WarningsAsErrors: ''
+
+CheckOptions:
+  # The engine passes small structs by value in a few hot paths deliberately.
+  - key: bugprone-sizeof-expression.WarnOnSizeOfIntegerExpression
+    value: 'true'
