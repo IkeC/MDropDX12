@@ -1,0 +1,21 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=0.000
+fDecay=0.980
+nWaveMode=0
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    // forgejo#88: exercises get_fft() at a normalized spectrum
+comp_4=`    // position derived from horizontal screen position, so a
+comp_5=`    // vertical strip's brightness is that bin's magnitude --
+comp_6=`    // TestShaderUniforms samples a horizontal line and just needs
+comp_7=`    // SOME nonzero pixel, proving get_fft() still returns a
+comp_8=`    // signal after the sqrt()->pow() rewrite and that switching
+comp_9=`    // audio profiles (which changes _fftParams, not a macro) does
+comp_10=`    // not force a recompile.
+comp_11=`    float mag = get_fft(uv.x);
+comp_12=`    ret = float3(mag, mag, mag);
+comp_13=`}

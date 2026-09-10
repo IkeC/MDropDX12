@@ -1,0 +1,37 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=0.000
+fDecay=0.980
+nWaveMode=0
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    // forgejo#88: sums 128 FFT bins (the same "128-bin accumulator"
+comp_4=`    // idea MilkDrop3 - Equalizer6 Water's warp shader loops over via
+comp_5=`    // sampler_fft, ported onto the modern get_fft() API this test
+comp_6=`    // actually needs to exercise) and renders a single uniform
+comp_7=`    // brightness that is log2(sum+1) -- a scale change reaches this
+comp_8=`    // linearly in log2 space, which is what TestFFTProfileApplied
+comp_9=`    // reads back and compares. See that test's own docstring for
+comp_10=`    // the still-open flakiness in how the comparison is driven --
+comp_11=`    // this shader's own response to fftScale is independently
+comp_12=`    // confirmed correct (a throwaway single-value probe driven
+comp_13=`    // directly over the pipe, bypassing the test harness entirely,
+comp_14=`    // measured log2(sum+1) moving from ~1.5-1.75 to ~4.7-5.2 across
+comp_15=`    // a real x16 profile switch, repeatably).
+comp_16=`    //
+comp_17=`    // get_fft() applies a perceptual sqrt on top of the profile's
+comp_18=`    // fftScale, so squaring its result here undoes that, restoring
+comp_19=`    // a direct linear relationship between the summed value and
+comp_20=`    // fftScale itself.
+comp_21=`    float sum = 0.0;
+comp_22=`    [loop]
+comp_23=`    for (int i = 0; i < 128; i++) {
+comp_24=`        float m = get_fft(i / 128.0);
+comp_25=`        sum += m * m;
+comp_26=`    }
+comp_27=`    float disp = saturate(log2(sum + 1.0) / 16.0);
+comp_28=`    ret = float3(disp, disp, disp);
+comp_29=`}

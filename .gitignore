@@ -1,0 +1,150 @@
+src/**/Debug
+src/**/Debug_x64
+src/**/Release
+src/**/Release_x64
+# The harness's own instance directory: its own exe, settings.ini,
+# presets.json and resources, seeded once from Release_x64. Regenerable,
+# machine-local, and deliberately not the user's configuration.
+src/**/Test_x64
+# Same idea, seeded from Test_x64 instead, for running a Debug build (DX12
+# debug layer + DRED) in isolation -- private/tools/milk2-probe/run_debug_layer_check.py.
+src/**/Debug_test_x64
+controller.json
+**/.vs
+**/*.opendb
+**/*.aps
+**/*.suo
+**/*.db
+mDropDX12/bin
+/MDropDX12.slnLaunch.user
+/src/mDropDX12/log
+/install/_Archiv
+/config/roadmap.md
+*.exe
+*.zip
+/install/*.zip
+/.gitattributes
+/.idea/.idea.MDropDX12/.idea
+/install/sign.cmd
+/config/notes.md
+/Release/*
+!/Release/Developer*.*
+/packages
+enc_temp_folder/
+
+# External dependencies (fetched by build.ps1)
+/external/
+
+# Large binary assets (download separately)
+resources/textures/
+
+# Shader cache (regenerated at runtime)
+cache/
+
+# Scratch/diagnostic tree: debug logs, captures, ad-hoc scripts, and the
+# Milkwave reference install used for side-by-side comparison.
+
+# Runtime-generated files
+*.log
+diag_*.txt
+sprites.ini
+resources/presets/Quicksave2/
+# forgejo#88: `resources/presets/test/` (directory-slash form) ignored the
+# WHOLE directory, and git will not descend into an ignored directory to
+# apply a file-level negation below it -- FFTMAG.milk/GETFFT.milk were
+# silently never committable, not merely never written, until this changed
+# to the `/*` (contents-glob) form specifically so they could be carved out.
+# The rest of the folder is still RUNTIME scratch (ad-hoc debug presets
+# dropped there during a session -- see the "test_preset_location"
+# convention); FFTMAG.milk/GETFFT.milk are deliberate, committed fixtures
+# that happen to live in the same folder because the folder is also what
+# gets a presets.json exemption (AnnotationIgnoreDirs) -- purpose-built
+# probe shaders TestFFTProfileApplied/TestShaderUniforms load by exact path,
+# not something any run generates.
+resources/presets/test/*
+!resources/presets/TEST/FFTMAG.milk
+!resources/presets/TEST/GETFFT.milk
+settings.ini
+settings.ini.bak
+messages.ini
+messages.ini.bak
+src/settings.ini
+src/messages.ini
+.worktrees/
+
+tools/comparison/
+
+# Preset files are never repository content.
+#
+# resources/presets/ is a WORKING directory -- it is where the running app puts
+# imports, where a Shader Import lands, and where anything being tried out
+# accumulates. Twenty-five .milk3 files were tracked here, and twelve of them
+# arrived in one `git add -A` during a directory reorganisation (153b9bde) that
+# nobody meant to include them in. Several were conversions of other people's
+# published GLSL Sandbox and Shadertoy shaders.
+#
+# release.ps1 already refuses to bundle this directory for exactly that reason
+# ("licences are not ours to redistribute") -- but the repository is published
+# too, so keeping them out of the ZIP was only half the rule.
+#
+# The engine needs no preset to be present: it comes up on the one compiled
+# into the exe (builtin_preset.h) and asks the user to point it at a library.
+*.milk
+*.milk2
+*.milk3
+
+# ...except the two purpose-built probe presets, which are this project's own
+# and are loaded BY EXACT PATH by test_audio_profiles. They were exempted at
+# lines 66-67 above; a blanket rule added later overrides an earlier negation,
+# so the exemption has to be restated here rather than left up there.
+!resources/presets/TEST/FFTMAG.milk
+!resources/presets/TEST/GETFFT.milk
+
+
+# MD3 PRO-derived shaders are personal-use only: recovered from a local licensed
+# install by tools/md3_shader_import.py, and never redistributable. Keep them
+# under a recovered/ directory so they cannot be committed by accident.
+resources/shaders/recovered/
+*.recovered.hlsl
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Lexer unit-test build output
+tools/lexer-test/bin/
+
+# npm dependencies are regenerable from package.json + package-lock.json and do
+# not belong in history. They were tracked here for a long time: 3,487 of the
+# repo's 3,984 files -- 88% of it -- while package.json itself was untracked.
+node_modules/
+
+# Editor and assistant working dirs, and loose captures that accumulate at the
+# repo root during display/preset testing. Ignored rather than deleted -- they
+# are working files, just not repository content.
+.grok/
+.kilo/
+.vscode/launch.json
+/d1_*.png
+/d2_*.png
+/d3_*.png
+/port_view_*.jpg
+
+# Everything private, in one place and never in git.
+#
+# tools/ (the probe harness and MCP server), mcps/, the agent working notes
+# under docs/superpowers and docs/plans, and the local push-guard hooks all
+# moved here. Previously they were tracked and stripped at publish time by a
+# nine-path list duplicated between sync-public.yml and the pre-push hook,
+# which had to be kept in step by hand.
+#
+# CLAUDE.md, .claude/ and .mcp.json cannot move: Claude Code discovers them at
+# the repo root, and the memory junction points into .claude/memory. They stay
+# tracked and stay on the publish strip list.
+private/
+
+# Claude Code writes per-machine permission rules here as they are granted.
+# .claude/ is only PARTLY ignored -- memory/project/ is tracked deliberately --
+# so without this line a file full of one machine's absolute paths would be
+# committable, in a repo whose Forgejo remote force-push-mirrors to GitHub.
+.claude/settings.local.json
